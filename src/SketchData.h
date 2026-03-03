@@ -86,6 +86,17 @@ struct Sketch {
                            float value = 0.0f, bool isAuto = false);
     void removeConstraint(EntityID id);
 
+    // Remove entities with cascade (removes referencing constraints + orphaned points)
+    void removePoint(EntityID id);
+    void removeLine(EntityID id);
+    void removeCircle(EntityID id);
+
+    // Check if a point is referenced by any line or circle
+    bool isPointReferenced(EntityID pointID) const;
+
+    // Remove all constraints that reference a given entity
+    void removeConstraintsReferencing(EntityID id);
+
     // Find nearest point within tolerance (world units). Returns NullID if none.
     EntityID findPointNear(float wx, float wy, float tolerance) const;
 

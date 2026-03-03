@@ -16,6 +16,7 @@ add_executable(SHITcad
     src/History.cpp
     src/AutoConstraint.cpp
     src/Solver.cpp
+    src/HitTest.cpp
 )
 
 target_include_directories(SHITcad PRIVATE ${CMAKE_SOURCE_DIR}/src)

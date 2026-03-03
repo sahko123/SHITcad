@@ -66,6 +66,116 @@ void Sketch::removeConstraint(EntityID id) {
         constraints.end());
 }
 
+void Sketch::removeConstraintsReferencing(EntityID id) {
+    constraints.erase(
+        std::remove_if(constraints.begin(), constraints.end(),
+            [id](const Constraint& c) {
+                return c.entityA == id || c.entityB == id;
+            }),
+        constraints.end());
+}
+
+bool Sketch::isPointReferenced(EntityID pointID) const {
+    for (const auto& line : lines) {
+        if (line.startPt == pointID || line.endPt == pointID)
+            return true;
+    }
+    for (const auto& circle : circles) {
+        if (circle.centerPt == pointID)
+            return true;
+    }
+    return false;
+}
+
+void Sketch::removePoint(EntityID id) {
+    // Remove all lines that reference this point
+    std::vector<EntityID> linesToRemove;
+    for (const auto& line : lines) {
+        if (line.startPt == id || line.endPt == id)
+            linesToRemove.push_back(line.id);
+    }
+    for (EntityID lineID : linesToRemove) {
+        removeLine(lineID);
+    }
+
+    // Remove all circles that reference this point
+    std::vector<EntityID> circlesToRemove;
+    for (const auto& circle : circles) {
+        if (circle.centerPt == id)
+            circlesToRemove.push_back(circle.id);
+    }
+    for (EntityID circleID : circlesToRemove) {
+        removeCircle(circleID);
+    }
+
+    // Remove constraints referencing this point
+    removeConstraintsReferencing(id);
+
+    // Remove the point itself
+    points.erase(
+        std::remove_if(points.begin(), points.end(),
+            [id](const PointEntity& p) { return p.id == id; }),
+        points.end());
+}
+
+void Sketch::removeLine(EntityID id) {
+    LineEntity* line = findLine(id);
+    if (!line) return;
+
+    EntityID startPt = line->startPt;
+    EntityID endPt = line->endPt;
+
+    // Remove constraints referencing this line
+    removeConstraintsReferencing(id);
+
+    // Remove the line
+    lines.erase(
+        std::remove_if(lines.begin(), lines.end(),
+            [id](const LineEntity& l) { return l.id == id; }),
+        lines.end());
+
+    // Remove orphaned points
+    if (!isPointReferenced(startPt)) {
+        removeConstraintsReferencing(startPt);
+        points.erase(
+            std::remove_if(points.begin(), points.end(),
+                [startPt](const PointEntity& p) { return p.id == startPt; }),
+            points.end());
+    }
+    if (!isPointReferenced(endPt)) {
+        removeConstraintsReferencing(endPt);
+        points.erase(
+            std::remove_if(points.begin(), points.end(),
+                [endPt](const PointEntity& p) { return p.id == endPt; }),
+            points.end());
+    }
+}
+
+void Sketch::removeCircle(EntityID id) {
+    CircleEntity* circle = findCircle(id);
+    if (!circle) return;
+
+    EntityID centerPt = circle->centerPt;
+
+    // Remove constraints referencing this circle
+    removeConstraintsReferencing(id);
+
+    // Remove the circle
+    circles.erase(
+        std::remove_if(circles.begin(), circles.end(),
+            [id](const CircleEntity& c) { return c.id == id; }),
+        circles.end());
+
+    // Remove orphaned center point
+    if (!isPointReferenced(centerPt)) {
+        removeConstraintsReferencing(centerPt);
+        points.erase(
+            std::remove_if(points.begin(), points.end(),
+                [centerPt](const PointEntity& p) { return p.id == centerPt; }),
+            points.end());
+    }
+}
+
 EntityID Sketch::findPointNear(float wx, float wy, float tolerance) const {
     EntityID bestID = NullID;
     float bestDist = std::numeric_limits<float>::max();
