@@ -6,6 +6,8 @@ namespace shitcad {
 
 class History {
 public:
+    static constexpr int kMaxSnapshots = 100;
+
     void pushState(const Sketch& sketch);
     bool undo(Sketch& sketch);
     bool redo(Sketch& sketch);

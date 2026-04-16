@@ -1,4 +1,5 @@
 #include "Canvas.h"
+#include "App.h"
 #include "AutoConstraint.h"
 #include <cmath>
 #include <algorithm>
@@ -28,21 +29,23 @@ Point2D Canvas::screenToWorld(ImVec2 screen) const {
 }
 
 ImU32 Canvas::getLineColor(EntityID lineID) const {
-    return (selection_.isLineSelected() && selection_.entityID == lineID)
+    return selection_.isSelected(HitType::Line, lineID)
         ? kColorSelected : kColorWhite;
 }
 
 ImU32 Canvas::getPointColor(EntityID pointID) const {
-    return (selection_.isPointSelected() && selection_.entityID == pointID)
+    return selection_.isSelected(HitType::Point, pointID)
         ? kColorSelected : kColorWhite;
 }
 
 ImU32 Canvas::getCircleColor(EntityID circleID) const {
-    return (selection_.isCircleSelected() && selection_.entityID == circleID)
+    return selection_.isSelected(HitType::Circle, circleID)
         ? kColorSelected : kColorWhite;
 }
 
-void Canvas::draw(Sketch& sketch) {
+void Canvas::draw(Sketch& sketch, App* app) {
+    app_ = app;
+
     // Toolbar at top
     ImGui::BeginChild("toolbar", {0, 30}, false, ImGuiWindowFlags_NoScrollbar);
     drawToolbar(nullptr);
@@ -107,6 +110,24 @@ void Canvas::drawToolbar(ImDrawList*) {
         }
         if (selected) ImGui::PopStyleColor();
     }
+
+    // Extrude button
+    if (app_) {
+        ImGui::SameLine();
+        ImGui::TextDisabled("|");
+        ImGui::SameLine();
+        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.5f, 0.3f, 0.1f, 1.0f));
+        if (ImGui::Button("[E]xtrude")) {
+            app_->enterExtrudeMode();
+        }
+        ImGui::PopStyleColor();
+
+        ImGui::SameLine();
+        if (ImGui::Button("View 3D [F5]")) {
+            app_->switchTo3D();
+        }
+    }
+
     ImGui::PopStyleVar(2);
 }
 
@@ -140,6 +161,17 @@ void Canvas::handleInput(Sketch& sketch) {
     if (ImGui::IsKeyPressed(ImGuiKey_L)) { tool_.type = ToolType::Line; tool_.reset(); selection_.clear(); }
     if (ImGui::IsKeyPressed(ImGuiKey_C)) { tool_.type = ToolType::Circle; tool_.reset(); selection_.clear(); }
     if (ImGui::IsKeyPressed(ImGuiKey_R)) { tool_.type = ToolType::Rectangle; tool_.reset(); selection_.clear(); }
+
+    // Extrude shortcut
+    if (ImGui::IsKeyPressed(ImGuiKey_E) && app_ && !app_->isExtrudeActive()) {
+        app_->enterExtrudeMode();
+    }
+
+    // View 3D shortcut
+    if (ImGui::IsKeyPressed(ImGuiKey_F5) && app_) {
+        app_->switchTo3D();
+    }
+
     if (ImGui::IsKeyPressed(ImGuiKey_Escape)) {
         if (tool_.hasFirstPoint) {
             tool_.reset(); // cancel in-progress tool first
@@ -182,7 +214,7 @@ void Canvas::handleInput(Sketch& sketch) {
     }
 
     // Handle dragging of selected points
-    if (selection_.isPointSelected() && selection_.isDragging) {
+    if (selection_.dragMode == SelectionDragMode::PointDrag) {
         handleDrag(sketch);
     }
 
@@ -200,27 +232,33 @@ void Canvas::handleInput(Sketch& sketch) {
     }
 
     // Start drag on selected point
-    if (selection_.isPointSelected() && !selection_.isDragging &&
+    if (selection_.dragMode == SelectionDragMode::None &&
         ImGui::IsMouseDragging(ImGuiMouseButton_Left, 3.0f)) {
-        // Check if drag started near the selected point
-        Point2D ptPos = sketch.getPointPos(selection_.entityID);
-        ImVec2 ptScreen = worldToScreen(ptPos);
-        ImVec2 mousePos = io.MousePos;
-        float screenDist = std::sqrt(
-            (ptScreen.x - mousePos.x) * (ptScreen.x - mousePos.x) +
-            (ptScreen.y - mousePos.y) * (ptScreen.y - mousePos.y));
-        if (screenDist < 20.0f) {
-            selection_.isDragging = true;
-            selection_.dragStarted = false;
+        for (const auto& e : selection_.selected) {
+            if (e.type != HitType::Point) continue;
+            Point2D ptPos = sketch.getPointPos(e.id);
+            ImVec2 ptScreen = worldToScreen(ptPos);
+            ImVec2 mousePos = io.MousePos;
+            float screenDist = std::sqrt(
+                (ptScreen.x - mousePos.x) * (ptScreen.x - mousePos.x) +
+                (ptScreen.y - mousePos.y) * (ptScreen.y - mousePos.y));
+            if (screenDist < 20.0f) {
+                selection_.dragMode = SelectionDragMode::PointDrag;
+                selection_.dragPointID = e.id;
+                selection_.dragStarted = false;
+                break;
+            }
         }
     }
 
     // End drag on mouse release
-    if (selection_.isDragging && ImGui::IsMouseReleased(ImGuiMouseButton_Left)) {
+    if (selection_.dragMode == SelectionDragMode::PointDrag &&
+        ImGui::IsMouseReleased(ImGuiMouseButton_Left)) {
         if (selection_.dragStarted) {
             history_.pushState(sketch);
         }
-        selection_.isDragging = false;
+        selection_.dragMode = SelectionDragMode::None;
+        selection_.dragPointID = NullID;
         selection_.dragStarted = false;
     }
 
@@ -250,7 +288,7 @@ void Canvas::handleDrag(Sketch& sketch) {
     Point2D cursorWorld = (currentSnap_.type != SnapType::None)
         ? currentSnap_.position : screenToWorld(io.MousePos);
 
-    PointEntity* pt = sketch.findPoint(selection_.entityID);
+    PointEntity* pt = sketch.findPoint(selection_.dragPointID);
     if (!pt) return;
 
     pt->x = cursorWorld.x;
@@ -258,24 +296,20 @@ void Canvas::handleDrag(Sketch& sketch) {
     selection_.dragStarted = true;
 
     // Live constraint solving
-    solver_.solve(sketch, selection_.entityID);
+    solver_.solve(sketch, selection_.dragPointID);
 }
 
 void Canvas::handleDeletion(Sketch& sketch) {
     if (!selection_.hasSelection()) return;
 
-    switch (selection_.type) {
-        case HitType::Point:
-            sketch.removePoint(selection_.entityID);
-            break;
-        case HitType::Line:
-            sketch.removeLine(selection_.entityID);
-            break;
-        case HitType::Circle:
-            sketch.removeCircle(selection_.entityID);
-            break;
-        default:
-            return;
+    auto toDelete = selection_.selected;
+    for (const auto& e : toDelete) {
+        switch (e.type) {
+            case HitType::Point: sketch.removePoint(e.id); break;
+            case HitType::Line: sketch.removeLine(e.id); break;
+            case HitType::Circle: sketch.removeCircle(e.id); break;
+            default: break;
+        }
     }
 
     selection_.clear();
@@ -284,8 +318,7 @@ void Canvas::handleDeletion(Sketch& sketch) {
 
 void Canvas::handleDimensionInput(Sketch& sketch) {
     if (selection_.isLineSelected()) {
-        // Get current line length for default value
-        LineEntity* line = sketch.findLine(selection_.entityID);
+        LineEntity* line = sketch.findLine(selection_.entityID());
         if (!line) return;
         Point2D a = sketch.getPointPos(line->startPt);
         Point2D b = sketch.getPointPos(line->endPt);
@@ -294,7 +327,7 @@ void Canvas::handleDimensionInput(Sketch& sketch) {
         dimInputActive_ = true;
         dimInputFocusNeeded_ = true;
     } else if (selection_.isCircleSelected()) {
-        CircleEntity* circle = sketch.findCircle(selection_.entityID);
+        CircleEntity* circle = sketch.findCircle(selection_.entityID());
         if (!circle) return;
         snprintf(dimInputBuf_, sizeof(dimInputBuf_), "%.3f", circle->radius);
         dimInputActive_ = true;
@@ -308,7 +341,7 @@ void Canvas::drawDimensionInputBox(Sketch& sketch) {
                        canvasOrigin_.y + canvasSize_.y * 0.5f};
 
     if (selection_.isLineSelected()) {
-        LineEntity* line = sketch.findLine(selection_.entityID);
+        LineEntity* line = sketch.findLine(selection_.entityID());
         if (line) {
             Point2D a = sketch.getPointPos(line->startPt);
             Point2D b = sketch.getPointPos(line->endPt);
@@ -317,7 +350,7 @@ void Canvas::drawDimensionInputBox(Sketch& sketch) {
             inputPos.y -= 30.0f;
         }
     } else if (selection_.isCircleSelected()) {
-        CircleEntity* circle = sketch.findCircle(selection_.entityID);
+        CircleEntity* circle = sketch.findCircle(selection_.entityID());
         if (circle) {
             Point2D center = sketch.getPointPos(circle->centerPt);
             inputPos = worldToScreen(center);
@@ -344,14 +377,12 @@ void Canvas::drawDimensionInputBox(Sketch& sketch) {
         float value = (float)atof(dimInputBuf_);
         if (value > 0.001f) {
             if (selection_.isLineSelected()) {
-                // Add or update distance constraint on this line
                 sketch.addConstraint(ConstraintType::Distance,
-                    selection_.entityID, NullID, value, false);
+                    selection_.entityID(), NullID, value, false);
                 solver_.solve(sketch);
                 history_.pushState(sketch);
             } else if (selection_.isCircleSelected()) {
-                // Set circle radius directly
-                CircleEntity* circle = sketch.findCircle(selection_.entityID);
+                CircleEntity* circle = sketch.findCircle(selection_.entityID());
                 if (circle) {
                     circle->radius = value;
                     history_.pushState(sketch);
@@ -454,7 +485,7 @@ void Canvas::drawGeometry(ImDrawList* dl, const Sketch& sketch) {
         ImVec2 sa = worldToScreen({a->x, a->y});
         ImVec2 sb = worldToScreen({b->x, b->y});
         ImU32 color = getLineColor(line.id);
-        float thickness = (selection_.isLineSelected() && selection_.entityID == line.id) ? 3.0f : 2.0f;
+        float thickness = selection_.isSelected(HitType::Line, line.id) ? 3.0f : 2.0f;
         dl->AddLine(sa, sb, color, thickness);
     }
 
@@ -462,7 +493,7 @@ void Canvas::drawGeometry(ImDrawList* dl, const Sketch& sketch) {
     for (const auto& pt : sketch.points) {
         ImVec2 sp = worldToScreen({pt.x, pt.y});
         ImU32 color = getPointColor(pt.id);
-        float radius = (selection_.isPointSelected() && selection_.entityID == pt.id) ? 5.0f : 3.0f;
+        float radius = selection_.isSelected(HitType::Point, pt.id) ? 5.0f : 3.0f;
         dl->AddCircleFilled(sp, radius, color);
     }
 }
@@ -475,7 +506,7 @@ void Canvas::drawCircles(ImDrawList* dl, const Sketch& sketch) {
         ImVec2 screenCenter = worldToScreen({center->x, center->y});
         float screenRadius = circle.radius * zoom_;
         ImU32 color = getCircleColor(circle.id);
-        float thickness = (selection_.isCircleSelected() && selection_.entityID == circle.id) ? 3.0f : 2.0f;
+        float thickness = selection_.isSelected(HitType::Circle, circle.id) ? 3.0f : 2.0f;
         dl->AddCircle(screenCenter, screenRadius, color, 0, thickness);
         dl->AddCircleFilled(screenCenter, 3.0f, color);
     }
@@ -605,6 +636,10 @@ void Canvas::drawSnapIndicator(ImDrawList* dl) {
                 {sp.x, sp.y - 5},
                 {sp.x - 5, sp.y + 3},
                 {sp.x + 5, sp.y + 3}, kColorSnap);
+            break;
+        case SnapType::Intersection:
+            dl->AddLine({sp.x - 5, sp.y - 5}, {sp.x + 5, sp.y + 5}, kColorSnap, 2.0f);
+            dl->AddLine({sp.x - 5, sp.y + 5}, {sp.x + 5, sp.y - 5}, kColorSnap, 2.0f);
             break;
         default:
             break;

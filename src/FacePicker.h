@@ -1,0 +1,38 @@
+#pragma once
+#include "SketchPlane.h"
+#include "Scene3D.h"
+#include <TopoDS_Face.hxx>
+
+namespace shitcad {
+
+struct FacePickResult {
+    bool hit = false;
+    int bodyIndex = -1;
+    TopoDS_Face face;
+    float hitWorld[3] = {0, 0, 0};
+    float t = 1e30f;
+};
+
+FacePickResult pickFace(const Scene3D& scene, const float rayOrigin[3], const float rayDir[3]);
+
+// Extract a sketch plane from a face. For non-planar faces, pass the hit point
+// to compute a tangent plane at that location.
+bool extractPlaneFromFace(const TopoDS_Face& face, SketchPlane& out,
+                          const float* hitWorld = nullptr);
+
+// Project all edges of a face onto the sketch plane as projected (locked) entities
+void projectFaceOntoSketch(const TopoDS_Face& face, const SketchPlane& plane, Sketch& sketch);
+
+// Find a face in the scene that is coplanar with the given sketch plane
+TopoDS_Face findCoplanarFace(const Scene3D& scene, const SketchPlane& plane);
+
+// Check if a face is cylindrical
+bool isCylindricalFace(const TopoDS_Face& face);
+
+// Build a tangent plane to a cylinder at a given angle (degrees) around the axis.
+// angle=0 corresponds to the hit point direction. The plane origin is at the
+// cylinder surface, midway along the cylinder height.
+bool buildCylinderTangentPlane(const TopoDS_Face& face, float angleDeg,
+                                const float* hitWorld, SketchPlane& out);
+
+} // namespace shitcad

@@ -58,14 +58,37 @@ target_include_directories(imgui PUBLIC
 
 target_link_libraries(imgui PUBLIC glfw glad_gl)
 
-# --- SolveSpace constraint solver (libslvs) ---
-set(SLVS_BUILD_SHARED OFF CACHE BOOL "" FORCE)
-
+# --- nlohmann/json (header-only) ---
 FetchContent_Declare(
-    solvespace_lib
-    GIT_REPOSITORY https://github.com/JacobStoren/SolveSpaceLib.git
-    GIT_TAG        master
+    nlohmann_json
+    GIT_REPOSITORY https://github.com/nlohmann/json.git
+    GIT_TAG        v3.11.3
     GIT_SHALLOW    TRUE
-    SOURCE_SUBDIR  libslvs
 )
-FetchContent_MakeAvailable(solvespace_lib)
+set(JSON_BuildTests OFF CACHE BOOL "" FORCE)
+FetchContent_MakeAvailable(nlohmann_json)
+
+# --- OpenCASCADE (via vcpkg) ---
+find_package(OpenCASCADE CONFIG REQUIRED
+    COMPONENTS FoundationClasses ModelingData ModelingAlgorithms)
+message(STATUS "OpenCASCADE found: ${OpenCASCADE_INCLUDE_DIR}")
+
+add_library(occt_libs INTERFACE)
+target_include_directories(occt_libs INTERFACE ${OpenCASCADE_INCLUDE_DIR})
+target_link_libraries(occt_libs INTERFACE
+    TKernel TKMath TKG3d TKG2d TKGeomBase TKGeomAlgo
+    TKBRep TKPrim TKTopAlgo TKShHealing TKMesh TKBO TKBool TKOffset
+)
+
+# Data exchange libraries (not part of core components, link directly)
+foreach(_lib TKDESTL TKXSBase TKDEStep TKDEIges)
+    find_library(${_lib}_LIB NAMES ${_lib} PATHS "${OpenCASCADE_LIBRARY_DIR}" NO_DEFAULT_PATH)
+    find_library(${_lib}_LIB_DEBUG NAMES ${_lib} PATHS "${OpenCASCADE_LIBRARY_DIR}/../debug/lib" NO_DEFAULT_PATH)
+    if(${_lib}_LIB)
+        target_link_libraries(occt_libs INTERFACE
+            $<$<CONFIG:Debug>:${${_lib}_LIB_DEBUG}>
+            $<$<NOT:$<CONFIG:Debug>>:${${_lib}_LIB}>)
+    else()
+        message(WARNING "${_lib} not found - some import/export formats will be unavailable")
+    endif()
+endforeach()

@@ -1,0 +1,63 @@
+#pragma once
+#include <imgui.h>
+
+namespace shitcad {
+
+struct Theme {
+    // 3D viewport
+    float bgColor[3];
+    float gridMinor[3];
+    float gridMajor[3];
+
+    // Sketch
+    float sketchLine[3];
+    float sketchSelected[3];
+    float sketchGridMinor;
+    float sketchGridMajor;
+    float toolPreview[4];
+    float snapColor[4];
+    float sketchProjected[3];
+
+    // Dimensions
+    ImU32 dimLineColor;
+    ImU32 dimTextColor;
+    ImU32 dimBgColor;
+    ImU32 dimDrivenLineColor;
+    ImU32 dimDrivenTextColor;
+
+    // Bodies
+    float bodyColor[3];
+    float edgeColor[3];
+
+    static Theme dark();
+    static Theme light();
+};
+
+// Global active theme pointer — set by Preferences::applyTheme()
+const Theme& activeTheme();
+Theme& activeThemeMut();
+
+struct Preferences {
+    bool lightMode = true;
+    bool showWireframe = false;
+
+    // User-adjustable colors and thicknesses
+    float edgeColor[3] = {0.30f, 0.30f, 0.30f};
+    float edgeThickness = 1.0f;
+    float sketchLineColor[3] = {0.1f, 0.1f, 0.1f};
+    float sketchLineThickness = 1.5f;
+    float tangentSnapPx = 15.0f; // tangent snap distance in pixels
+
+    // Dimension label colors (RGBA 0-1)
+    float dimLineCol[4] = {0.0f, 0.55f, 0.63f, 0.86f};
+    float dimTextCol[4] = {0.08f, 0.08f, 0.08f, 0.94f};
+    float dimBgCol[4] = {0.94f, 0.94f, 0.96f, 0.78f};
+
+    // Constraint icon colors (RGBA 0-1)
+    float conTextCol[4] = {0.39f, 0.24f, 0.63f, 0.78f};
+    float conBgCol[4] = {1.0f, 1.0f, 1.0f, 0.63f};
+
+    void applyTheme();
+};
+
+} // namespace shitcad

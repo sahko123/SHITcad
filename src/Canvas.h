@@ -10,9 +10,11 @@
 
 namespace shitcad {
 
+class App;
+
 class Canvas {
 public:
-    void draw(Sketch& sketch);
+    void draw(Sketch& sketch, App* app = nullptr);
 
     ImVec2 worldToScreen(Point2D world) const;
     Point2D screenToWorld(ImVec2 screen) const;
@@ -39,6 +41,8 @@ private:
     bool dimInputActive_ = false;
     char dimInputBuf_[32] = {};
     bool dimInputFocusNeeded_ = false;
+
+    App* app_ = nullptr;
 
     void handleInput(Sketch& sketch);
     void handleToolAction(Sketch& sketch, Point2D worldPos);

@@ -9,6 +9,13 @@ void History::pushState(const Sketch& sketch) {
     }
     snapshots_.push_back(sketch);
     current_ = (int)snapshots_.size() - 1;
+
+    // Evict oldest snapshots if over the limit
+    if ((int)snapshots_.size() > kMaxSnapshots) {
+        int excess = (int)snapshots_.size() - kMaxSnapshots;
+        snapshots_.erase(snapshots_.begin(), snapshots_.begin() + excess);
+        current_ -= excess;
+    }
 }
 
 bool History::undo(Sketch& sketch) {
