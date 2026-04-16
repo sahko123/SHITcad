@@ -18,6 +18,12 @@
 #include <ShapeFix_Face.hxx>
 #include <ShapeFix_Wire.hxx>
 #include <GC_MakeArcOfCircle.hxx>
+#include <Geom_Ellipse.hxx>
+#include <Geom_BSplineCurve.hxx>
+#include <gp_Elips.hxx>
+#include <TColgp_Array1OfPnt.hxx>
+#include <TColStd_Array1OfReal.hxx>
+#include <TColStd_Array1OfInteger.hxx>
 #include <BRepAlgoAPI_Fuse.hxx>
 #include <BRepPrimAPI_MakeRevol.hxx>
 #include <BRepOffsetAPI_ThruSections.hxx>
@@ -72,14 +78,15 @@ static TopoDS_Wire buildProfileWire(const Sketch& sketch, const ClosedProfile& p
             gp_Pnt pb = localToGpPnt(plane, b.x, b.y);
             if (pa.Distance(pb) < 1e-6) continue;
 
-            // Check if this segment is an arc
-            bool isArc = (!profile.segments.empty() && i < profile.segments.size()
-                          && profile.segments[i].type == SegmentType::Arc);
+            // Build edge based on segment type
+            SegmentType segType = SegmentType::Line;
+            if (!profile.segments.empty() && i < profile.segments.size())
+                segType = profile.segments[i].type;
 
-            if (isArc) {
+            if (segType == SegmentType::Arc) {
                 const auto& seg = profile.segments[i];
-                float span = seg.arcEndAngle - seg.arcStartAngle;
-                float midAngle = seg.arcStartAngle + span * 0.5f;
+                double span = seg.arcEndAngle - seg.arcStartAngle;
+                double midAngle = seg.arcStartAngle + span * 0.5;
                 Point2D midLocal = {
                     seg.arcCenter.x + seg.arcRadius * std::cos(midAngle),
                     seg.arcCenter.y + seg.arcRadius * std::sin(midAngle)
@@ -92,7 +99,83 @@ static TopoDS_Wire buildProfileWire(const Sketch& sketch, const ClosedProfile& p
                 BRepBuilderAPI_MakeEdge edgeBuilder(arcMaker.Value());
                 if (!edgeBuilder.IsDone()) return TopoDS_Wire();
                 wireBuilder.Add(edgeBuilder.Edge());
+
+            } else if (segType == SegmentType::Ellipse || segType == SegmentType::EllipseArc) {
+                const auto& seg = profile.segments[i];
+                // Build OCCT ellipse in 3D on the sketch plane
+                gp_Pnt centerPt = localToGpPnt(plane, seg.ellipseCenter.x, seg.ellipseCenter.y);
+                gp_Dir normalDir(plane.normal[0], plane.normal[1], plane.normal[2]);
+
+                // Major axis direction: rotate plane's U axis by ellipseRotation
+                double cosR = std::cos(seg.ellipseRotation);
+                double sinR = std::sin(seg.ellipseRotation);
+                gp_Dir majorDir(
+                    plane.uAxis[0] * cosR + plane.vAxis[0] * sinR,
+                    plane.uAxis[1] * cosR + plane.vAxis[1] * sinR,
+                    plane.uAxis[2] * cosR + plane.vAxis[2] * sinR
+                );
+
+                gp_Ax2 ax(centerPt, normalDir, majorDir);
+                gp_Elips elips(ax, seg.semiMajor, seg.semiMinor);
+                Handle(Geom_Ellipse) geomEllipse = new Geom_Ellipse(elips);
+
+                // Build edge between the parametric angles
+                BRepBuilderAPI_MakeEdge edgeBuilder(geomEllipse, seg.ellipseStartAngle, seg.ellipseEndAngle);
+                if (!edgeBuilder.IsDone()) return TopoDS_Wire();
+                wireBuilder.Add(edgeBuilder.Edge());
+
+            } else if (segType == SegmentType::Spline) {
+                const auto& seg = profile.segments[i];
+                int nCtrl = (int)seg.splineControlPts.size();
+                if (nCtrl < 2) return TopoDS_Wire();
+
+                // Convert control points to 3D on the sketch plane
+                TColgp_Array1OfPnt poles(1, nCtrl);
+                for (int ci = 0; ci < nCtrl; ci++) {
+                    poles.SetValue(ci + 1, localToGpPnt(plane,
+                        seg.splineControlPts[ci].x, seg.splineControlPts[ci].y));
+                }
+
+                // Build knot vector: OCCT wants unique knots + multiplicities
+                // Our format stores the full knot vector with repeats
+                std::vector<double> uniqueKnots;
+                std::vector<int> mults;
+                for (int ki = 0; ki < (int)seg.splineKnots.size(); ki++) {
+                    if (uniqueKnots.empty() || std::fabs(seg.splineKnots[ki] - uniqueKnots.back()) > 1e-10) {
+                        uniqueKnots.push_back(seg.splineKnots[ki]);
+                        mults.push_back(1);
+                    } else {
+                        mults.back()++;
+                    }
+                }
+
+                int nKnots = (int)uniqueKnots.size();
+                TColStd_Array1OfReal knotsArr(1, nKnots);
+                TColStd_Array1OfInteger multsArr(1, nKnots);
+                for (int ki = 0; ki < nKnots; ki++) {
+                    knotsArr.SetValue(ki + 1, uniqueKnots[ki]);
+                    multsArr.SetValue(ki + 1, mults[ki]);
+                }
+
+                // Weights (optional — uniform if empty)
+                bool hasWeights = !seg.splineWeights.empty() && (int)seg.splineWeights.size() == nCtrl;
+                TColStd_Array1OfReal weightsArr(1, nCtrl);
+                for (int ci = 0; ci < nCtrl; ci++)
+                    weightsArr.SetValue(ci + 1, hasWeights ? seg.splineWeights[ci] : 1.0);
+
+                Handle(Geom_BSplineCurve) bspline;
+                try {
+                    bspline = new Geom_BSplineCurve(poles, weightsArr, knotsArr, multsArr, seg.splineDegree);
+                } catch (...) {
+                    return TopoDS_Wire(); // invalid spline data
+                }
+
+                BRepBuilderAPI_MakeEdge edgeBuilder(bspline, seg.splineParamStart, seg.splineParamEnd);
+                if (!edgeBuilder.IsDone()) return TopoDS_Wire();
+                wireBuilder.Add(edgeBuilder.Edge());
+
             } else {
+                // Line segment
                 BRepBuilderAPI_MakeEdge edgeBuilder(pa, pb);
                 if (!edgeBuilder.IsDone()) return TopoDS_Wire();
                 wireBuilder.Add(edgeBuilder.Edge());
