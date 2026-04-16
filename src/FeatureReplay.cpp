@@ -414,7 +414,7 @@ void replayFeatures(FeatureHistory& history,
             const Sketch& sketch = plane.sketch;
 
             // Detect profiles
-            auto detected = detectClosedProfiles(sketch);
+            auto detected = detectClosedProfiles(sketch, plane);
             if (detected.empty()) {
                 mutableFeat.hasError = true;
                 mutableFeat.errorMsg = "No profiles detected";
@@ -519,7 +519,7 @@ void replayFeatures(FeatureHistory& history,
             const SketchPlane& plane = planes[srcSD.sketchPlaneIndex];
             const Sketch& sketch = plane.sketch;
 
-            auto detected = detectClosedProfiles(sketch);
+            auto detected = detectClosedProfiles(sketch, plane);
             if (detected.empty()) {
                 mutableFeat.hasError = true;
                 mutableFeat.errorMsg = "No profiles detected";
@@ -631,7 +631,7 @@ void replayFeatures(FeatureHistory& history,
                 LoftData d;
                 d.sketch = &sketch;
                 d.plane = &plane;
-                d.detected = detectClosedProfiles(sketch);
+                d.detected = detectClosedProfiles(sketch, plane);
                 if (d.detected.empty()) {
                     logNoProfilesDiagnostics(feat.name.c_str(), sketch, plane);
                     loftError = true; break;

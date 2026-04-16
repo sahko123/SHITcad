@@ -50,14 +50,14 @@ void App::enterExtrudeMode() {
     if (activeSketchPlane_ >= 0) {
         // In sketch mode: use current sketch
         planeIdx = activeSketchPlane_;
-        profiles = detectClosedProfiles(activeSketch());
+        profiles = detectClosedProfiles(activeSketch(), activePlane());
     } else {
         // In navigate mode: find the first sketch plane with closed profiles
         for (int i = 0; i < (int)sketchPlanes_.size(); i++) {
             auto& sp = sketchPlanes_[i];
             if (sp.sketch.points.empty() && sp.sketch.lines.empty() && sp.sketch.circles.empty())
                 continue;
-            auto p = detectClosedProfiles(sp.sketch);
+            auto p = detectClosedProfiles(sp.sketch, sp);
             if (!p.empty()) {
                 if (profiles.empty() || p.size() > profiles.size()) {
                     planeIdx = i;
@@ -538,7 +538,7 @@ void App::editExtrudeFeature(FeatureID id) {
     }
 
     // Detect profiles from the sketch
-    auto profiles = detectClosedProfiles(sketchPlanes_[planeIdx].sketch);
+    auto profiles = detectClosedProfiles(sketchPlanes_[planeIdx].sketch, sketchPlanes_[planeIdx]);
     if (profiles.empty()) return;
 
     // Enter extrude mode

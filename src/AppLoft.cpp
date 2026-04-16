@@ -91,7 +91,7 @@ void App::drawLoftPanel() {
         if (sp.sketch.points.empty() && sp.sketch.lines.empty() && sp.sketch.circles.empty())
             continue;
 
-        auto profiles = detectClosedProfiles(sp.sketch);
+        auto profiles = detectClosedProfiles(sp.sketch, sp);
         if (profiles.empty()) continue;
 
         // Check not already added
@@ -367,7 +367,7 @@ void App::editLoftFeature(FeatureID id) {
         int planeIdx = sd.sketchPlaneIndex;
         if (planeIdx < 0 || planeIdx >= (int)sketchPlanes_.size()) continue;
 
-        auto profiles = detectClosedProfiles(sketchPlanes_[planeIdx].sketch);
+        auto profiles = detectClosedProfiles(sketchPlanes_[planeIdx].sketch, sketchPlanes_[planeIdx]);
         if (profiles.empty()) continue;
 
         LoftToolSection sec;

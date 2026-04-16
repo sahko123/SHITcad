@@ -31,13 +31,13 @@ void App::enterRevolveMode() {
 
     if (activeSketchPlane_ >= 0) {
         planeIdx = activeSketchPlane_;
-        profiles = detectClosedProfiles(activeSketch());
+        profiles = detectClosedProfiles(activeSketch(), activePlane());
     } else {
         for (int i = 0; i < (int)sketchPlanes_.size(); i++) {
             auto& sp = sketchPlanes_[i];
             if (sp.sketch.points.empty() && sp.sketch.lines.empty() && sp.sketch.circles.empty())
                 continue;
-            auto p = detectClosedProfiles(sp.sketch);
+            auto p = detectClosedProfiles(sp.sketch, sp);
             if (!p.empty()) {
                 if (profiles.empty() || p.size() > profiles.size()) {
                     planeIdx = i;
@@ -462,7 +462,7 @@ void App::editRevolveFeature(FeatureID id) {
         finishSketch();
     }
 
-    auto profiles = detectClosedProfiles(sketchPlanes_[planeIdx].sketch);
+    auto profiles = detectClosedProfiles(sketchPlanes_[planeIdx].sketch, sketchPlanes_[planeIdx]);
     if (profiles.empty()) return;
 
     // Need at least one line for axis

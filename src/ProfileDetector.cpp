@@ -1416,9 +1416,14 @@ std::vector<ClosedProfile> detectClosedProfiles(const Sketch& sketch) {
 
 // With plane: routes to OCCT backend if preference is set
 std::vector<ClosedProfile> detectClosedProfiles(const Sketch& sketch, const SketchPlane& plane) {
-    if (activeProfileBackend() == ProfileDetectorBackend::OCCT)
-        return detectClosedProfilesOCCT(sketch, plane);
-    return detectClosedProfilesCustom(sketch);
+    if (activeProfileBackend() == ProfileDetectorBackend::OCCT) {
+        auto result = detectClosedProfilesOCCT(sketch, plane);
+        fprintf(stderr, "[ProfileDetector] OCCT backend: %d profiles detected\n", (int)result.size());
+        return result;
+    }
+    auto result = detectClosedProfilesCustom(sketch);
+    fprintf(stderr, "[ProfileDetector] Custom backend: %d profiles detected\n", (int)result.size());
+    return result;
 }
 
 } // namespace shitcad
