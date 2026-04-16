@@ -1,4 +1,5 @@
 #include "ProfileDetector.h"
+#include "SketchPlane.h"
 #include "Intersect.h"
 #include <unordered_map>
 #include <unordered_set>
@@ -706,7 +707,7 @@ static void buildSubdivision(const Sketch& sketch,
 
 // ---- Main detection function ----
 
-std::vector<ClosedProfile> detectClosedProfiles(const Sketch& sketch) {
+std::vector<ClosedProfile> detectClosedProfilesCustom(const Sketch& sketch) {
     // ---- Step 0: Build subdivided edge graph ----
     std::vector<SubVertex> subVerts;
     std::vector<SubEdge> subEdges;
@@ -918,6 +919,21 @@ std::vector<ClosedProfile> detectClosedProfiles(const Sketch& sketch) {
     }
 
     return results;
+}
+
+// ---- Router functions ----
+
+// Default: always uses custom tracer (no plane available for OCCT path)
+std::vector<ClosedProfile> detectClosedProfiles(const Sketch& sketch) {
+    return detectClosedProfilesCustom(sketch);
+}
+
+// With plane: can route to OCCT backend if preference is set
+std::vector<ClosedProfile> detectClosedProfiles(const Sketch& sketch, const SketchPlane& plane) {
+    // TODO: check preference for backend selection
+    // For now, always use custom tracer until OCCT backend is implemented
+    (void)plane;
+    return detectClosedProfilesCustom(sketch);
 }
 
 } // namespace shitcad

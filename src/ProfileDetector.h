@@ -7,18 +7,37 @@
 
 namespace shitcad {
 
-// Segment type for mixed line/arc profile boundaries
-enum class SegmentType : uint8_t { Line, Arc };
+// Segment type for profile boundary edges
+enum class SegmentType : uint8_t { Line, Arc, Ellipse, EllipseArc, Spline };
 
-// Describes one edge of a profile boundary (line or arc)
+// Describes one edge of a profile boundary
 struct BoundarySegment {
     SegmentType type = SegmentType::Line;
-    // Arc data (only used when type == Arc):
+
+    // Arc data (type == Arc):
     Point2D arcCenter;
     double arcRadius = 0;
     double arcStartAngle = 0; // angle at start vertex (radians)
     double arcEndAngle = 0;   // angle at end vertex (radians)
     EntityID origCircleID = NullID;
+
+    // Ellipse / EllipseArc data (type == Ellipse or EllipseArc):
+    EntityID origEllipseID = NullID;
+    Point2D ellipseCenter;
+    double semiMajor = 0;
+    double semiMinor = 0;
+    double ellipseRotation = 0;    // major axis angle (radians, CCW from +X)
+    double ellipseStartAngle = 0;  // parametric start angle on ellipse
+    double ellipseEndAngle = 0;    // parametric end angle on ellipse
+
+    // Spline data (type == Spline):
+    EntityID origSplineID = NullID;
+    std::vector<Point2D> splineControlPts;
+    std::vector<double> splineKnots;
+    std::vector<double> splineWeights;
+    int splineDegree = 3;
+    double splineParamStart = 0;  // parameter range on the B-spline
+    double splineParamEnd = 1;
 };
 
 // A closed profile (region): an outer boundary with optional inner holes.
@@ -26,6 +45,8 @@ struct BoundarySegment {
 struct ClosedProfile {
     std::vector<EntityID> pointIDs;  // ordered loop of points (empty for circles)
     std::vector<EntityID> lineIDs;   // lines connecting consecutive points (empty for circles)
+    std::vector<EntityID> ellipseIDs;   // ellipse/ellipseArc entities on boundary
+    std::vector<EntityID> splineIDs;    // spline entities on boundary
     EntityID circleID = NullID;      // non-null if this profile is a circle
     bool isCircle() const { return circleID != NullID; }
 
@@ -67,16 +88,39 @@ inline std::vector<Point2D> tessellateProfile(const Sketch& sketch, const Closed
         Point2D pt = useResolved ? profile.resolvedPoints[i] : sketch.getPointPos(profile.pointIDs[i]);
         tess.push_back(pt);
 
-        if (!profile.segments.empty() && i < (int)profile.segments.size()
-            && profile.segments[i].type == SegmentType::Arc) {
+        if (!profile.segments.empty() && i < (int)profile.segments.size()) {
             const auto& seg = profile.segments[i];
-            double span = seg.arcEndAngle - seg.arcStartAngle;
-            int steps = std::max(4, (int)(std::fabs(span) / (kArcTessDegreesPerStep * kDegToRad)));
-            for (int s = 1; s < steps; s++) {
-                double t = (double)s / steps;
-                double angle = seg.arcStartAngle + t * span;
-                tess.push_back({seg.arcCenter.x + seg.arcRadius * std::cos(angle),
-                                seg.arcCenter.y + seg.arcRadius * std::sin(angle)});
+            if (seg.type == SegmentType::Arc) {
+                double span = seg.arcEndAngle - seg.arcStartAngle;
+                int steps = std::max(4, (int)(std::fabs(span) / (kArcTessDegreesPerStep * kDegToRad)));
+                for (int s = 1; s < steps; s++) {
+                    double t = (double)s / steps;
+                    double angle = seg.arcStartAngle + t * span;
+                    tess.push_back({seg.arcCenter.x + seg.arcRadius * std::cos(angle),
+                                    seg.arcCenter.y + seg.arcRadius * std::sin(angle)});
+                }
+            } else if (seg.type == SegmentType::Ellipse || seg.type == SegmentType::EllipseArc) {
+                double span = seg.ellipseEndAngle - seg.ellipseStartAngle;
+                int steps = std::max(8, (int)(std::fabs(span) / (kArcTessDegreesPerStep * kDegToRad)));
+                double cosR = std::cos(seg.ellipseRotation);
+                double sinR = std::sin(seg.ellipseRotation);
+                for (int s = 1; s < steps; s++) {
+                    double t = (double)s / steps;
+                    double angle = seg.ellipseStartAngle + t * span;
+                    double lx = seg.semiMajor * std::cos(angle);
+                    double ly = seg.semiMinor * std::sin(angle);
+                    tess.push_back({seg.ellipseCenter.x + lx * cosR - ly * sinR,
+                                    seg.ellipseCenter.y + lx * sinR + ly * cosR});
+                }
+            } else if (seg.type == SegmentType::Spline) {
+                int steps = std::max(16, (int)seg.splineControlPts.size() * 8);
+                double paramSpan = seg.splineParamEnd - seg.splineParamStart;
+                for (int s = 1; s < steps; s++) {
+                    double t = seg.splineParamStart + paramSpan * (double)s / steps;
+                    Point2D pt = evaluateBSpline(seg.splineControlPts, seg.splineKnots,
+                                                  seg.splineWeights, seg.splineDegree, t);
+                    tess.push_back(pt);
+                }
             }
         }
     }
@@ -162,7 +206,23 @@ inline bool pointInsidePolygonWinding(const std::vector<Point2D>& poly, Point2D 
     return windingNumber(poly, p) != 0;
 }
 
-// Detect all closed profiles in the sketch by walking line adjacency.
+// Profile detection backend selection
+enum class ProfileDetectorBackend : uint8_t {
+    Custom,  // Half-edge tracer (original)
+    OCCT,    // BOPAlgo_BuilderFace (exact geometry)
+};
+
+// Detect all closed profiles using the custom half-edge tracer.
+std::vector<ClosedProfile> detectClosedProfilesCustom(const Sketch& sketch);
+
+// Detect all closed profiles using OCCT's BOPAlgo_BuilderFace (exact geometry).
+// Requires a SketchPlane for 2D→3D conversion.
+struct SketchPlane; // forward decl
+std::vector<ClosedProfile> detectClosedProfilesOCCT(const Sketch& sketch, const SketchPlane& plane);
+
+// Router: picks backend based on the active preference.
+// Falls back to Custom if plane is not provided and OCCT is selected.
 std::vector<ClosedProfile> detectClosedProfiles(const Sketch& sketch);
+std::vector<ClosedProfile> detectClosedProfiles(const Sketch& sketch, const SketchPlane& plane);
 
 } // namespace shitcad
