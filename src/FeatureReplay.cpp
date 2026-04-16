@@ -97,6 +97,8 @@ static void logMatchAttempt(FILE* f, int sigIdx, const ProfileSignature& sig,
 
     std::set<EntityID> sigEdges = sig.lineIDs;
     sigEdges.insert(sig.arcIDs.begin(), sig.arcIDs.end());
+    sigEdges.insert(sig.ellipseIDs.begin(), sig.ellipseIDs.end());
+    sigEdges.insert(sig.splineIDs.begin(), sig.splineIDs.end());
 
     for (int d = 0; d < (int)detected.size(); d++) {
         const auto& prof = detected[d];

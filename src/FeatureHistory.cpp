@@ -10,9 +10,15 @@ ProfileSignature ProfileSignature::fromProfile(const ClosedProfile& profile, con
     ProfileSignature sig;
     sig.circleID = profile.circleID;
     for (auto id : profile.lineIDs) sig.lineIDs.insert(id);
+    for (auto id : profile.ellipseIDs) sig.ellipseIDs.insert(id);
+    for (auto id : profile.splineIDs) sig.splineIDs.insert(id);
     for (const auto& seg : profile.segments) {
         if (seg.type == SegmentType::Arc && seg.origCircleID != NullID)
             sig.arcIDs.insert(seg.origCircleID);
+        if ((seg.type == SegmentType::Ellipse || seg.type == SegmentType::EllipseArc) && seg.origEllipseID != NullID)
+            sig.ellipseIDs.insert(seg.origEllipseID);
+        if (seg.type == SegmentType::Spline && seg.origSplineID != NullID)
+            sig.splineIDs.insert(seg.origSplineID);
     }
     if (!profile.isCircle()) {
         Point2D c = polygonCentroid(tessellateProfile(sketch, profile));
@@ -28,14 +34,22 @@ bool ProfileSignature::matches(const ClosedProfile& profile, const Sketch& sketc
         return circleID == profile.circleID;
     }
 
-    // First try Jaccard similarity on edge IDs
+    // First try Jaccard similarity on edge IDs (all entity types)
     std::set<EntityID> myEdges = lineIDs;
     myEdges.insert(arcIDs.begin(), arcIDs.end());
+    myEdges.insert(ellipseIDs.begin(), ellipseIDs.end());
+    myEdges.insert(splineIDs.begin(), splineIDs.end());
 
     std::set<EntityID> otherEdges(profile.lineIDs.begin(), profile.lineIDs.end());
+    otherEdges.insert(profile.ellipseIDs.begin(), profile.ellipseIDs.end());
+    otherEdges.insert(profile.splineIDs.begin(), profile.splineIDs.end());
     for (const auto& seg : profile.segments) {
         if (seg.type == SegmentType::Arc && seg.origCircleID != NullID)
             otherEdges.insert(seg.origCircleID);
+        if ((seg.type == SegmentType::Ellipse || seg.type == SegmentType::EllipseArc) && seg.origEllipseID != NullID)
+            otherEdges.insert(seg.origEllipseID);
+        if (seg.type == SegmentType::Spline && seg.origSplineID != NullID)
+            otherEdges.insert(seg.origSplineID);
     }
 
     if (!myEdges.empty() && !otherEdges.empty()) {
@@ -63,8 +77,8 @@ bool ProfileSignature::matches(const ClosedProfile& profile, const Sketch& sketc
     double dist = std::sqrt(dx * dx + dy * dy);
     if (dist < 0.5) {
         // Also check segment count similarity
-        int mySeg = (int)(lineIDs.size() + arcIDs.size());
-        int otherSeg = (int)(profile.lineIDs.size() + profile.segments.size());
+        int mySeg = (int)(lineIDs.size() + arcIDs.size() + ellipseIDs.size() + splineIDs.size());
+        int otherSeg = (int)(profile.lineIDs.size() + profile.ellipseIDs.size() + profile.splineIDs.size() + profile.segments.size());
         if (mySeg == 0 || otherSeg == 0) return dist < 0.1;
         double ratio = (double)std::min(mySeg, otherSeg) / std::max(mySeg, otherSeg);
         return ratio > 0.5;
