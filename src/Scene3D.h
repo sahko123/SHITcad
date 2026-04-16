@@ -28,6 +28,56 @@ struct Body3D {
     GLuint edgeVAO = 0;
     GLuint edgeVBO = 0;
     int edgeVertexCount = 0;
+
+    // RAII: destructor frees OpenGL resources
+    ~Body3D() {
+        if (vao) glDeleteVertexArrays(1, &vao);
+        if (vbo) glDeleteBuffers(1, &vbo);
+        if (edgeVAO) glDeleteVertexArrays(1, &edgeVAO);
+        if (edgeVBO) glDeleteBuffers(1, &edgeVBO);
+    }
+
+    // Move constructor: transfer ownership, zero source
+    Body3D(Body3D&& other) noexcept
+        : shape(std::move(other.shape)), vertices(std::move(other.vertices)),
+          vao(other.vao), vbo(other.vbo), vertexCount(other.vertexCount),
+          colorR(other.colorR), colorG(other.colorG), colorB(other.colorB),
+          visible(other.visible),
+          edgeVAO(other.edgeVAO), edgeVBO(other.edgeVBO), edgeVertexCount(other.edgeVertexCount) {
+        other.vao = 0; other.vbo = 0;
+        other.edgeVAO = 0; other.edgeVBO = 0;
+        other.vertexCount = 0; other.edgeVertexCount = 0;
+    }
+
+    // Move assignment: clean up old, transfer, zero source
+    Body3D& operator=(Body3D&& other) noexcept {
+        if (this != &other) {
+            // Free our current GL resources
+            if (vao) glDeleteVertexArrays(1, &vao);
+            if (vbo) glDeleteBuffers(1, &vbo);
+            if (edgeVAO) glDeleteVertexArrays(1, &edgeVAO);
+            if (edgeVBO) glDeleteBuffers(1, &edgeVBO);
+            // Transfer
+            shape = std::move(other.shape);
+            vertices = std::move(other.vertices);
+            vao = other.vao; vbo = other.vbo; vertexCount = other.vertexCount;
+            colorR = other.colorR; colorG = other.colorG; colorB = other.colorB;
+            visible = other.visible;
+            edgeVAO = other.edgeVAO; edgeVBO = other.edgeVBO; edgeVertexCount = other.edgeVertexCount;
+            // Zero source
+            other.vao = 0; other.vbo = 0;
+            other.edgeVAO = 0; other.edgeVBO = 0;
+            other.vertexCount = 0; other.edgeVertexCount = 0;
+        }
+        return *this;
+    }
+
+    // No copy (would double-free GL handles)
+    Body3D(const Body3D&) = delete;
+    Body3D& operator=(const Body3D&) = delete;
+
+    // Default constructor
+    Body3D() = default;
 };
 
 class Scene3D {

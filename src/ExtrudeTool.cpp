@@ -21,21 +21,9 @@ void ExtrudeToolState::reset() {
     sketchPlaneIndex = -1;
     editingFeatureID = 0;
 
-    if (previewBody.vao) { glDeleteVertexArrays(1, &previewBody.vao); previewBody.vao = 0; }
-    if (previewBody.vbo) { glDeleteBuffers(1, &previewBody.vbo); previewBody.vbo = 0; }
-    if (previewBody.edgeVAO) { glDeleteVertexArrays(1, &previewBody.edgeVAO); previewBody.edgeVAO = 0; }
-    if (previewBody.edgeVBO) { glDeleteBuffers(1, &previewBody.edgeVBO); previewBody.edgeVBO = 0; }
-    previewBody.vertices.clear();
-    previewBody.vertexCount = 0;
-    previewBody.edgeVertexCount = 0;
-
-    for (auto& b : cutPreviewBodies) {
-        if (b.vao) glDeleteVertexArrays(1, &b.vao);
-        if (b.vbo) glDeleteBuffers(1, &b.vbo);
-        if (b.edgeVAO) glDeleteVertexArrays(1, &b.edgeVAO);
-        if (b.edgeVBO) glDeleteBuffers(1, &b.edgeVBO);
-    }
-    cutPreviewBodies.clear();
+    // Body3D RAII: move-assign empty Body3D frees old GL resources
+    previewBody = Body3D{};
+    cutPreviewBodies.clear(); // destructors free GL resources
     hidingBodiesForPreview = false;
     renderCache.clear();
     handleVisible = false;
@@ -54,20 +42,7 @@ void RevolveToolState::reset() {
     sketchPlaneIndex = -1;
     editingFeatureID = 0;
 
-    if (previewBody.vao) { glDeleteVertexArrays(1, &previewBody.vao); previewBody.vao = 0; }
-    if (previewBody.vbo) { glDeleteBuffers(1, &previewBody.vbo); previewBody.vbo = 0; }
-    if (previewBody.edgeVAO) { glDeleteVertexArrays(1, &previewBody.edgeVAO); previewBody.edgeVAO = 0; }
-    if (previewBody.edgeVBO) { glDeleteBuffers(1, &previewBody.edgeVBO); previewBody.edgeVBO = 0; }
-    previewBody.vertices.clear();
-    previewBody.vertexCount = 0;
-    previewBody.edgeVertexCount = 0;
-
-    for (auto& b : cutPreviewBodies) {
-        if (b.vao) glDeleteVertexArrays(1, &b.vao);
-        if (b.vbo) glDeleteBuffers(1, &b.vbo);
-        if (b.edgeVAO) glDeleteVertexArrays(1, &b.edgeVAO);
-        if (b.edgeVBO) glDeleteBuffers(1, &b.edgeVBO);
-    }
+    previewBody = Body3D{};
     cutPreviewBodies.clear();
     hidingBodiesForPreview = false;
     renderCache.clear();
@@ -81,20 +56,7 @@ void LoftToolState::reset() {
     editingFeatureID = 0;
     previewDirty = true;
 
-    if (previewBody.vao) { glDeleteVertexArrays(1, &previewBody.vao); previewBody.vao = 0; }
-    if (previewBody.vbo) { glDeleteBuffers(1, &previewBody.vbo); previewBody.vbo = 0; }
-    if (previewBody.edgeVAO) { glDeleteVertexArrays(1, &previewBody.edgeVAO); previewBody.edgeVAO = 0; }
-    if (previewBody.edgeVBO) { glDeleteBuffers(1, &previewBody.edgeVBO); previewBody.edgeVBO = 0; }
-    previewBody.vertices.clear();
-    previewBody.vertexCount = 0;
-    previewBody.edgeVertexCount = 0;
-
-    for (auto& b : cutPreviewBodies) {
-        if (b.vao) glDeleteVertexArrays(1, &b.vao);
-        if (b.vbo) glDeleteBuffers(1, &b.vbo);
-        if (b.edgeVAO) glDeleteVertexArrays(1, &b.edgeVAO);
-        if (b.edgeVBO) glDeleteBuffers(1, &b.edgeVBO);
-    }
+    previewBody = Body3D{};
     cutPreviewBodies.clear();
     hidingBodiesForPreview = false;
 }

@@ -166,10 +166,7 @@ void Scene3D::addMeshBody(Body3D&& body) {
 void Scene3D::replaceBody(int index, const TopoDS_Shape& newShape) {
     if (index < 0 || index >= (int)bodies_.size()) return;
     auto& b = bodies_[index];
-    if (b.vao) { glDeleteVertexArrays(1, &b.vao); b.vao = 0; }
-    if (b.vbo) { glDeleteBuffers(1, &b.vbo); b.vbo = 0; }
-    if (b.edgeVAO) { glDeleteVertexArrays(1, &b.edgeVAO); b.edgeVAO = 0; }
-    if (b.edgeVBO) { glDeleteBuffers(1, &b.edgeVBO); b.edgeVBO = 0; }
+    // uploadMesh/uploadEdges handle freeing old GL resources before re-creating
     b.shape = newShape;
     b.vertices.clear();
     triangulateShape(newShape, b.vertices);
@@ -179,31 +176,18 @@ void Scene3D::replaceBody(int index, const TopoDS_Shape& newShape) {
 
 void Scene3D::removeBody(int index) {
     if (index < 0 || index >= (int)bodies_.size()) return;
-    auto& b = bodies_[index];
-    if (b.vao) glDeleteVertexArrays(1, &b.vao);
-    if (b.vbo) glDeleteBuffers(1, &b.vbo);
-    if (b.edgeVAO) glDeleteVertexArrays(1, &b.edgeVAO);
-    if (b.edgeVBO) glDeleteBuffers(1, &b.edgeVBO);
+    // Body3D destructor handles GL cleanup via RAII
     bodies_.erase(bodies_.begin() + index);
 }
 
 void Scene3D::removeLastBody() {
     if (bodies_.empty()) return;
-    auto& b = bodies_.back();
-    if (b.vao) glDeleteVertexArrays(1, &b.vao);
-    if (b.vbo) glDeleteBuffers(1, &b.vbo);
-    if (b.edgeVAO) glDeleteVertexArrays(1, &b.edgeVAO);
-    if (b.edgeVBO) glDeleteBuffers(1, &b.edgeVBO);
+    // Body3D destructor handles GL cleanup via RAII
     bodies_.pop_back();
 }
 
 void Scene3D::clear() {
-    for (auto& b : bodies_) {
-        if (b.vao) glDeleteVertexArrays(1, &b.vao);
-        if (b.vbo) glDeleteBuffers(1, &b.vbo);
-        if (b.edgeVAO) glDeleteVertexArrays(1, &b.edgeVAO);
-        if (b.edgeVBO) glDeleteBuffers(1, &b.edgeVBO);
-    }
+    // Body3D destructors handle GL cleanup via RAII
     bodies_.clear();
 }
 
