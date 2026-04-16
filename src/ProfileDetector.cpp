@@ -35,6 +35,7 @@
 #include <GCPnts_AbscissaPoint.hxx>
 #include <ShapeAnalysis.hxx>
 #include <ShapeAnalysis_Wire.hxx>
+#include <BRepBuilderAPI_MakeFace.hxx>
 
 namespace shitcad {
 
@@ -1133,30 +1134,53 @@ static void buildOCCTEdges(const Sketch& sketch, const SketchPlane& plane,
     }
 }
 
-// Map an output edge from BOPAlgo back to its source sketch entity
-// by checking which input edge it was derived from (or is identical to)
+// Map an output edge from BOPAlgo back to its source sketch entity.
+// BOPAlgo_BuilderFace doesn't expose Modified()/Generated(), so we match
+// by checking if the output edge shares the same underlying curve (IsPartner/IsSame)
+// or by sampling a midpoint and finding the closest input edge.
 static EdgeOrigin findEdgeOrigin(const TopoDS_Edge& outputEdge,
                                   const std::vector<TopoDS_Edge>& inputEdges,
-                                  const std::vector<EdgeOrigin>& inputOrigins,
-                                  const BOPAlgo_BuilderFace& builder) {
-    // Check if this output edge is a modified version of an input edge
+                                  const std::vector<EdgeOrigin>& inputOrigins) {
+    // First: check topological identity (IsSame covers un-split edges)
     for (int i = 0; i < (int)inputEdges.size(); i++) {
-        // Check if output is same as input
         if (outputEdge.IsSame(inputEdges[i]))
             return inputOrigins[i];
+    }
 
-        // Check if output was generated from input (split edges)
-        const TopTools_ListOfShape& modified = builder.Modified(inputEdges[i]);
-        for (auto it = modified.cbegin(); it != modified.cend(); ++it) {
-            if (outputEdge.IsSame(*it))
-                return inputOrigins[i];
+    // Second: check if they share the same underlying curve (IsPartner — same TShape)
+    for (int i = 0; i < (int)inputEdges.size(); i++) {
+        if (outputEdge.IsPartner(inputEdges[i]))
+            return inputOrigins[i];
+    }
+
+    // Third: sample midpoint of output edge and find closest input edge
+    BRepAdaptor_Curve outCurve(outputEdge);
+    double outMid = (outCurve.FirstParameter() + outCurve.LastParameter()) * 0.5;
+    gp_Pnt midPt = outCurve.Value(outMid);
+
+    double bestDist = 1e9;
+    int bestIdx = -1;
+    for (int i = 0; i < (int)inputEdges.size(); i++) {
+        BRepAdaptor_Curve inCurve(inputEdges[i]);
+        // Project midpoint onto input curve
+        double inFirst = inCurve.FirstParameter();
+        double inLast = inCurve.LastParameter();
+        // Sample a few points on the input curve and find minimum distance
+        double minD = 1e9;
+        for (int s = 0; s <= 10; s++) {
+            double t = inFirst + (inLast - inFirst) * s / 10.0;
+            double d = midPt.Distance(inCurve.Value(t));
+            if (d < minD) minD = d;
         }
-        const TopTools_ListOfShape& generated = builder.Generated(inputEdges[i]);
-        for (auto it = generated.cbegin(); it != generated.cend(); ++it) {
-            if (outputEdge.IsSame(*it))
-                return inputOrigins[i];
+        if (minD < bestDist) {
+            bestDist = minD;
+            bestIdx = i;
         }
     }
+
+    if (bestIdx >= 0 && bestDist < 0.01)
+        return inputOrigins[bestIdx];
+
     return {}; // unknown origin
 }
 
@@ -1257,8 +1281,10 @@ std::vector<ClosedProfile> detectClosedProfilesOCCT(const Sketch& sketch, const 
     // Step 2: Create the base face (infinite plane, bounded later)
     gp_Pnt origin(plane.origin[0], plane.origin[1], plane.origin[2]);
     gp_Dir normal(plane.normal[0], plane.normal[1], plane.normal[2]);
-    Handle(Geom_Plane) geomPlane = new Geom_Plane(origin, normal);
-    TopoDS_Face baseFace = BRepBuilderAPI_MakeFace(geomPlane, -1e6, 1e6, -1e6, 1e6).Face();
+    gp_Pln gpPlane(origin, normal);
+    BRepBuilderAPI_MakeFace faceMaker(gpPlane, -1e6, 1e6, -1e6, 1e6);
+    if (!faceMaker.IsDone()) return results;
+    TopoDS_Face baseFace = faceMaker.Face();
 
     // Step 3: Feed edges to BOPAlgo_BuilderFace
     BOPAlgo_BuilderFace faceBuilder;
@@ -1296,7 +1322,7 @@ std::vector<ClosedProfile> detectClosedProfilesOCCT(const Sketch& sketch, const 
             profile.resolvedPoints.push_back({lx, ly});
 
             // Find which sketch entity this edge came from
-            EdgeOrigin origin = findEdgeOrigin(edge, inputEdges, inputOrigins, faceBuilder);
+            EdgeOrigin origin = findEdgeOrigin(edge, inputEdges, inputOrigins);
 
             // Build segment with real curve data
             BoundarySegment seg = buildSegmentFromEdge(edge, origin, sketch, plane);
@@ -1368,7 +1394,7 @@ std::vector<ClosedProfile> detectClosedProfilesOCCT(const Sketch& sketch, const 
                 plane.worldToLocal((float)startPt.X(), (float)startPt.Y(), (float)startPt.Z(), hlx, hly);
                 hole.resolvedPoints.push_back({hlx, hly});
 
-                EdgeOrigin hOrigin = findEdgeOrigin(edge, inputEdges, inputOrigins, faceBuilder);
+                EdgeOrigin hOrigin = findEdgeOrigin(edge, inputEdges, inputOrigins);
                 hole.segments.push_back(buildSegmentFromEdge(edge, hOrigin, sketch, plane));
             }
             if (hole.resolvedPoints.size() >= 2)
