@@ -1276,15 +1276,19 @@ std::vector<ClosedProfile> detectClosedProfilesOCCT(const Sketch& sketch, const 
     std::vector<TopoDS_Edge> inputEdges;
     std::vector<EdgeOrigin> inputOrigins;
     buildOCCTEdges(sketch, plane, inputEdges, inputOrigins);
-    if (inputEdges.empty()) return results;
+    fprintf(stderr, "[OCCT] Step 1: %d input edges built from sketch (%d pts, %d lines, %d circles, %d arcs)\n",
+            (int)inputEdges.size(), (int)sketch.points.size(), (int)sketch.lines.size(),
+            (int)sketch.circles.size(), (int)sketch.arcs.size());
+    if (inputEdges.empty()) { fprintf(stderr, "[OCCT] ABORT: no input edges\n"); return results; }
 
-    // Step 2: Create the base face (infinite plane, bounded later)
-    gp_Pnt origin(plane.origin[0], plane.origin[1], plane.origin[2]);
+    // Step 2: Create the base face (bounded plane)
+    gp_Pnt planeOrigin(plane.origin[0], plane.origin[1], plane.origin[2]);
     gp_Dir normal(plane.normal[0], plane.normal[1], plane.normal[2]);
-    gp_Pln gpPlane(origin, normal);
+    gp_Pln gpPlane(planeOrigin, normal);
     BRepBuilderAPI_MakeFace faceMaker(gpPlane, -1e6, 1e6, -1e6, 1e6);
-    if (!faceMaker.IsDone()) return results;
+    if (!faceMaker.IsDone()) { fprintf(stderr, "[OCCT] ABORT: MakeFace failed\n"); return results; }
     TopoDS_Face baseFace = faceMaker.Face();
+    fprintf(stderr, "[OCCT] Step 2: base face created\n");
 
     // Step 3: Feed edges to BOPAlgo_BuilderFace
     BOPAlgo_BuilderFace faceBuilder;
@@ -1296,17 +1300,35 @@ std::vector<ClosedProfile> detectClosedProfilesOCCT(const Sketch& sketch, const 
     faceBuilder.SetShapes(edgeList);
 
     faceBuilder.Perform();
-    if (faceBuilder.HasErrors()) return results;
+    if (faceBuilder.HasErrors()) {
+        fprintf(stderr, "[OCCT] ABORT: BOPAlgo_BuilderFace has errors\n");
+        return results;
+    }
+    if (faceBuilder.HasWarnings()) {
+        fprintf(stderr, "[OCCT] WARNING: BOPAlgo_BuilderFace has warnings\n");
+    }
 
     // Step 4: Extract result faces and convert to ClosedProfile
     const TopTools_ListOfShape& resultFaces = faceBuilder.Areas();
+    int faceCount = 0;
+    for (auto it2 = resultFaces.cbegin(); it2 != resultFaces.cend(); ++it2) faceCount++;
+    fprintf(stderr, "[OCCT] Step 4: %d result faces from BOPAlgo\n", faceCount);
 
-    for (auto it = resultFaces.cbegin(); it != resultFaces.cend(); ++it) {
+    int faceIdx = 0;
+    for (auto it = resultFaces.cbegin(); it != resultFaces.cend(); ++it, ++faceIdx) {
         const TopoDS_Face& face = TopoDS::Face(*it);
 
         // Get outer wire
         TopoDS_Wire outerWire = ShapeAnalysis::OuterWire(face);
-        if (outerWire.IsNull()) continue;
+        if (outerWire.IsNull()) {
+            fprintf(stderr, "[OCCT]   face[%d]: outer wire is null, skipping\n", faceIdx);
+            continue;
+        }
+
+        // Count edges in wire
+        int edgeCount = 0;
+        for (TopExp_Explorer expCount(outerWire, TopAbs_EDGE); expCount.More(); expCount.Next()) edgeCount++;
+        fprintf(stderr, "[OCCT]   face[%d]: outer wire has %d edges\n", faceIdx, edgeCount);
 
         // Build profile from outer wire
         ClosedProfile profile;
@@ -1319,7 +1341,7 @@ std::vector<ClosedProfile> detectClosedProfilesOCCT(const Sketch& sketch, const 
             gp_Pnt startPt = BRep_Tool::Pnt(TopExp::FirstVertex(edge, Standard_True));
             float lx, ly;
             plane.worldToLocal((float)startPt.X(), (float)startPt.Y(), (float)startPt.Z(), lx, ly);
-            profile.resolvedPoints.push_back({lx, ly});
+            profile.resolvedPoints.push_back({(double)lx, (double)ly});
 
             // Find which sketch entity this edge came from
             EdgeOrigin origin = findEdgeOrigin(edge, inputEdges, inputOrigins);
@@ -1337,8 +1359,7 @@ std::vector<ClosedProfile> detectClosedProfilesOCCT(const Sketch& sketch, const 
                         break;
                     case EdgeOrigin::KCircle:
                     case EdgeOrigin::KArc:
-                        seg.origCircleID = origin.entityID; // already set in buildSegment
-                        break;
+                        break; // origCircleID already set in buildSegmentFromEdge
                     case EdgeOrigin::KEllipse:
                     case EdgeOrigin::KEllipseArc:
                         if (ellipseIDset.insert(origin.entityID).second)
@@ -1352,14 +1373,16 @@ std::vector<ClosedProfile> detectClosedProfilesOCCT(const Sketch& sketch, const 
             }
         }
 
-        if (profile.resolvedPoints.size() < 2) continue;
+        fprintf(stderr, "[OCCT]   face[%d]: %d resolved points, %d segments, %d lineIDs\n",
+                faceIdx, (int)profile.resolvedPoints.size(), (int)profile.segments.size(),
+                (int)profile.lineIDs.size());
 
-        // Check if this is a single full circle
+        // Check if this is a single full circle (before the point count check,
+        // because a full circle OCCT edge has only 1 vertex)
         if (profile.segments.size() == 1 && profile.segments[0].type == SegmentType::Arc) {
             const auto& seg = profile.segments[0];
             double span = std::fabs(seg.arcEndAngle - seg.arcStartAngle);
             if (span > 6.0) { // ~2*pi = full circle
-                // Find matching circle entity
                 for (const auto& circle : sketch.circles) {
                     if (std::fabs(circle.radius - seg.arcRadius) < 1e-4) {
                         Point2D center = sketch.getPointPos(circle.centerPt);
@@ -1369,6 +1392,7 @@ std::vector<ClosedProfile> detectClosedProfilesOCCT(const Sketch& sketch, const 
                             profile.resolvedPoints.clear();
                             profile.segments.clear();
                             profile.lineIDs.clear();
+                            fprintf(stderr, "[OCCT]   face[%d]: identified as full circle (id=%u)\n", faceIdx, circle.id);
                             break;
                         }
                     }
@@ -1376,12 +1400,34 @@ std::vector<ClosedProfile> detectClosedProfilesOCCT(const Sketch& sketch, const 
             }
         }
 
+        // Non-circle profiles need at least 2 points
+        if (!profile.isCircle() && profile.resolvedPoints.size() < 2) {
+            fprintf(stderr, "[OCCT]   face[%d]: too few points and not a circle, skipping\n", faceIdx);
+            continue;
+        }
+
+        // Also handle full ellipses (single edge, type Ellipse)
+        if (!profile.isCircle() && profile.segments.size() == 1 &&
+            profile.segments[0].type == SegmentType::Ellipse) {
+            // Full ellipse — treat similarly to circle but keep as ellipse segment
+            // Just ensure it passes through (resolvedPoints may have only 1 entry)
+            fprintf(stderr, "[OCCT]   face[%d]: full ellipse detected\n", faceIdx);
+        }
+
         // Compute signed area to filter exterior face
-        auto tess = tessellateProfile(sketch, profile);
-        double area = polygonSignedArea(tess);
-        if (area <= 0 && !profile.isCircle()) continue; // CW = exterior
+        if (!profile.isCircle()) {
+            auto tess = tessellateProfile(sketch, profile);
+            double area = polygonSignedArea(tess);
+            fprintf(stderr, "[OCCT]   face[%d]: signed area = %.4f (tessPoints=%d)\n",
+                    faceIdx, area, (int)tess.size());
+            if (area <= 0) {
+                fprintf(stderr, "[OCCT]   face[%d]: exterior face (CW), skipping\n", faceIdx);
+                continue;
+            }
+        }
 
         // Add holes from inner wires
+        int holeCount = 0;
         for (TopExp_Explorer expWire(face, TopAbs_WIRE); expWire.More(); expWire.Next()) {
             const TopoDS_Wire& wire = TopoDS::Wire(expWire.Current());
             if (wire.IsSame(outerWire)) continue;
@@ -1392,18 +1438,22 @@ std::vector<ClosedProfile> detectClosedProfilesOCCT(const Sketch& sketch, const 
                 gp_Pnt startPt = BRep_Tool::Pnt(TopExp::FirstVertex(edge, Standard_True));
                 float hlx, hly;
                 plane.worldToLocal((float)startPt.X(), (float)startPt.Y(), (float)startPt.Z(), hlx, hly);
-                hole.resolvedPoints.push_back({hlx, hly});
+                hole.resolvedPoints.push_back({(double)hlx, (double)hly});
 
                 EdgeOrigin hOrigin = findEdgeOrigin(edge, inputEdges, inputOrigins);
                 hole.segments.push_back(buildSegmentFromEdge(edge, hOrigin, sketch, plane));
             }
-            if (hole.resolvedPoints.size() >= 2)
+            if (hole.resolvedPoints.size() >= 2) {
                 profile.holes.push_back(std::move(hole));
+                holeCount++;
+            }
         }
 
+        fprintf(stderr, "[OCCT]   face[%d]: ACCEPTED (%d holes)\n", faceIdx, holeCount);
         results.push_back(std::move(profile));
     }
 
+    fprintf(stderr, "[OCCT] Final: %d profiles returned\n", (int)results.size());
     return results;
 }
 
