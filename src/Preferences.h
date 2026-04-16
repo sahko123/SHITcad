@@ -1,7 +1,14 @@
 #pragma once
 #include <imgui.h>
+#include <cstdint>
 
 namespace shitcad {
+
+// Profile detection backend selection
+enum class ProfileDetectorBackend : uint8_t {
+    Custom = 0,  // Half-edge tracer (original)
+    OCCT = 1,    // BOPAlgo_BuilderFace (exact geometry)
+};
 
 struct Theme {
     // 3D viewport
@@ -37,6 +44,10 @@ struct Theme {
 const Theme& activeTheme();
 Theme& activeThemeMut();
 
+// Global profile detector backend setting
+ProfileDetectorBackend activeProfileBackend();
+void setActiveProfileBackend(ProfileDetectorBackend backend);
+
 struct Preferences {
     bool lightMode = true;
     bool showWireframe = false;
@@ -47,6 +58,9 @@ struct Preferences {
     float sketchLineColor[3] = {0.1f, 0.1f, 0.1f};
     float sketchLineThickness = 1.5f;
     float tangentSnapPx = 15.0f; // tangent snap distance in pixels
+
+    // Profile detection backend
+    ProfileDetectorBackend profileBackend = ProfileDetectorBackend::Custom;
 
     // Dimension label colors (RGBA 0-1)
     float dimLineCol[4] = {0.0f, 0.55f, 0.63f, 0.86f};

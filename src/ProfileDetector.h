@@ -206,12 +206,6 @@ inline bool pointInsidePolygonWinding(const std::vector<Point2D>& poly, Point2D 
     return windingNumber(poly, p) != 0;
 }
 
-// Profile detection backend selection
-enum class ProfileDetectorBackend : uint8_t {
-    Custom,  // Half-edge tracer (original)
-    OCCT,    // BOPAlgo_BuilderFace (exact geometry)
-};
-
 // Detect all closed profiles using the custom half-edge tracer.
 std::vector<ClosedProfile> detectClosedProfilesCustom(const Sketch& sketch);
 

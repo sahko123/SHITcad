@@ -1,5 +1,6 @@
 #include "ProfileDetector.h"
 #include "SketchPlane.h"
+#include "Preferences.h"
 #include "Intersect.h"
 #include <unordered_map>
 #include <unordered_set>
@@ -1387,10 +1388,10 @@ std::vector<ClosedProfile> detectClosedProfiles(const Sketch& sketch) {
     return detectClosedProfilesCustom(sketch);
 }
 
-// With plane: can route to OCCT backend if preference is set
+// With plane: routes to OCCT backend if preference is set
 std::vector<ClosedProfile> detectClosedProfiles(const Sketch& sketch, const SketchPlane& plane) {
-    // TODO: check preference for backend selection — wired up in task #4
-    (void)plane;
+    if (activeProfileBackend() == ProfileDetectorBackend::OCCT)
+        return detectClosedProfilesOCCT(sketch, plane);
     return detectClosedProfilesCustom(sketch);
 }
 

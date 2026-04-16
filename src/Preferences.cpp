@@ -3,9 +3,13 @@
 namespace shitcad {
 
 static Theme s_activeTheme = Theme::light();
+static ProfileDetectorBackend s_profileBackend = ProfileDetectorBackend::Custom;
 
 const Theme& activeTheme() { return s_activeTheme; }
 Theme& activeThemeMut() { return s_activeTheme; }
+
+ProfileDetectorBackend activeProfileBackend() { return s_profileBackend; }
+void setActiveProfileBackend(ProfileDetectorBackend backend) { s_profileBackend = backend; }
 
 Theme Theme::dark() {
     Theme t;

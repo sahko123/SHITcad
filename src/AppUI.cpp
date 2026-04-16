@@ -78,6 +78,19 @@ void App::drawPreferencesWindow() {
     ImGui::Text("Snapping");
     ImGui::SliderFloat("Tangent Snap (px)", &prefs_.tangentSnapPx, 5.0f, 40.0f, "%.0f");
 
+    ImGui::Separator();
+    ImGui::Text("Profile Detection");
+    const char* backendNames[] = { "Custom (half-edge tracer)", "OCCT (exact geometry)" };
+    int backendIdx = (int)prefs_.profileBackend;
+    if (ImGui::Combo("Backend", &backendIdx, backendNames, 2)) {
+        prefs_.profileBackend = (ProfileDetectorBackend)backendIdx;
+        setActiveProfileBackend(prefs_.profileBackend);
+    }
+    if (prefs_.profileBackend == ProfileDetectorBackend::OCCT) {
+        ImGui::TextWrapped("Uses OCCT's BOPAlgo_BuilderFace for exact curve intersections. "
+                           "Ellipses and splines produce smooth edges instead of polyline approximations.");
+    }
+
     ImGui::End();
 }
 
