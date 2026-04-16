@@ -4,6 +4,37 @@
 #include <unordered_map>
 #include <unordered_set>
 
+// OCCT includes for BOPAlgo_BuilderFace profile detection
+#include <BOPAlgo_BuilderFace.hxx>
+#include <BRepBuilderAPI_MakeEdge.hxx>
+#include <BRepBuilderAPI_MakeWire.hxx>
+#include <BRep_Tool.hxx>
+#include <Geom_Circle.hxx>
+#include <Geom_Ellipse.hxx>
+#include <Geom_BSplineCurve.hxx>
+#include <Geom_Line.hxx>
+#include <Geom_Plane.hxx>
+#include <GeomAPI_ProjectPointOnCurve.hxx>
+#include <gp_Circ.hxx>
+#include <gp_Elips.hxx>
+#include <gp_Pln.hxx>
+#include <gp_Ax2.hxx>
+#include <TColgp_Array1OfPnt.hxx>
+#include <TColStd_Array1OfReal.hxx>
+#include <TColStd_Array1OfInteger.hxx>
+#include <TopExp_Explorer.hxx>
+#include <TopoDS.hxx>
+#include <TopoDS_Edge.hxx>
+#include <TopoDS_Wire.hxx>
+#include <TopoDS_Face.hxx>
+#include <TopExp.hxx>
+#include <TopTools_IndexedMapOfShape.hxx>
+#include <TopTools_ListOfShape.hxx>
+#include <BRepAdaptor_Curve.hxx>
+#include <GCPnts_AbscissaPoint.hxx>
+#include <ShapeAnalysis.hxx>
+#include <ShapeAnalysis_Wire.hxx>
+
 namespace shitcad {
 
 // ---- Subdivision structures ----
@@ -921,6 +952,434 @@ std::vector<ClosedProfile> detectClosedProfilesCustom(const Sketch& sketch) {
     return results;
 }
 
+// ===========================================================================
+// OCCT-based profile detection using BOPAlgo_BuilderFace
+// ===========================================================================
+
+// Helper: convert local 2D point to 3D on the sketch plane
+static gp_Pnt toGpPnt(const SketchPlane& plane, double lx, double ly) {
+    float wx, wy, wz;
+    plane.localToWorld((float)lx, (float)ly, wx, wy, wz);
+    return gp_Pnt(wx, wy, wz);
+}
+
+// Metadata for an OCCT edge: which sketch entity it came from
+struct EdgeOrigin {
+    EntityID entityID = NullID;
+    enum Kind { KLine, KCircle, KArc, KEllipse, KEllipseArc, KSpline } kind = KLine;
+};
+
+// Build OCCT edges from sketch entities and track their origins
+static void buildOCCTEdges(const Sketch& sketch, const SketchPlane& plane,
+                           std::vector<TopoDS_Edge>& edges,
+                           std::vector<EdgeOrigin>& origins) {
+    gp_Dir normalDir(plane.normal[0], plane.normal[1], plane.normal[2]);
+
+    // Lines
+    for (const auto& line : sketch.lines) {
+        if (line.projected) continue;
+        Point2D a = sketch.getPointPos(line.startPt);
+        Point2D b = sketch.getPointPos(line.endPt);
+        gp_Pnt pa = toGpPnt(plane, a.x, a.y);
+        gp_Pnt pb = toGpPnt(plane, b.x, b.y);
+        if (pa.Distance(pb) < 1e-6) continue;
+
+        BRepBuilderAPI_MakeEdge me(pa, pb);
+        if (me.IsDone()) {
+            edges.push_back(me.Edge());
+            origins.push_back({line.id, EdgeOrigin::KLine});
+        }
+    }
+
+    // Circles
+    for (const auto& circle : sketch.circles) {
+        if (circle.projected) continue;
+        if (circle.radius < 1e-6) continue;
+        Point2D center = sketch.getPointPos(circle.centerPt);
+        gp_Pnt cp = toGpPnt(plane, center.x, center.y);
+        gp_Ax2 ax(cp, normalDir);
+        gp_Circ circ(ax, circle.radius);
+
+        BRepBuilderAPI_MakeEdge me(circ);
+        if (me.IsDone()) {
+            edges.push_back(me.Edge());
+            origins.push_back({circle.id, EdgeOrigin::KCircle});
+        }
+    }
+
+    // Arcs
+    for (const auto& arc : sketch.arcs) {
+        if (arc.projected) continue;
+        Point2D center = sketch.getPointPos(arc.centerPt);
+        Point2D sp = sketch.getPointPos(arc.startPt);
+        Point2D ep = sketch.getPointPos(arc.endPt);
+        double radius = distance(center, sp);
+        if (radius < 1e-6) continue;
+
+        gp_Pnt cp = toGpPnt(plane, center.x, center.y);
+        gp_Ax2 ax(cp, normalDir);
+        gp_Circ circ(ax, radius);
+
+        // Build arc edge between start and end angles
+        BRepBuilderAPI_MakeEdge me(circ, arc.startAngle, arc.endAngle);
+        if (me.IsDone()) {
+            edges.push_back(me.Edge());
+            origins.push_back({arc.id, EdgeOrigin::KArc});
+        }
+    }
+
+    // Ellipses
+    for (const auto& ellipse : sketch.ellipses) {
+        if (ellipse.projected) continue;
+        if (ellipse.semiMajor < 1e-6 || ellipse.semiMinor < 1e-6) continue;
+        Point2D center = sketch.getPointPos(ellipse.centerPt);
+        gp_Pnt cp = toGpPnt(plane, center.x, center.y);
+
+        double cosR = std::cos(ellipse.rotation);
+        double sinR = std::sin(ellipse.rotation);
+        gp_Dir majorDir(
+            plane.uAxis[0] * cosR + plane.vAxis[0] * sinR,
+            plane.uAxis[1] * cosR + plane.vAxis[1] * sinR,
+            plane.uAxis[2] * cosR + plane.vAxis[2] * sinR
+        );
+        gp_Ax2 ax(cp, normalDir, majorDir);
+        gp_Elips elips(ax, ellipse.semiMajor, ellipse.semiMinor);
+
+        BRepBuilderAPI_MakeEdge me(elips);
+        if (me.IsDone()) {
+            edges.push_back(me.Edge());
+            origins.push_back({ellipse.id, EdgeOrigin::KEllipse});
+        }
+    }
+
+    // Ellipse arcs
+    for (const auto& ea : sketch.ellipseArcs) {
+        if (ea.projected) continue;
+        if (ea.semiMajor < 1e-6 || ea.semiMinor < 1e-6) continue;
+        Point2D center = sketch.getPointPos(ea.centerPt);
+        gp_Pnt cp = toGpPnt(plane, center.x, center.y);
+
+        double cosR = std::cos(ea.rotation);
+        double sinR = std::sin(ea.rotation);
+        gp_Dir majorDir(
+            plane.uAxis[0] * cosR + plane.vAxis[0] * sinR,
+            plane.uAxis[1] * cosR + plane.vAxis[1] * sinR,
+            plane.uAxis[2] * cosR + plane.vAxis[2] * sinR
+        );
+        gp_Ax2 ax(cp, normalDir, majorDir);
+        gp_Elips elips(ax, ea.semiMajor, ea.semiMinor);
+
+        BRepBuilderAPI_MakeEdge me(elips, ea.startAngle, ea.endAngle);
+        if (me.IsDone()) {
+            edges.push_back(me.Edge());
+            origins.push_back({ea.id, EdgeOrigin::KEllipseArc});
+        }
+    }
+
+    // Splines
+    for (const auto& sp : sketch.splines) {
+        if (sp.projected) continue;
+        int nCtrl = (int)sp.controlPtIDs.size();
+        if (nCtrl < 2) continue;
+
+        TColgp_Array1OfPnt poles(1, nCtrl);
+        for (int ci = 0; ci < nCtrl; ci++) {
+            Point2D pt = sketch.getPointPos(sp.controlPtIDs[ci]);
+            poles.SetValue(ci + 1, toGpPnt(plane, pt.x, pt.y));
+        }
+
+        // Generate knots if not stored
+        std::vector<double> knots = sp.knots;
+        if (knots.empty()) knots = generateUniformKnots(nCtrl, sp.degree);
+
+        // Convert full knot vector to unique knots + multiplicities
+        std::vector<double> uniqueKnots;
+        std::vector<int> mults;
+        for (double k : knots) {
+            if (uniqueKnots.empty() || std::fabs(k - uniqueKnots.back()) > 1e-10) {
+                uniqueKnots.push_back(k);
+                mults.push_back(1);
+            } else {
+                mults.back()++;
+            }
+        }
+
+        int nKnots = (int)uniqueKnots.size();
+        TColStd_Array1OfReal knotsArr(1, nKnots);
+        TColStd_Array1OfInteger multsArr(1, nKnots);
+        for (int ki = 0; ki < nKnots; ki++) {
+            knotsArr.SetValue(ki + 1, uniqueKnots[ki]);
+            multsArr.SetValue(ki + 1, mults[ki]);
+        }
+
+        bool hasWeights = !sp.weights.empty() && (int)sp.weights.size() == nCtrl;
+        TColStd_Array1OfReal weightsArr(1, nCtrl);
+        for (int ci = 0; ci < nCtrl; ci++)
+            weightsArr.SetValue(ci + 1, hasWeights ? sp.weights[ci] : 1.0);
+
+        try {
+            Handle(Geom_BSplineCurve) bspline = new Geom_BSplineCurve(
+                poles, weightsArr, knotsArr, multsArr, sp.degree);
+
+            BRepBuilderAPI_MakeEdge me(bspline);
+            if (me.IsDone()) {
+                edges.push_back(me.Edge());
+                origins.push_back({sp.id, EdgeOrigin::KSpline});
+            }
+        } catch (...) {
+            // Skip invalid spline
+        }
+    }
+}
+
+// Map an output edge from BOPAlgo back to its source sketch entity
+// by checking which input edge it was derived from (or is identical to)
+static EdgeOrigin findEdgeOrigin(const TopoDS_Edge& outputEdge,
+                                  const std::vector<TopoDS_Edge>& inputEdges,
+                                  const std::vector<EdgeOrigin>& inputOrigins,
+                                  const BOPAlgo_BuilderFace& builder) {
+    // Check if this output edge is a modified version of an input edge
+    for (int i = 0; i < (int)inputEdges.size(); i++) {
+        // Check if output is same as input
+        if (outputEdge.IsSame(inputEdges[i]))
+            return inputOrigins[i];
+
+        // Check if output was generated from input (split edges)
+        const TopTools_ListOfShape& modified = builder.Modified(inputEdges[i]);
+        for (auto it = modified.cbegin(); it != modified.cend(); ++it) {
+            if (outputEdge.IsSame(*it))
+                return inputOrigins[i];
+        }
+        const TopTools_ListOfShape& generated = builder.Generated(inputEdges[i]);
+        for (auto it = generated.cbegin(); it != generated.cend(); ++it) {
+            if (outputEdge.IsSame(*it))
+                return inputOrigins[i];
+        }
+    }
+    return {}; // unknown origin
+}
+
+// Build a BoundarySegment from an OCCT edge + its origin info
+static BoundarySegment buildSegmentFromEdge(const TopoDS_Edge& edge,
+                                             const EdgeOrigin& origin,
+                                             const Sketch& sketch,
+                                             const SketchPlane& plane) {
+    BoundarySegment seg;
+
+    BRepAdaptor_Curve adaptor(edge);
+    double paramFirst = adaptor.FirstParameter();
+    double paramLast = adaptor.LastParameter();
+
+    switch (adaptor.GetType()) {
+        case GeomAbs_Line:
+            seg.type = SegmentType::Line;
+            break;
+
+        case GeomAbs_Circle: {
+            seg.type = SegmentType::Arc;
+            gp_Circ circ = adaptor.Circle();
+            gp_Pnt center3D = circ.Location();
+            float lx, ly;
+            plane.worldToLocal((float)center3D.X(), (float)center3D.Y(), (float)center3D.Z(), lx, ly);
+            seg.arcCenter = {lx, ly};
+            seg.arcRadius = circ.Radius();
+            seg.arcStartAngle = paramFirst;
+            seg.arcEndAngle = paramLast;
+            seg.origCircleID = origin.entityID;
+            break;
+        }
+
+        case GeomAbs_Ellipse: {
+            seg.type = (origin.kind == EdgeOrigin::KEllipseArc) ? SegmentType::EllipseArc : SegmentType::Ellipse;
+            gp_Elips elips = adaptor.Ellipse();
+            gp_Pnt center3D = elips.Location();
+            float lx, ly;
+            plane.worldToLocal((float)center3D.X(), (float)center3D.Y(), (float)center3D.Z(), lx, ly);
+            seg.ellipseCenter = {lx, ly};
+            seg.semiMajor = elips.MajorRadius();
+            seg.semiMinor = elips.MinorRadius();
+
+            // Recover rotation: project major axis direction back to local 2D
+            gp_Dir majorDir = elips.XAxis().Direction();
+            float mx, my;
+            // Major axis direction is a direction vector, project its tip
+            float tipX = (float)(center3D.X() + majorDir.X());
+            float tipY = (float)(center3D.Y() + majorDir.Y());
+            float tipZ = (float)(center3D.Z() + majorDir.Z());
+            float tlx, tly;
+            plane.worldToLocal(tipX, tipY, tipZ, tlx, tly);
+            seg.ellipseRotation = std::atan2(tly - ly, tlx - lx);
+
+            seg.ellipseStartAngle = paramFirst;
+            seg.ellipseEndAngle = paramLast;
+            seg.origEllipseID = origin.entityID;
+            break;
+        }
+
+        case GeomAbs_BSplineCurve: {
+            seg.type = SegmentType::Spline;
+            seg.origSplineID = origin.entityID;
+            seg.splineParamStart = paramFirst;
+            seg.splineParamEnd = paramLast;
+
+            // Extract spline data from the sketch entity
+            const SplineEntity* sp = sketch.findSpline(origin.entityID);
+            if (sp) {
+                seg.splineDegree = sp->degree;
+                for (auto id : sp->controlPtIDs)
+                    seg.splineControlPts.push_back(sketch.getPointPos(id));
+                seg.splineKnots = sp->knots;
+                if (seg.splineKnots.empty())
+                    seg.splineKnots = generateUniformKnots((int)sp->controlPtIDs.size(), sp->degree);
+                seg.splineWeights = sp->weights;
+            }
+            break;
+        }
+
+        default:
+            seg.type = SegmentType::Line;
+            break;
+    }
+
+    return seg;
+}
+
+std::vector<ClosedProfile> detectClosedProfilesOCCT(const Sketch& sketch, const SketchPlane& plane) {
+    std::vector<ClosedProfile> results;
+
+    // Step 1: Build OCCT edges from all sketch entities
+    std::vector<TopoDS_Edge> inputEdges;
+    std::vector<EdgeOrigin> inputOrigins;
+    buildOCCTEdges(sketch, plane, inputEdges, inputOrigins);
+    if (inputEdges.empty()) return results;
+
+    // Step 2: Create the base face (infinite plane, bounded later)
+    gp_Pnt origin(plane.origin[0], plane.origin[1], plane.origin[2]);
+    gp_Dir normal(plane.normal[0], plane.normal[1], plane.normal[2]);
+    Handle(Geom_Plane) geomPlane = new Geom_Plane(origin, normal);
+    TopoDS_Face baseFace = BRepBuilderAPI_MakeFace(geomPlane, -1e6, 1e6, -1e6, 1e6).Face();
+
+    // Step 3: Feed edges to BOPAlgo_BuilderFace
+    BOPAlgo_BuilderFace faceBuilder;
+    faceBuilder.SetFace(baseFace);
+
+    TopTools_ListOfShape edgeList;
+    for (const auto& e : inputEdges)
+        edgeList.Append(e);
+    faceBuilder.SetShapes(edgeList);
+
+    faceBuilder.Perform();
+    if (faceBuilder.HasErrors()) return results;
+
+    // Step 4: Extract result faces and convert to ClosedProfile
+    const TopTools_ListOfShape& resultFaces = faceBuilder.Areas();
+
+    for (auto it = resultFaces.cbegin(); it != resultFaces.cend(); ++it) {
+        const TopoDS_Face& face = TopoDS::Face(*it);
+
+        // Get outer wire
+        TopoDS_Wire outerWire = ShapeAnalysis::OuterWire(face);
+        if (outerWire.IsNull()) continue;
+
+        // Build profile from outer wire
+        ClosedProfile profile;
+        std::unordered_set<EntityID> lineIDset, ellipseIDset, splineIDset;
+
+        for (TopExp_Explorer expEdge(outerWire, TopAbs_EDGE); expEdge.More(); expEdge.Next()) {
+            const TopoDS_Edge& edge = TopoDS::Edge(expEdge.Current());
+
+            // Get start vertex position in local coords
+            gp_Pnt startPt = BRep_Tool::Pnt(TopExp::FirstVertex(edge, Standard_True));
+            float lx, ly;
+            plane.worldToLocal((float)startPt.X(), (float)startPt.Y(), (float)startPt.Z(), lx, ly);
+            profile.resolvedPoints.push_back({lx, ly});
+
+            // Find which sketch entity this edge came from
+            EdgeOrigin origin = findEdgeOrigin(edge, inputEdges, inputOrigins, faceBuilder);
+
+            // Build segment with real curve data
+            BoundarySegment seg = buildSegmentFromEdge(edge, origin, sketch, plane);
+            profile.segments.push_back(seg);
+
+            // Track entity IDs
+            if (origin.entityID != NullID) {
+                switch (origin.kind) {
+                    case EdgeOrigin::KLine:
+                        if (lineIDset.insert(origin.entityID).second)
+                            profile.lineIDs.push_back(origin.entityID);
+                        break;
+                    case EdgeOrigin::KCircle:
+                    case EdgeOrigin::KArc:
+                        seg.origCircleID = origin.entityID; // already set in buildSegment
+                        break;
+                    case EdgeOrigin::KEllipse:
+                    case EdgeOrigin::KEllipseArc:
+                        if (ellipseIDset.insert(origin.entityID).second)
+                            profile.ellipseIDs.push_back(origin.entityID);
+                        break;
+                    case EdgeOrigin::KSpline:
+                        if (splineIDset.insert(origin.entityID).second)
+                            profile.splineIDs.push_back(origin.entityID);
+                        break;
+                }
+            }
+        }
+
+        if (profile.resolvedPoints.size() < 2) continue;
+
+        // Check if this is a single full circle
+        if (profile.segments.size() == 1 && profile.segments[0].type == SegmentType::Arc) {
+            const auto& seg = profile.segments[0];
+            double span = std::fabs(seg.arcEndAngle - seg.arcStartAngle);
+            if (span > 6.0) { // ~2*pi = full circle
+                // Find matching circle entity
+                for (const auto& circle : sketch.circles) {
+                    if (std::fabs(circle.radius - seg.arcRadius) < 1e-4) {
+                        Point2D center = sketch.getPointPos(circle.centerPt);
+                        if (std::fabs(center.x - seg.arcCenter.x) < 1e-4 &&
+                            std::fabs(center.y - seg.arcCenter.y) < 1e-4) {
+                            profile.circleID = circle.id;
+                            profile.resolvedPoints.clear();
+                            profile.segments.clear();
+                            profile.lineIDs.clear();
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Compute signed area to filter exterior face
+        auto tess = tessellateProfile(sketch, profile);
+        double area = polygonSignedArea(tess);
+        if (area <= 0 && !profile.isCircle()) continue; // CW = exterior
+
+        // Add holes from inner wires
+        for (TopExp_Explorer expWire(face, TopAbs_WIRE); expWire.More(); expWire.Next()) {
+            const TopoDS_Wire& wire = TopoDS::Wire(expWire.Current());
+            if (wire.IsSame(outerWire)) continue;
+
+            ClosedProfile hole;
+            for (TopExp_Explorer expEdge(wire, TopAbs_EDGE); expEdge.More(); expEdge.Next()) {
+                const TopoDS_Edge& edge = TopoDS::Edge(expEdge.Current());
+                gp_Pnt startPt = BRep_Tool::Pnt(TopExp::FirstVertex(edge, Standard_True));
+                float hlx, hly;
+                plane.worldToLocal((float)startPt.X(), (float)startPt.Y(), (float)startPt.Z(), hlx, hly);
+                hole.resolvedPoints.push_back({hlx, hly});
+
+                EdgeOrigin hOrigin = findEdgeOrigin(edge, inputEdges, inputOrigins, faceBuilder);
+                hole.segments.push_back(buildSegmentFromEdge(edge, hOrigin, sketch, plane));
+            }
+            if (hole.resolvedPoints.size() >= 2)
+                profile.holes.push_back(std::move(hole));
+        }
+
+        results.push_back(std::move(profile));
+    }
+
+    return results;
+}
+
 // ---- Router functions ----
 
 // Default: always uses custom tracer (no plane available for OCCT path)
@@ -930,8 +1389,7 @@ std::vector<ClosedProfile> detectClosedProfiles(const Sketch& sketch) {
 
 // With plane: can route to OCCT backend if preference is set
 std::vector<ClosedProfile> detectClosedProfiles(const Sketch& sketch, const SketchPlane& plane) {
-    // TODO: check preference for backend selection
-    // For now, always use custom tracer until OCCT backend is implemented
+    // TODO: check preference for backend selection — wired up in task #4
     (void)plane;
     return detectClosedProfilesCustom(sketch);
 }
