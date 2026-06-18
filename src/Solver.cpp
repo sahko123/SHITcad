@@ -74,12 +74,12 @@ SolveResult Solver::solve(Sketch& sketch, EntityID draggedPoint) {
                     if (std::fabs(a->y - b->y) > 1e-6f) {
                         int ra = countRefs(line->startPt);
                         int rb = countRefs(line->endPt);
-                        float totalR = (float)(ra + rb);
-                        if (totalR < 1.0f) totalR = 1.0f;
+                        double totalR = (double)(ra + rb);
+                        if (totalR < 1.0) totalR = 1.0;
                         // Weight: point with more refs moves less
-                        float wA = (float)ra / totalR; // fraction of correction applied to b
-                        float wB = (float)rb / totalR; // fraction of correction applied to a
-                        float avg = a->y * wA + b->y * wB;
+                        double wA = (double)ra / totalR; // fraction of correction applied to b
+                        double wB = (double)rb / totalR; // fraction of correction applied to a
+                        double avg = a->y * wA + b->y * wB;
                         a->y = avg;
                         b->y = avg;
                         changed = true;
@@ -97,11 +97,11 @@ SolveResult Solver::solve(Sketch& sketch, EntityID draggedPoint) {
                     if (std::fabs(a->x - b->x) > 1e-6f) {
                         int ra = countRefs(line->startPt);
                         int rb = countRefs(line->endPt);
-                        float totalR = (float)(ra + rb);
-                        if (totalR < 1.0f) totalR = 1.0f;
-                        float wA = (float)ra / totalR;
-                        float wB = (float)rb / totalR;
-                        float avg = a->x * wA + b->x * wB;
+                        double totalR = (double)(ra + rb);
+                        if (totalR < 1.0) totalR = 1.0;
+                        double wA = (double)ra / totalR;
+                        double wB = (double)rb / totalR;
+                        double avg = a->x * wA + b->x * wB;
                         a->x = avg;
                         b->x = avg;
                         changed = true;
@@ -117,12 +117,12 @@ SolveResult Solver::solve(Sketch& sketch, EntityID draggedPoint) {
                     if (std::fabs(a->x - b->x) > 1e-6f || std::fabs(a->y - b->y) > 1e-6f) {
                         int ra = countRefs(c.entityA);
                         int rb = countRefs(c.entityB);
-                        float totalR = (float)(ra + rb);
-                        if (totalR < 1.0f) totalR = 1.0f;
-                        float wA = (float)ra / totalR; // a's weight — more refs = moves less
-                        float wB = (float)rb / totalR;
-                        float tX = a->x * wA + b->x * wB;
-                        float tY = a->y * wA + b->y * wB;
+                        double totalR = (double)(ra + rb);
+                        if (totalR < 1.0) totalR = 1.0;
+                        double wA = (double)ra / totalR; // a's weight — more refs = moves less
+                        double wB = (double)rb / totalR;
+                        double tX = a->x * wA + b->x * wB;
+                        double tY = a->y * wA + b->y * wB;
                         a->x = tX; a->y = tY;
                         b->x = tX; b->y = tY;
                         changed = true;
@@ -138,28 +138,28 @@ SolveResult Solver::solve(Sketch& sketch, EntityID draggedPoint) {
                     PointEntity* b = sketch.findPoint(line->endPt);
                     if (!a || !b) break;
 
-                    float dx = b->x - a->x;
-                    float dy = b->y - a->y;
-                    float currentLen = std::sqrt(dx * dx + dy * dy);
-                    float targetLen = c.value;
+                    double dx = b->x - a->x;
+                    double dy = b->y - a->y;
+                    double currentLen = std::sqrt(dx * dx + dy * dy);
+                    double targetLen = c.value;
 
-                    if (currentLen < 1e-6f) break;
-                    if (std::fabs(currentLen - targetLen) < 1e-6f) break;
+                    if (currentLen < 1e-6) break;
+                    if (std::fabs(currentLen - targetLen) < 1e-6) break;
 
                     // Weighted pivot: more-constrained endpoint moves less
                     int ra = countRefs(line->startPt);
                     int rb = countRefs(line->endPt);
-                    float totalR = (float)(ra + rb);
-                    if (totalR < 1.0f) totalR = 1.0f;
-                    float wA = (float)ra / totalR; // a's fraction — high = a moves less
+                    double totalR = (double)(ra + rb);
+                    if (totalR < 1.0) totalR = 1.0;
+                    double wA = (double)ra / totalR; // a's fraction — high = a moves less
                     // Pivot biased toward more-constrained end
-                    float pivotX = a->x * wA + b->x * (1.0f - wA);
-                    float pivotY = a->y * wA + b->y * (1.0f - wA);
-                    float ux = dx / currentLen, uy = dy / currentLen;
+                    double pivotX = a->x * wA + b->x * (1.0 - wA);
+                    double pivotY = a->y * wA + b->y * (1.0 - wA);
+                    double ux = dx / currentLen, uy = dy / currentLen;
                     // Place endpoints at target distance from pivot, preserving direction
-                    float distA = currentLen * (1.0f - wA); // a's distance from pivot
-                    float distB = currentLen * wA;          // b's distance from pivot
-                    float scale = targetLen / currentLen;
+                    double distA = currentLen * (1.0 - wA); // a's distance from pivot
+                    double distB = currentLen * wA;          // b's distance from pivot
+                    double scale = targetLen / currentLen;
                     a->x = pivotX - ux * distA * scale;
                     a->y = pivotY - uy * distA * scale;
                     b->x = pivotX + ux * distB * scale;
@@ -173,25 +173,25 @@ SolveResult Solver::solve(Sketch& sketch, EntityID draggedPoint) {
                     PointEntity* b = sketch.findPoint(c.entityB);
                     if (!a || !b) break;
 
-                    float dx = b->x - a->x;
-                    float dy = b->y - a->y;
-                    float currentLen = std::sqrt(dx * dx + dy * dy);
-                    float targetLen = c.value;
+                    double dx = b->x - a->x;
+                    double dy = b->y - a->y;
+                    double currentLen = std::sqrt(dx * dx + dy * dy);
+                    double targetLen = c.value;
 
-                    if (currentLen < 1e-6f) break;
-                    if (std::fabs(currentLen - targetLen) < 1e-6f) break;
+                    if (currentLen < 1e-6) break;
+                    if (std::fabs(currentLen - targetLen) < 1e-6) break;
 
                     int ra = countRefs(c.entityA);
                     int rb = countRefs(c.entityB);
-                    float totalR = (float)(ra + rb);
-                    if (totalR < 1.0f) totalR = 1.0f;
-                    float wA = (float)ra / totalR;
-                    float pivotX = a->x * wA + b->x * (1.0f - wA);
-                    float pivotY = a->y * wA + b->y * (1.0f - wA);
-                    float ux = dx / currentLen, uy = dy / currentLen;
-                    float distA = currentLen * (1.0f - wA);
-                    float distB = currentLen * wA;
-                    float scale = targetLen / currentLen;
+                    double totalR = (double)(ra + rb);
+                    if (totalR < 1.0) totalR = 1.0;
+                    double wA = (double)ra / totalR;
+                    double pivotX = a->x * wA + b->x * (1.0 - wA);
+                    double pivotY = a->y * wA + b->y * (1.0 - wA);
+                    double ux = dx / currentLen, uy = dy / currentLen;
+                    double distA = currentLen * (1.0 - wA);
+                    double distB = currentLen * wA;
+                    double scale = targetLen / currentLen;
                     a->x = pivotX - ux * distA * scale;
                     a->y = pivotY - uy * distA * scale;
                     b->x = pivotX + ux * distB * scale;
@@ -214,13 +214,13 @@ SolveResult Solver::solve(Sketch& sketch, EntityID draggedPoint) {
                             PointEntity* sp = sketch.findPoint(arc->startPt);
                             PointEntity* ep = sketch.findPoint(arc->endPt);
                             if (cp && sp && ep) {
-                                float targetR = c.value;
+                                double targetR = c.value;
                                 // Scale start and end points radially from center
                                 auto scalePoint = [&](PointEntity* pt) {
-                                    float dx = pt->x - cp->x, dy = pt->y - cp->y;
-                                    float curR = std::sqrt(dx*dx + dy*dy);
-                                    if (curR > 1e-7f) {
-                                        float scale = targetR / curR;
+                                    double dx = pt->x - cp->x, dy = pt->y - cp->y;
+                                    double curR = std::sqrt(dx*dx + dy*dy);
+                                    if (curR > 1e-7) {
+                                        double scale = targetR / curR;
                                         pt->x = cp->x + dx * scale;
                                         pt->y = cp->y + dy * scale;
                                     }
@@ -238,8 +238,8 @@ SolveResult Solver::solve(Sketch& sketch, EntityID draggedPoint) {
                 case ConstraintType::Diameter: {
                     CircleEntity* circle = sketch.findCircle(c.entityA);
                     if (!circle) break;
-                    float targetR = c.value * 0.5f;
-                    if (std::fabs(circle->radius - targetR) > 1e-6f) {
+                    double targetR = c.value * 0.5;
+                    if (std::fabs(circle->radius - targetR) > 1e-6) {
                         circle->radius = targetR;
                         changed = true;
                     }
@@ -258,76 +258,74 @@ SolveResult Solver::solve(Sketch& sketch, EntityID draggedPoint) {
                     PointEntity* b2 = sketch.findPoint(line2->endPt);
                     if (!a1 || !b1 || !a2 || !b2) break;
 
-                    constexpr float kPi = 3.14159265358979f;
-                    constexpr float kTwoPi = 2.0f * kPi;
-                    float eps = 1e-3f;
+                    double eps = 1e-3;
                     auto pEq = [eps](PointEntity* p, PointEntity* q) {
                         return std::fabs(p->x - q->x) < eps && std::fabs(p->y - q->y) < eps;
                     };
 
                     // Find vertex (shared endpoint or line intersection)
-                    float vx, vy;
+                    double vx, vy;
                     bool sharedVertex = false;
                     if (pEq(a1, a2) || pEq(a1, b2))      { vx = a1->x; vy = a1->y; sharedVertex = true; }
                     else if (pEq(b1, a2) || pEq(b1, b2)) { vx = b1->x; vy = b1->y; sharedVertex = true; }
                     else {
                         // Compute intersection of infinite lines
-                        float ldx1 = b1->x-a1->x, ldy1 = b1->y-a1->y;
-                        float ldx2 = b2->x-a2->x, ldy2 = b2->y-a2->y;
-                        float denom = ldx1*ldy2 - ldy1*ldx2;
-                        if (std::fabs(denom) < 1e-6f) break; // parallel
-                        float t = ((a2->x-a1->x)*ldy2 - (a2->y-a1->y)*ldx2) / denom;
+                        double ldx1 = b1->x-a1->x, ldy1 = b1->y-a1->y;
+                        double ldx2 = b2->x-a2->x, ldy2 = b2->y-a2->y;
+                        double denom = ldx1*ldy2 - ldy1*ldx2;
+                        if (std::fabs(denom) < 1e-6) break; // parallel
+                        double t = ((a2->x-a1->x)*ldy2 - (a2->y-a1->y)*ldx2) / denom;
                         vx = a1->x + t*ldx1; vy = a1->y + t*ldy1;
                     }
 
                     // Direction from vertex toward farther endpoint of each line
-                    auto dist2 = [](float ax, float ay, float bx, float by) {
-                        float dx = ax-bx, dy = ay-by; return dx*dx + dy*dy;
+                    auto dist2 = [](double ax, double ay, double bx, double by) {
+                        double dx = ax-bx, dy = ay-by; return dx*dx + dy*dy;
                     };
                     PointEntity* far1 = (dist2(vx,vy,b1->x,b1->y) >= dist2(vx,vy,a1->x,a1->y)) ? b1 : a1;
                     PointEntity* far2 = (dist2(vx,vy,b2->x,b2->y) >= dist2(vx,vy,a2->x,a2->y)) ? b2 : a2;
 
-                    float dx1 = far1->x - vx, dy1 = far1->y - vy;
-                    float dx2 = far2->x - vx, dy2 = far2->y - vy;
-                    float len1 = std::sqrt(dx1*dx1 + dy1*dy1);
-                    float len2 = std::sqrt(dx2*dx2 + dy2*dy2);
-                    if (len1 < 1e-6f || len2 < 1e-6f) break;
+                    double dx1 = far1->x - vx, dy1 = far1->y - vy;
+                    double dx2 = far2->x - vx, dy2 = far2->y - vy;
+                    double len1 = std::sqrt(dx1*dx1 + dy1*dy1);
+                    double len2 = std::sqrt(dx2*dx2 + dy2*dy2);
+                    if (len1 < 1e-6 || len2 < 1e-6) break;
 
-                    float dot = dx1*dx2 + dy1*dy2;
-                    float cross = dx1*dy2 - dy1*dx2;
-                    float ccwRad = std::atan2(cross, dot);
+                    double dot = dx1*dx2 + dy1*dy2;
+                    double cross = dx1*dy2 - dy1*dx2;
+                    double ccwRad = std::atan2(cross, dot);
                     if (ccwRad < 0) ccwRad += kTwoPi;
-                    float cwRad = kTwoPi - ccwRad;
+                    double cwRad = kTwoPi - ccwRad;
                     // Use the stored sector (CW or CCW) from when the constraint was created
-                    float currentAngle, targetAngle;
+                    double currentAngle, targetAngle;
                     bool cwSector = c.angleCW;
                     if (!cwSector) {
                         currentAngle = ccwRad;
-                        targetAngle = c.value * kPi / 180.0f;
+                        targetAngle = c.value * kPi / 180.0;
                     } else {
                         currentAngle = cwRad;
-                        targetAngle = c.value * kPi / 180.0f;
+                        targetAngle = c.value * kPi / 180.0;
                     }
 
-                    float diff = targetAngle - currentAngle;
+                    double diff = targetAngle - currentAngle;
                     if (diff > kPi) diff -= kTwoPi;
                     if (diff < -kPi) diff += kTwoPi;
-                    if (std::fabs(diff) < 1e-6f) break;
+                    if (std::fabs(diff) < 1e-6) break;
 
                     // CW sector: rotation direction is inverted
-                    float totalRot = cwSector ? -diff : diff;
+                    double totalRot = cwSector ? -diff : diff;
 
                     // Weight: more-constrained line rotates less
                     int r1 = countLineRefs(line1);
                     int r2 = countLineRefs(line2);
-                    float totalR = (float)(r1 + r2);
-                    if (totalR < 1.0f) totalR = 1.0f;
-                    float w1 = (float)r1 / totalR;
-                    float rot2 = totalRot * w1;           // line2's rotation
-                    float rot1 = -totalRot * (1.0f - w1); // line1's rotation (opposite)
+                    double totalR = (double)(r1 + r2);
+                    if (totalR < 1.0) totalR = 1.0;
+                    double w1 = (double)r1 / totalR;
+                    double rot2 = totalRot * w1;           // line2's rotation
+                    double rot1 = -totalRot * (1.0 - w1); // line1's rotation (opposite)
 
-                    auto rotatePt = [](PointEntity* pt, float ox, float oy, float cosR, float sinR) {
-                        float rx = pt->x-ox, ry = pt->y-oy;
+                    auto rotatePt = [](PointEntity* pt, double ox, double oy, double cosR, double sinR) {
+                        double rx = pt->x-ox, ry = pt->y-oy;
                         pt->x = ox + rx*cosR - ry*sinR;
                         pt->y = oy + rx*sinR + ry*cosR;
                     };
@@ -335,14 +333,14 @@ SolveResult Solver::solve(Sketch& sketch, EntityID draggedPoint) {
                     if (sharedVertex) {
                         // Rotate far endpoints around shared vertex
                         PointEntity* far1_ = (dist2(vx,vy,b1->x,b1->y) >= dist2(vx,vy,a1->x,a1->y)) ? b1 : a1;
-                        float cos1 = std::cos(rot1), sin1 = std::sin(rot1);
-                        float cos2 = std::cos(rot2), sin2 = std::sin(rot2);
+                        double cos1 = std::cos(rot1), sin1 = std::sin(rot1);
+                        double cos2 = std::cos(rot2), sin2 = std::sin(rot2);
                         rotatePt(far1_, vx, vy, cos1, sin1);
                         rotatePt(far2, vx, vy, cos2, sin2);
                     } else {
                         // Rotate each line around the intersection point
-                        float cos1 = std::cos(rot1), sin1 = std::sin(rot1);
-                        float cos2 = std::cos(rot2), sin2 = std::sin(rot2);
+                        double cos1 = std::cos(rot1), sin1 = std::sin(rot1);
+                        double cos2 = std::cos(rot2), sin2 = std::sin(rot2);
                         rotatePt(a1, vx, vy, cos1, sin1);
                         rotatePt(b1, vx, vy, cos1, sin1);
                         rotatePt(a2, vx, vy, cos2, sin2);
@@ -363,54 +361,54 @@ SolveResult Solver::solve(Sketch& sketch, EntityID draggedPoint) {
                     PointEntity* lb = sketch.findPoint(line->endPt);
                     if (!la || !lb) break;
 
-                    float ldx = lb->x - la->x, ldy = lb->y - la->y;
-                    float lineLen2 = ldx*ldx + ldy*ldy;
-                    if (lineLen2 < 1e-12f) break;
-                    float lineLen = std::sqrt(lineLen2);
+                    double ldx = lb->x - la->x, ldy = lb->y - la->y;
+                    double lineLen2 = ldx*ldx + ldy*ldy;
+                    if (lineLen2 < 1e-12) break;
+                    double lineLen = std::sqrt(lineLen2);
 
                     // Signed perpendicular distance from point to line
-                    float cross = (pt->x - la->x)*ldy - (pt->y - la->y)*ldx;
-                    float dist = cross / lineLen;
+                    double cross = (pt->x - la->x)*ldy - (pt->y - la->y)*ldx;
+                    double dist = cross / lineLen;
 
                     // Target signed distance: initial side * value
                     // Negative value flips the side
-                    float sideSign = c.negativeSide ? -1.0f : 1.0f;
-                    float targetSigned = sideSign * c.value;
+                    double sideSign = c.negativeSide ? -1.0 : 1.0;
+                    double targetSigned = sideSign * c.value;
 
-                    if (std::fabs(dist - targetSigned) < 1e-6f) break;
+                    if (std::fabs(dist - targetSigned) < 1e-6) break;
 
-                    float nx = -ldy / lineLen;
-                    float ny = ldx / lineLen;
-                    float error = targetSigned - dist;
+                    double nx = -ldy / lineLen;
+                    double ny = ldx / lineLen;
+                    double error = targetSigned - dist;
 
                     // Weight: more constrained entity moves less
                     int rPt = countRefs(c.entityA);
                     int rLine = countLineRefs(line);
-                    float totalR = (float)(rPt + rLine);
-                    if (totalR < 1.0f) totalR = 1.0f;
+                    double totalR = (double)(rPt + rLine);
+                    if (totalR < 1.0) totalR = 1.0;
                     // lineFrac = how much point moves (high when line is constrained)
                     // ptFrac = how much line moves (high when point is constrained)
-                    float lineFrac = (float)rLine / totalR;
-                    float ptFrac = (float)rPt / totalR;
+                    double lineFrac = (double)rLine / totalR;
+                    double ptFrac = (double)rPt / totalR;
 
                     // Point target: project onto line, then offset to target distance
                     // pt = proj - normal * targetSigned (derived from sign convention)
-                    float t = ((pt->x - la->x)*ldx + (pt->y - la->y)*ldy) / lineLen2;
-                    float projX = la->x + t*ldx;
-                    float projY = la->y + t*ldy;
-                    float ptTargetX = projX - nx * targetSigned;
-                    float ptTargetY = projY - ny * targetSigned;
-                    float ptMoveX = ptTargetX - pt->x;
-                    float ptMoveY = ptTargetY - pt->y;
+                    double t = ((pt->x - la->x)*ldx + (pt->y - la->y)*ldy) / lineLen2;
+                    double projX = la->x + t*ldx;
+                    double projY = la->y + t*ldy;
+                    double ptTargetX = projX - nx * targetSigned;
+                    double ptTargetY = projY - ny * targetSigned;
+                    double ptMoveX = ptTargetX - pt->x;
+                    double ptMoveY = ptTargetY - pt->y;
 
                     // Line shift: moving line by (nx*s) changes dist by +s
                     // We need dist to change by +error, so s = error
-                    float lineShift = error;
+                    double lineShift = error;
 
                     // Apply weighted
                     pt->x += ptMoveX * lineFrac;
                     pt->y += ptMoveY * lineFrac;
-                    float ls = lineShift * ptFrac;
+                    double ls = lineShift * ptFrac;
                     la->x += nx * ls;
                     la->y += ny * ls;
                     lb->x += nx * ls;
@@ -428,37 +426,90 @@ SolveResult Solver::solve(Sketch& sketch, EntityID draggedPoint) {
                     PointEntity* lb = sketch.findPoint(line->endPt);
                     if (!la || !lb) break;
 
-                    float ldx = lb->x - la->x, ldy = lb->y - la->y;
-                    float len2 = ldx*ldx + ldy*ldy;
-                    if (len2 < 1e-12f) break;
-                    float lineLen = std::sqrt(len2);
+                    double ldx = lb->x - la->x, ldy = lb->y - la->y;
+                    double len2 = ldx*ldx + ldy*ldy;
+                    if (len2 < 1e-12) break;
+                    double lineLen = std::sqrt(len2);
 
                     // Signed perpendicular distance from point to line
-                    float cross = (pt->x - la->x)*ldy - (pt->y - la->y)*ldx;
-                    float dist = cross / lineLen;
-                    if (std::fabs(dist) < 1e-6f) break;
+                    double cross = (pt->x - la->x)*ldy - (pt->y - la->y)*ldx;
+                    double dist = cross / lineLen;
+                    if (std::fabs(dist) < 1e-6) break;
 
                     // Normal direction (perpendicular to line)
-                    float nx = -ldy / lineLen;
-                    float ny = ldx / lineLen;
+                    double nx = -ldy / lineLen;
+                    double ny = ldx / lineLen;
 
                     // Weight: point vs line
                     int rPt = countRefs(c.entityA);
                     int rLine = countLineRefs(line);
-                    float totalR = (float)(rPt + rLine);
-                    if (totalR < 1.0f) totalR = 1.0f;
-                    float lineFrac = (float)rLine / totalR; // how much point moves
-                    float ptFrac = (float)rPt / totalR;     // how much line moves
+                    double totalR = (double)(rPt + rLine);
+                    if (totalR < 1.0) totalR = 1.0;
+                    double lineFrac = (double)rLine / totalR; // how much point moves
+                    double ptFrac = (double)rPt / totalR;     // how much line moves
 
                     // Move point toward line
                     pt->x += nx * dist * lineFrac;
                     pt->y += ny * dist * lineFrac;
                     // Shift line toward point
-                    float ls = -dist * ptFrac;
+                    double ls = -dist * ptFrac;
                     la->x += nx * ls;
                     la->y += ny * ls;
                     lb->x += nx * ls;
                     lb->y += ny * ls;
+                    changed = true;
+                    break;
+                }
+
+                case ConstraintType::PointOnCircle: {
+                    // entityA = point ID, entityB = circle or arc ID
+                    PointEntity* pt = sketch.findPoint(c.entityA);
+                    if (!pt) break;
+                    // If the point is projected (pinned as a reference), skip — moving the
+                    // circle center to compensate would shift the entire circle system.
+                    if (pt->projected) break;
+
+                    EntityID centerPtID = NullID;
+                    double radius = 0.0;
+                    CircleEntity* circ = sketch.findCircle(c.entityB);
+                    if (circ) {
+                        centerPtID = circ->centerPt;
+                        radius = circ->radius;
+                    } else {
+                        ArcEntity* arc = sketch.findArc(c.entityB);
+                        if (arc) {
+                            centerPtID = arc->centerPt;
+                            PointEntity* sp = sketch.findPoint(arc->startPt);
+                            PointEntity* cp = sketch.findPoint(arc->centerPt);
+                            if (sp && cp) {
+                                double dx = sp->x - cp->x, dy = sp->y - cp->y;
+                                radius = std::sqrt(dx*dx + dy*dy);
+                            }
+                        }
+                    }
+                    if (centerPtID == NullID || radius < 1e-7) break;
+                    PointEntity* cen = sketch.findPoint(centerPtID);
+                    if (!cen) break;
+
+                    double dx = pt->x - cen->x, dy = pt->y - cen->y;
+                    double dist = std::sqrt(dx*dx + dy*dy);
+                    if (dist < 1e-7) break; // point at center, can't determine direction
+                    double err = dist - radius;
+                    if (std::fabs(err) < 1e-6) break;
+
+                    double nx = dx / dist, ny = dy / dist;
+
+                    int rPt  = countRefs(c.entityA);
+                    int rCen = countRefs(centerPtID);
+                    double totalR = (double)(rPt + rCen);
+                    if (totalR < 1.0) totalR = 1.0;
+                    double cenFrac = (double)rCen / totalR;
+                    double ptFrac  = (double)rPt  / totalR;
+
+                    pt->x  -= nx * err * cenFrac;
+                    pt->y  -= ny * err * cenFrac;
+                    cen->x += nx * err * ptFrac;
+                    cen->y += ny * err * ptFrac;
                     changed = true;
                     break;
                 }
@@ -473,37 +524,37 @@ SolveResult Solver::solve(Sketch& sketch, EntityID draggedPoint) {
                     PointEntity* b2 = sketch.findPoint(l2->endPt);
                     if (!a1 || !b1 || !a2 || !b2) break;
 
-                    float dx1 = b1->x-a1->x, dy1 = b1->y-a1->y;
-                    float dx2 = b2->x-a2->x, dy2 = b2->y-a2->y;
-                    float len1 = std::sqrt(dx1*dx1 + dy1*dy1);
-                    float len2 = std::sqrt(dx2*dx2 + dy2*dy2);
-                    if (len1 < 1e-6f || len2 < 1e-6f) break;
+                    double dx1 = b1->x-a1->x, dy1 = b1->y-a1->y;
+                    double dx2 = b2->x-a2->x, dy2 = b2->y-a2->y;
+                    double len1 = std::sqrt(dx1*dx1 + dy1*dy1);
+                    double len2 = std::sqrt(dx2*dx2 + dy2*dy2);
+                    if (len1 < 1e-6 || len2 < 1e-6) break;
 
-                    if (std::fabs(len1 - len2) < 1e-6f) break;
+                    if (std::fabs(len1 - len2) < 1e-6) break;
 
                     // Weighted target: more-constrained line changes less
                     int r1 = countLineRefs(l1);
                     int r2 = countLineRefs(l2);
-                    float totalR = (float)(r1 + r2);
-                    if (totalR < 1.0f) totalR = 1.0f;
-                    float w1 = (float)r1 / totalR; // line1's weight — high = changes less
+                    double totalR = (double)(r1 + r2);
+                    if (totalR < 1.0) totalR = 1.0;
+                    double w1 = (double)r1 / totalR; // line1's weight — high = changes less
                     // Target length biased toward more-constrained line
-                    float target = len1 * w1 + len2 * (1.0f - w1);
+                    double target = len1 * w1 + len2 * (1.0 - w1);
 
                     // Scale each line from weighted pivot
-                    auto scaleLine = [&](PointEntity* a, PointEntity* b, float dx, float dy, float curLen,
+                    auto scaleLine = [&](PointEntity* a, PointEntity* b, double dx, double dy, double curLen,
                                          EntityID startPt, EntityID endPt) {
                         int ra = countRefs(startPt);
                         int rb = countRefs(endPt);
-                        float tr = (float)(ra + rb);
-                        if (tr < 1.0f) tr = 1.0f;
-                        float wa = (float)ra / tr;
-                        float pivX = a->x * wa + b->x * (1.0f - wa);
-                        float pivY = a->y * wa + b->y * (1.0f - wa);
-                        float ux = dx / curLen, uy = dy / curLen;
-                        float dA = curLen * (1.0f - wa);
-                        float dB = curLen * wa;
-                        float s = target / curLen;
+                        double tr = (double)(ra + rb);
+                        if (tr < 1.0) tr = 1.0;
+                        double wa = (double)ra / tr;
+                        double pivX = a->x * wa + b->x * (1.0 - wa);
+                        double pivY = a->y * wa + b->y * (1.0 - wa);
+                        double ux = dx / curLen, uy = dy / curLen;
+                        double dA = curLen * (1.0 - wa);
+                        double dB = curLen * wa;
+                        double s = target / curLen;
                         a->x = pivX - ux * dA * s; a->y = pivY - uy * dA * s;
                         b->x = pivX + ux * dB * s; b->y = pivY + uy * dB * s;
                     };
@@ -523,48 +574,47 @@ SolveResult Solver::solve(Sketch& sketch, EntityID draggedPoint) {
                     PointEntity* b2 = sketch.findPoint(l2->endPt);
                     if (!a1 || !b1 || !a2 || !b2) break;
 
-                    float dx1 = b1->x-a1->x, dy1 = b1->y-a1->y;
-                    float dx2 = b2->x-a2->x, dy2 = b2->y-a2->y;
-                    float len1 = std::sqrt(dx1*dx1 + dy1*dy1);
-                    float len2 = std::sqrt(dx2*dx2 + dy2*dy2);
-                    if (len1 < 1e-6f || len2 < 1e-6f) break;
+                    double dx1 = b1->x-a1->x, dy1 = b1->y-a1->y;
+                    double dx2 = b2->x-a2->x, dy2 = b2->y-a2->y;
+                    double len1 = std::sqrt(dx1*dx1 + dy1*dy1);
+                    double len2 = std::sqrt(dx2*dx2 + dy2*dy2);
+                    if (len1 < 1e-6 || len2 < 1e-6) break;
 
-                    float dot = (dx1*dx2 + dy1*dy2) / (len1*len2);
-                    if (std::fabs(dot) < 1e-6f) break; // already perpendicular
+                    double dot = (dx1*dx2 + dy1*dy2) / (len1*len2);
+                    if (std::fabs(dot) < 1e-6) break; // already perpendicular
 
                     // Total rotation needed to make lines perpendicular
-                    float cross = dx1*dy2 - dy1*dx2;
-                    float curAngle = std::atan2(cross, dx1*dx2 + dy1*dy2);
-                    constexpr float kPi = 3.14159265358979f;
-                    float targetAngle = (curAngle >= 0) ? kPi * 0.5f : -kPi * 0.5f;
-                    float totalRot = targetAngle - curAngle;
+                    double cross = dx1*dy2 - dy1*dx2;
+                    double curAngle = std::atan2(cross, dx1*dx2 + dy1*dy2);
+                    double targetAngle = (curAngle >= 0) ? kPi * 0.5 : -kPi * 0.5;
+                    double totalRot = targetAngle - curAngle;
                     while (totalRot > kPi) totalRot -= 2*kPi;
                     while (totalRot < -kPi) totalRot += 2*kPi;
-                    if (std::fabs(totalRot) < 1e-6f) break;
+                    if (std::fabs(totalRot) < 1e-6) break;
 
                     // Weight: more-constrained line rotates less
                     int r1 = countLineRefs(l1);
                     int r2 = countLineRefs(l2);
-                    float totalR = (float)(r1 + r2);
-                    if (totalR < 1.0f) totalR = 1.0f;
-                    float w1 = (float)r1 / totalR; // line1's weight
+                    double totalR = (double)(r1 + r2);
+                    if (totalR < 1.0) totalR = 1.0;
+                    double w1 = (double)r1 / totalR; // line1's weight
                     // line2 rotates by totalRot * w1, line1 rotates by -totalRot * w2
-                    float rot2 = totalRot * w1;
-                    float rot1 = -totalRot * (1.0f - w1);
+                    double rot2 = totalRot * w1;
+                    double rot1 = -totalRot * (1.0 - w1);
 
                     // Check for shared vertex
-                    float eps = 1e-3f;
+                    double eps = 1e-3;
                     auto pEq = [eps](PointEntity* p, PointEntity* q) {
                         return std::fabs(p->x-q->x)<eps && std::fabs(p->y-q->y)<eps;
                     };
-                    auto dist2 = [](float ax,float ay,float bx,float by){ float ddx=ax-bx,ddy=ay-by; return ddx*ddx+ddy*ddy; };
-                    float cx = 0, cy = 0;
+                    auto dist2 = [](double ax,double ay,double bx,double by){ double ddx=ax-bx,ddy=ay-by; return ddx*ddx+ddy*ddy; };
+                    double cx = 0, cy = 0;
                     bool shared = false;
                     if (pEq(a1,a2)||pEq(a1,b2))      { cx=a1->x; cy=a1->y; shared=true; }
                     else if (pEq(b1,a2)||pEq(b1,b2)) { cx=b1->x; cy=b1->y; shared=true; }
 
-                    auto rotatePt = [](PointEntity* pt, float ox, float oy, float cosR, float sinR) {
-                        float rx = pt->x-ox, ry = pt->y-oy;
+                    auto rotatePt = [](PointEntity* pt, double ox, double oy, double cosR, double sinR) {
+                        double rx = pt->x-ox, ry = pt->y-oy;
                         pt->x = ox + rx*cosR - ry*sinR;
                         pt->y = oy + rx*sinR + ry*cosR;
                     };
@@ -573,18 +623,18 @@ SolveResult Solver::solve(Sketch& sketch, EntityID draggedPoint) {
                         // Rotate far endpoints around shared vertex
                         PointEntity* far1 = (dist2(cx,cy,b1->x,b1->y)>=dist2(cx,cy,a1->x,a1->y)) ? b1 : a1;
                         PointEntity* far2 = (dist2(cx,cy,b2->x,b2->y)>=dist2(cx,cy,a2->x,a2->y)) ? b2 : a2;
-                        float cos1 = std::cos(rot1), sin1 = std::sin(rot1);
-                        float cos2 = std::cos(rot2), sin2 = std::sin(rot2);
+                        double cos1 = std::cos(rot1), sin1 = std::sin(rot1);
+                        double cos2 = std::cos(rot2), sin2 = std::sin(rot2);
                         rotatePt(far1, cx, cy, cos1, sin1);
                         rotatePt(far2, cx, cy, cos2, sin2);
                     } else {
                         // Rotate each line around its midpoint
-                        float cos1 = std::cos(rot1), sin1 = std::sin(rot1);
-                        float cos2 = std::cos(rot2), sin2 = std::sin(rot2);
-                        float mx1 = (a1->x+b1->x)*0.5f, my1 = (a1->y+b1->y)*0.5f;
+                        double cos1 = std::cos(rot1), sin1 = std::sin(rot1);
+                        double cos2 = std::cos(rot2), sin2 = std::sin(rot2);
+                        double mx1 = (a1->x+b1->x)*0.5, my1 = (a1->y+b1->y)*0.5;
                         rotatePt(a1, mx1, my1, cos1, sin1);
                         rotatePt(b1, mx1, my1, cos1, sin1);
-                        float mx2 = (a2->x+b2->x)*0.5f, my2 = (a2->y+b2->y)*0.5f;
+                        double mx2 = (a2->x+b2->x)*0.5, my2 = (a2->y+b2->y)*0.5;
                         rotatePt(a2, mx2, my2, cos2, sin2);
                         rotatePt(b2, mx2, my2, cos2, sin2);
                     }
@@ -602,39 +652,39 @@ SolveResult Solver::solve(Sketch& sketch, EntityID draggedPoint) {
                     PointEntity* b2 = sketch.findPoint(l2->endPt);
                     if (!a1 || !b1 || !a2 || !b2) break;
 
-                    float dx1 = b1->x-a1->x, dy1 = b1->y-a1->y;
-                    float dx2 = b2->x-a2->x, dy2 = b2->y-a2->y;
-                    float len1 = std::sqrt(dx1*dx1 + dy1*dy1);
-                    float len2 = std::sqrt(dx2*dx2 + dy2*dy2);
-                    if (len1 < 1e-6f || len2 < 1e-6f) break;
+                    double dx1 = b1->x-a1->x, dy1 = b1->y-a1->y;
+                    double dx2 = b2->x-a2->x, dy2 = b2->y-a2->y;
+                    double len1 = std::sqrt(dx1*dx1 + dy1*dy1);
+                    double len2 = std::sqrt(dx2*dx2 + dy2*dy2);
+                    if (len1 < 1e-6 || len2 < 1e-6) break;
 
-                    float cross = dx1*dy2 - dy1*dx2;
-                    if (std::fabs(cross) < 1e-6f * len1 * len2) break; // already parallel
+                    double cross = dx1*dy2 - dy1*dx2;
+                    if (std::fabs(cross) < 1e-6 * len1 * len2) break; // already parallel
 
-                    float dot = dx1*dx2 + dy1*dy2;
-                    float totalAngle = std::atan2(cross, dot); // angle from parallel
+                    double dot = dx1*dx2 + dy1*dy2;
+                    double totalAngle = std::atan2(cross, dot); // angle from parallel
 
                     // Weight: more-constrained line rotates less
                     int r1 = countLineRefs(l1);
                     int r2 = countLineRefs(l2);
-                    float totalR = (float)(r1 + r2);
-                    if (totalR < 1.0f) totalR = 1.0f;
-                    float w1 = (float)r1 / totalR;
-                    float rot2 = -totalAngle * w1;         // line2 rotates toward line1
-                    float rot1 = totalAngle * (1.0f - w1); // line1 rotates toward line2
+                    double totalR = (double)(r1 + r2);
+                    if (totalR < 1.0) totalR = 1.0;
+                    double w1 = (double)r1 / totalR;
+                    double rot2 = -totalAngle * w1;         // line2 rotates toward line1
+                    double rot1 = totalAngle * (1.0 - w1); // line1 rotates toward line2
 
-                    auto rotatePt = [](PointEntity* pt, float ox, float oy, float cosR, float sinR) {
-                        float rx = pt->x-ox, ry = pt->y-oy;
-                        pt->x = ox + rx*cosR - ry*sinR;
-                        pt->y = oy + rx*sinR + ry*cosR;
+                    auto rotatePt = [](PointEntity* p, double ox, double oy, double cosR, double sinR) {
+                        double rx = p->x-ox, ry = p->y-oy;
+                        p->x = ox + rx*cosR - ry*sinR;
+                        p->y = oy + rx*sinR + ry*cosR;
                     };
 
-                    float cos1 = std::cos(rot1), sin1 = std::sin(rot1);
-                    float cos2 = std::cos(rot2), sin2 = std::sin(rot2);
-                    float mx1 = (a1->x+b1->x)*0.5f, my1 = (a1->y+b1->y)*0.5f;
+                    double cos1 = std::cos(rot1), sin1 = std::sin(rot1);
+                    double cos2 = std::cos(rot2), sin2 = std::sin(rot2);
+                    double mx1 = (a1->x+b1->x)*0.5, my1 = (a1->y+b1->y)*0.5;
                     rotatePt(a1, mx1, my1, cos1, sin1);
                     rotatePt(b1, mx1, my1, cos1, sin1);
-                    float mx2 = (a2->x+b2->x)*0.5f, my2 = (a2->y+b2->y)*0.5f;
+                    double mx2 = (a2->x+b2->x)*0.5, my2 = (a2->y+b2->y)*0.5;
                     rotatePt(a2, mx2, my2, cos2, sin2);
                     rotatePt(b2, mx2, my2, cos2, sin2);
                     changed = true;
@@ -649,64 +699,83 @@ SolveResult Solver::solve(Sketch& sketch, EntityID draggedPoint) {
                     PointEntity* lb = sketch.findPoint(line->endPt);
                     if (!la || !lb) break;
 
-                    float cx, cy, radius;
+                    double cx, cy, radius;
                     CircleEntity* circle = sketch.findCircle(c.entityB);
                     ArcEntity* arc = sketch.findArc(c.entityB);
+                    PointEntity* curveCenterPt = nullptr;
                     if (circle) {
-                        PointEntity* cp = sketch.findPoint(circle->centerPt);
-                        if (!cp) break;
-                        cx = cp->x; cy = cp->y; radius = circle->radius;
+                        curveCenterPt = sketch.findPoint(circle->centerPt);
+                        if (!curveCenterPt) break;
+                        cx = curveCenterPt->x; cy = curveCenterPt->y; radius = circle->radius;
                     } else if (arc) {
-                        PointEntity* cp = sketch.findPoint(arc->centerPt);
+                        curveCenterPt = sketch.findPoint(arc->centerPt);
                         PointEntity* sp = sketch.findPoint(arc->startPt);
-                        if (!cp || !sp) break;
-                        cx = cp->x; cy = cp->y;
-                        float dx = sp->x-cp->x, dy = sp->y-cp->y;
+                        if (!curveCenterPt || !sp) break;
+                        cx = curveCenterPt->x; cy = curveCenterPt->y;
+                        double dx = sp->x - curveCenterPt->x, dy = sp->y - curveCenterPt->y;
                         radius = std::sqrt(dx*dx + dy*dy);
                     } else break;
 
                     // Determine which line endpoint is on/near the circle (contact point)
-                    float distA = std::fabs(distance({la->x, la->y}, {cx, cy}) - radius);
-                    float distB = std::fabs(distance({lb->x, lb->y}, {cx, cy}) - radius);
-                    PointEntity* contact = (distA < distB) ? la : lb;  // endpoint on circle
-                    PointEntity* far = (contact == la) ? lb : la;      // the other endpoint
+                    double distA = std::fabs(distance({la->x, la->y}, {cx, cy}) - radius);
+                    double distB = std::fabs(distance({lb->x, lb->y}, {cx, cy}) - radius);
+                    PointEntity* contact = (distA < distB) ? la : lb;
+                    PointEntity* far = (contact == la) ? lb : la;
 
                     // Step 1: Snap contact point onto the circle
-                    float dcx = contact->x - cx, dcy = contact->y - cy;
-                    float dcLen = std::sqrt(dcx*dcx + dcy*dcy);
-                    if (dcLen < 1e-7f) break;
-                    float newCx = cx + dcx / dcLen * radius;
-                    float newCy = cy + dcy / dcLen * radius;
-                    if (std::fabs(contact->x - newCx) > 1e-6f || std::fabs(contact->y - newCy) > 1e-6f)
+                    double dcx = contact->x - cx, dcy = contact->y - cy;
+                    double dcLen = std::sqrt(dcx*dcx + dcy*dcy);
+                    if (dcLen < 1e-7) break;
+                    double newCx2 = cx + dcx / dcLen * radius;
+                    double newCy2 = cy + dcy / dcLen * radius;
+                    if (std::fabs(contact->x - newCx2) > 1e-6 || std::fabs(contact->y - newCy2) > 1e-6)
                         changed = true;
-                    contact->x = newCx;
-                    contact->y = newCy;
+                    contact->x = newCx2;
+                    contact->y = newCy2;
 
-                    // Step 2: Rotate the far endpoint around the contact point so the line
-                    // is tangent to the circle (perpendicular to the radius at contact)
-                    // Tangent direction at contact: perpendicular to radius vector
-                    float rx = contact->x - cx, ry = contact->y - cy;
-                    // Two tangent directions: (ry, -rx) and (-ry, rx)
-                    // Pick the one closest to current line direction
-                    float ldx = far->x - contact->x, ldy = far->y - contact->y;
-                    float lineLen = std::sqrt(ldx*ldx + ldy*ldy);
-                    if (lineLen < 1e-6f) break;
+                    double ldx = far->x - contact->x, ldy = far->y - contact->y;
+                    double lineLen = std::sqrt(ldx*ldx + ldy*ldy);
+                    if (lineLen < 1e-6) break;
 
-                    float dot1 = ldx * ry + ldy * (-rx);
-                    float dot2 = ldx * (-ry) + ldy * rx;
-                    float tx, ty;
-                    if (dot1 >= dot2) { tx = ry; ty = -rx; }
-                    else              { tx = -ry; ty = rx; }
+                    // Step 2: Enforce tangency.
+                    // Fillet case: contact is a shared endpoint of the arc — the line was
+                    // trimmed to exactly meet the arc. Keep the line fixed and slide the arc
+                    // center perpendicular to the line at the contact point. This avoids
+                    // rotating the triangle vertex (the line's far endpoint).
+                    // External circle/arc case: rotate the far endpoint to be tangential.
+                    EntityID contactPtID = (contact == la) ? line->startPt : line->endPt;
+                    bool isFillet = arc && (contactPtID == arc->startPt || contactPtID == arc->endPt);
 
-                    // Place far endpoint along tangent direction at current distance
-                    float tLen = std::sqrt(tx*tx + ty*ty);
-                    if (tLen < 1e-7f) break;
-                    float newFarX = contact->x + (tx / tLen) * lineLen;
-                    float newFarY = contact->y + (ty / tLen) * lineLen;
-                    if (std::fabs(far->x - newFarX) > 1e-6f || std::fabs(far->y - newFarY) > 1e-6f) {
-                        far->x = newFarX;
-                        far->y = newFarY;
-                        changed = true;
+                    if (isFillet && curveCenterPt) {
+                        double perpX = -ldy / lineLen, perpY = ldx / lineLen;
+                        double dotToCenter = (cx - contact->x) * perpX + (cy - contact->y) * perpY;
+                        if (dotToCenter < 0.0) { perpX = -perpX; perpY = -perpY; }
+                        double newCX = contact->x + perpX * radius;
+                        double newCY = contact->y + perpY * radius;
+                        if (std::fabs(curveCenterPt->x - newCX) > 1e-6 ||
+                            std::fabs(curveCenterPt->y - newCY) > 1e-6) {
+                            curveCenterPt->x = newCX;
+                            curveCenterPt->y = newCY;
+                            sketch.recomputeArcAngles(*arc);
+                            changed = true;
+                        }
+                    } else {
+                        // Rotate far endpoint around contact so line is perpendicular to radius
+                        double rx = contact->x - cx, ry = contact->y - cy;
+                        double dot1 = ldx * ry + ldy * (-rx);
+                        double dot2 = ldx * (-ry) + ldy * rx;
+                        double tx, ty;
+                        if (dot1 >= dot2) { tx = ry; ty = -rx; }
+                        else              { tx = -ry; ty = rx; }
+                        double tLen = std::sqrt(tx*tx + ty*ty);
+                        if (tLen < 1e-7) break;
+                        double newFarX = contact->x + (tx / tLen) * lineLen;
+                        double newFarY = contact->y + (ty / tLen) * lineLen;
+                        if (std::fabs(far->x - newFarX) > 1e-6 || std::fabs(far->y - newFarY) > 1e-6) {
+                            far->x = newFarX;
+                            far->y = newFarY;
+                            changed = true;
+                        }
                     }
                     break;
                 }
@@ -719,17 +788,17 @@ SolveResult Solver::solve(Sketch& sketch, EntityID draggedPoint) {
                     PointEntity* lb = sketch.findPoint(line->endPt);
                     if (!la || !lb) break;
 
-                    float mx = (la->x + lb->x) * 0.5f;
-                    float my = (la->y + lb->y) * 0.5f;
-                    float errX = pt->x - mx, errY = pt->y - my;
-                    if (std::fabs(errX) > 1e-6f || std::fabs(errY) > 1e-6f) {
+                    double mx = (la->x + lb->x) * 0.5;
+                    double my = (la->y + lb->y) * 0.5;
+                    double errX = pt->x - mx, errY = pt->y - my;
+                    if (std::fabs(errX) > 1e-6 || std::fabs(errY) > 1e-6) {
                         // Weight: point vs line endpoints
                         int rPt = countRefs(c.entityA);
                         int rLine = countLineRefs(line);
-                        float totalR = (float)(rPt + rLine);
-                        if (totalR < 1.0f) totalR = 1.0f;
-                        float lineFrac = (float)rLine / totalR; // how much point moves
-                        float ptFrac = (float)rPt / totalR;     // how much line moves
+                        double totalR = (double)(rPt + rLine);
+                        if (totalR < 1.0) totalR = 1.0;
+                        double lineFrac = (double)rLine / totalR; // how much point moves
+                        double ptFrac = (double)rPt / totalR;     // how much line moves
 
                         // Move point toward midpoint
                         pt->x -= errX * lineFrac;
@@ -755,27 +824,27 @@ SolveResult Solver::solve(Sketch& sketch, EntityID draggedPoint) {
                     if (!aa || !ab) break;
 
                     // Reflect p1 across axis line
-                    float adx = ab->x-aa->x, ady = ab->y-aa->y;
-                    float alen2 = adx*adx + ady*ady;
-                    if (alen2 < 1e-12f) break;
+                    double adx = ab->x-aa->x, ady = ab->y-aa->y;
+                    double alen2 = adx*adx + ady*ady;
+                    if (alen2 < 1e-12) break;
 
                     // Reflection of p1: r = 2*proj(p1-aa, axis) + aa - (p1-aa) + aa
-                    float px = p1->x-aa->x, py = p1->y-aa->y;
-                    float t = (px*adx + py*ady) / alen2;
-                    float reflX = 2*(aa->x + t*adx) - p1->x;
-                    float reflY = 2*(aa->y + t*ady) - p1->y;
+                    double px = p1->x-aa->x, py = p1->y-aa->y;
+                    double t = (px*adx + py*ady) / alen2;
+                    double reflX = 2*(aa->x + t*adx) - p1->x;
+                    double reflY = 2*(aa->y + t*ady) - p1->y;
 
                     // Also reflect p2 across axis
-                    float px2 = p2->x-aa->x, py2 = p2->y-aa->y;
-                    float t2 = (px2*adx + py2*ady) / alen2;
-                    float refl2X = 2*(aa->x + t2*adx) - p2->x;
-                    float refl2Y = 2*(aa->y + t2*ady) - p2->y;
+                    double px2 = p2->x-aa->x, py2 = p2->y-aa->y;
+                    double t2 = (px2*adx + py2*ady) / alen2;
+                    double refl2X = 2*(aa->x + t2*adx) - p2->x;
+                    double refl2Y = 2*(aa->y + t2*ady) - p2->y;
 
                     // Target: midpoint of both reflections (symmetric convergence)
-                    float targ1X = (p1->x + refl2X) * 0.5f;
-                    float targ1Y = (p1->y + refl2Y) * 0.5f;
-                    float targ2X = (p2->x + reflX) * 0.5f;
-                    float targ2Y = (p2->y + reflY) * 0.5f;
+                    double targ1X = (p1->x + refl2X) * 0.5;
+                    double targ1Y = (p1->y + refl2Y) * 0.5;
+                    double targ2X = (p2->x + reflX) * 0.5;
+                    double targ2Y = (p2->y + reflY) * 0.5;
 
                     if (std::fabs(p1->x-targ1X) > 1e-6f || std::fabs(p1->y-targ1Y) > 1e-6f ||
                         std::fabs(p2->x-targ2X) > 1e-6f || std::fabs(p2->y-targ2Y) > 1e-6f) {
@@ -804,14 +873,14 @@ SolveResult Solver::solve(Sketch& sketch, EntityID draggedPoint) {
                     PointEntity* p2 = sketch.findPoint(cp2ID);
                     if (!p1 || !p2) break;
 
-                    if (std::fabs(p1->x - p2->x) > 1e-6f || std::fabs(p1->y - p2->y) > 1e-6f) {
+                    if (std::fabs(p1->x - p2->x) > 1e-6 || std::fabs(p1->y - p2->y) > 1e-6) {
                         int r1 = countRefs(cp1ID);
                         int r2 = countRefs(cp2ID);
-                        float totalR = (float)(r1 + r2);
-                        if (totalR < 1.0f) totalR = 1.0f;
-                        float w1 = (float)r1 / totalR;
-                        float tX = p1->x * w1 + p2->x * (1.0f - w1);
-                        float tY = p1->y * w1 + p2->y * (1.0f - w1);
+                        double totalR = (double)(r1 + r2);
+                        if (totalR < 1.0) totalR = 1.0;
+                        double w1 = (double)r1 / totalR;
+                        double tX = p1->x * w1 + p2->x * (1.0 - w1);
+                        double tY = p1->y * w1 + p2->y * (1.0 - w1);
                         p1->x = tX; p1->y = tY;
                         p2->x = tX; p2->y = tY;
                         changed = true;
@@ -831,21 +900,21 @@ SolveResult Solver::solve(Sketch& sketch, EntityID draggedPoint) {
             PointEntity* ep = sketch.findPoint(arc.endPt);
             if (!cp || !sp || !ep) continue;
 
-            float dsx = sp->x - cp->x, dsy = sp->y - cp->y;
-            float dex = ep->x - cp->x, dey = ep->y - cp->y;
-            float rStart = std::sqrt(dsx*dsx + dsy*dsy);
-            float rEnd   = std::sqrt(dex*dex + dey*dey);
+            double dsx = sp->x - cp->x, dsy = sp->y - cp->y;
+            double dex = ep->x - cp->x, dey = ep->y - cp->y;
+            double rStart = std::sqrt(dsx*dsx + dsy*dsy);
+            double rEnd   = std::sqrt(dex*dex + dey*dey);
 
-            if (rStart < 1e-7f || rEnd < 1e-7f) continue;
-            if (std::fabs(rStart - rEnd) < 1e-6f) continue;
+            if (rStart < 1e-7 || rEnd < 1e-7) continue;
+            if (std::fabs(rStart - rEnd) < 1e-6) continue;
 
-            float targetR;
+            double targetR;
             if (draggedPoint == arc.startPt)
                 targetR = rStart;
             else if (draggedPoint == arc.endPt)
                 targetR = rEnd;
             else
-                targetR = (rStart + rEnd) * 0.5f;
+                targetR = (rStart + rEnd) * 0.5;
 
             sp->x = cp->x + dsx / rStart * targetR;
             sp->y = cp->y + dsy / rStart * targetR;
@@ -864,7 +933,7 @@ SolveResult Solver::solve(Sketch& sketch, EntityID draggedPoint) {
     // Check if all constraints are satisfied after solving
     for (const auto& c : sketch.constraints) {
         if (c.driven) continue;
-        float err = 0;
+        double err = 0;
         switch (c.type) {
             case ConstraintType::Distance: {
                 LineEntity* line = sketch.findLine(c.entityA);
@@ -872,7 +941,7 @@ SolveResult Solver::solve(Sketch& sketch, EntityID draggedPoint) {
                 PointEntity* a = sketch.findPoint(line->startPt);
                 PointEntity* b = sketch.findPoint(line->endPt);
                 if (!a || !b) break;
-                float dx = b->x - a->x, dy = b->y - a->y;
+                double dx = b->x - a->x, dy = b->y - a->y;
                 err = std::fabs(std::sqrt(dx*dx + dy*dy) - c.value);
                 break;
             }
@@ -880,7 +949,7 @@ SolveResult Solver::solve(Sketch& sketch, EntityID draggedPoint) {
                 PointEntity* a = sketch.findPoint(c.entityA);
                 PointEntity* b = sketch.findPoint(c.entityB);
                 if (!a || !b) break;
-                float dx = b->x - a->x, dy = b->y - a->y;
+                double dx = b->x - a->x, dy = b->y - a->y;
                 err = std::fabs(std::sqrt(dx*dx + dy*dy) - c.value);
                 break;
             }
@@ -922,7 +991,7 @@ SolveResult Solver::solve(Sketch& sketch, EntityID draggedPoint) {
             }
             case ConstraintType::Diameter: {
                 CircleEntity* circle = sketch.findCircle(c.entityA);
-                if (circle) err = std::fabs(circle->radius - c.value * 0.5f);
+                if (circle) err = std::fabs(circle->radius - c.value * 0.5);
                 break;
             }
             case ConstraintType::Angle: {
@@ -935,36 +1004,36 @@ SolveResult Solver::solve(Sketch& sketch, EntityID draggedPoint) {
                 PointEntity* b2 = sketch.findPoint(line2->endPt);
                 if (!a1 || !b1 || !a2 || !b2) break;
                 // Find vertex (shared or intersection)
-                float eps = 1e-3f;
+                double eps = 1e-3;
                 auto pEq = [eps](PointEntity* p, PointEntity* q) {
                     return std::fabs(p->x - q->x) < eps && std::fabs(p->y - q->y) < eps;
                 };
-                float vx, vy;
+                double vx, vy;
                 if (pEq(a1, a2) || pEq(a1, b2))      { vx = a1->x; vy = a1->y; }
                 else if (pEq(b1, a2) || pEq(b1, b2)) { vx = b1->x; vy = b1->y; }
                 else {
-                    float ldx1 = b1->x-a1->x, ldy1 = b1->y-a1->y;
-                    float ldx2 = b2->x-a2->x, ldy2 = b2->y-a2->y;
-                    float denom = ldx1*ldy2 - ldy1*ldx2;
-                    if (std::fabs(denom) < 1e-6f) break;
-                    float t = ((a2->x-a1->x)*ldy2 - (a2->y-a1->y)*ldx2) / denom;
+                    double ldx1 = b1->x-a1->x, ldy1 = b1->y-a1->y;
+                    double ldx2 = b2->x-a2->x, ldy2 = b2->y-a2->y;
+                    double denom = ldx1*ldy2 - ldy1*ldx2;
+                    if (std::fabs(denom) < 1e-6) break;
+                    double t = ((a2->x-a1->x)*ldy2 - (a2->y-a1->y)*ldx2) / denom;
                     vx = a1->x + t*ldx1; vy = a1->y + t*ldy1;
                 }
-                auto dist2v = [](float ax, float ay, float bx, float by) {
-                    float dx = ax-bx, dy = ay-by; return dx*dx + dy*dy;
+                auto dist2v = [](double ax, double ay, double bx, double by) {
+                    double dx = ax-bx, dy = ay-by; return dx*dx + dy*dy;
                 };
                 PointEntity* f1 = (dist2v(vx,vy,b1->x,b1->y)>=dist2v(vx,vy,a1->x,a1->y)) ? b1 : a1;
                 PointEntity* f2 = (dist2v(vx,vy,b2->x,b2->y)>=dist2v(vx,vy,a2->x,a2->y)) ? b2 : a2;
-                float dx1 = f1->x-vx, dy1 = f1->y-vy;
-                float dx2 = f2->x-vx, dy2 = f2->y-vy;
-                float dot = dx1*dx2 + dy1*dy2;
-                float cross = dx1*dy2 - dy1*dx2;
-                float ccwRad = std::atan2(cross, dot);
-                if (ccwRad < 0) ccwRad += 2.0f * 3.14159265358979f;
-                float ccwDeg = ccwRad * 180.0f / 3.14159265358979f;
-                float cwDeg = 360.0f - ccwDeg;
+                double dx1 = f1->x-vx, dy1 = f1->y-vy;
+                double dx2 = f2->x-vx, dy2 = f2->y-vy;
+                double dot = dx1*dx2 + dy1*dy2;
+                double cross = dx1*dy2 - dy1*dx2;
+                double ccwRad = std::atan2(cross, dot);
+                if (ccwRad < 0) ccwRad += 2.0 * 3.14159265358979;
+                double ccwDeg = ccwRad * 180.0 / 3.14159265358979;
+                double cwDeg = 360.0 - ccwDeg;
                 // Use the stored sector
-                float currentDeg = c.angleCW ? cwDeg : ccwDeg;
+                double currentDeg = c.angleCW ? cwDeg : ccwDeg;
                 err = std::fabs(currentDeg - c.value);
                 break;
             }
@@ -975,13 +1044,13 @@ SolveResult Solver::solve(Sketch& sketch, EntityID draggedPoint) {
                 PointEntity* la = sketch.findPoint(line->startPt);
                 PointEntity* lb = sketch.findPoint(line->endPt);
                 if (!la || !lb) break;
-                float ldx = lb->x-la->x, ldy = lb->y-la->y;
-                float lineLen = std::sqrt(ldx*ldx+ldy*ldy);
-                if (lineLen < 1e-6f) break;
-                float cross = (pt->x-la->x)*ldy - (pt->y-la->y)*ldx;
-                float dist = cross / lineLen;
-                float sideSign = c.negativeSide ? -1.0f : 1.0f;
-                float targetSigned = sideSign * c.value;
+                double ldx = lb->x-la->x, ldy = lb->y-la->y;
+                double lineLen = std::sqrt(ldx*ldx+ldy*ldy);
+                if (lineLen < 1e-6) break;
+                double cross = (pt->x-la->x)*ldy - (pt->y-la->y)*ldx;
+                double dist = cross / lineLen;
+                double sideSign = c.negativeSide ? -1.0 : 1.0;
+                double targetSigned = sideSign * c.value;
                 err = std::fabs(dist - targetSigned);
                 break;
             }
@@ -992,11 +1061,34 @@ SolveResult Solver::solve(Sketch& sketch, EntityID draggedPoint) {
                 PointEntity* la = sketch.findPoint(line->startPt);
                 PointEntity* lb = sketch.findPoint(line->endPt);
                 if (!la || !lb) break;
-                float ldx = lb->x-la->x, ldy = lb->y-la->y;
-                float lineLen = std::sqrt(ldx*ldx+ldy*ldy);
-                if (lineLen < 1e-6f) break;
-                float cross = (pt->x-la->x)*ldy - (pt->y-la->y)*ldx;
+                double ldx = lb->x-la->x, ldy = lb->y-la->y;
+                double lineLen = std::sqrt(ldx*ldx+ldy*ldy);
+                if (lineLen < 1e-6) break;
+                double cross = (pt->x-la->x)*ldy - (pt->y-la->y)*ldx;
                 err = std::fabs(cross) / lineLen;
+                break;
+            }
+            case ConstraintType::PointOnCircle: {
+                PointEntity* pt = sketch.findPoint(c.entityA);
+                if (!pt) break;
+                EntityID centerPtID = NullID;
+                double radius = 0.0;
+                CircleEntity* circ = sketch.findCircle(c.entityB);
+                if (circ) { centerPtID = circ->centerPt; radius = circ->radius; }
+                else {
+                    ArcEntity* arc = sketch.findArc(c.entityB);
+                    if (arc) {
+                        centerPtID = arc->centerPt;
+                        PointEntity* sp = sketch.findPoint(arc->startPt);
+                        PointEntity* cp = sketch.findPoint(arc->centerPt);
+                        if (sp && cp) { double dx=sp->x-cp->x, dy=sp->y-cp->y; radius=std::sqrt(dx*dx+dy*dy); }
+                    }
+                }
+                if (centerPtID == NullID) break;
+                PointEntity* cen = sketch.findPoint(centerPtID);
+                if (!cen) break;
+                double dx = pt->x-cen->x, dy = pt->y-cen->y;
+                err = std::fabs(std::sqrt(dx*dx+dy*dy) - radius);
                 break;
             }
             case ConstraintType::EqualLength: {
@@ -1008,8 +1100,8 @@ SolveResult Solver::solve(Sketch& sketch, EntityID draggedPoint) {
                 PointEntity* a2 = sketch.findPoint(l2->startPt);
                 PointEntity* b2 = sketch.findPoint(l2->endPt);
                 if (!a1||!b1||!a2||!b2) break;
-                float dx1=b1->x-a1->x, dy1=b1->y-a1->y;
-                float dx2=b2->x-a2->x, dy2=b2->y-a2->y;
+                double dx1=b1->x-a1->x, dy1=b1->y-a1->y;
+                double dx2=b2->x-a2->x, dy2=b2->y-a2->y;
                 err = std::fabs(std::sqrt(dx1*dx1+dy1*dy1) - std::sqrt(dx2*dx2+dy2*dy2));
                 break;
             }
@@ -1022,10 +1114,10 @@ SolveResult Solver::solve(Sketch& sketch, EntityID draggedPoint) {
                 PointEntity* a2 = sketch.findPoint(l2->startPt);
                 PointEntity* b2 = sketch.findPoint(l2->endPt);
                 if (!a1||!b1||!a2||!b2) break;
-                float dx1=b1->x-a1->x, dy1=b1->y-a1->y;
-                float dx2=b2->x-a2->x, dy2=b2->y-a2->y;
-                float len1=std::sqrt(dx1*dx1+dy1*dy1), len2=std::sqrt(dx2*dx2+dy2*dy2);
-                if (len1>1e-6f && len2>1e-6f)
+                double dx1=b1->x-a1->x, dy1=b1->y-a1->y;
+                double dx2=b2->x-a2->x, dy2=b2->y-a2->y;
+                double len1=std::sqrt(dx1*dx1+dy1*dy1), len2=std::sqrt(dx2*dx2+dy2*dy2);
+                if (len1>1e-6 && len2>1e-6)
                     err = std::fabs(dx1*dx2+dy1*dy2) / (len1*len2);
                 break;
             }
@@ -1038,10 +1130,10 @@ SolveResult Solver::solve(Sketch& sketch, EntityID draggedPoint) {
                 PointEntity* a2 = sketch.findPoint(l2->startPt);
                 PointEntity* b2 = sketch.findPoint(l2->endPt);
                 if (!a1||!b1||!a2||!b2) break;
-                float dx1=b1->x-a1->x, dy1=b1->y-a1->y;
-                float dx2=b2->x-a2->x, dy2=b2->y-a2->y;
-                float len1=std::sqrt(dx1*dx1+dy1*dy1), len2=std::sqrt(dx2*dx2+dy2*dy2);
-                if (len1>1e-6f && len2>1e-6f)
+                double dx1=b1->x-a1->x, dy1=b1->y-a1->y;
+                double dx2=b2->x-a2->x, dy2=b2->y-a2->y;
+                double len1=std::sqrt(dx1*dx1+dy1*dy1), len2=std::sqrt(dx2*dx2+dy2*dy2);
+                if (len1>1e-6 && len2>1e-6)
                     err = std::fabs(dx1*dy2-dy1*dx2) / (len1*len2);
                 break;
             }
@@ -1051,7 +1143,7 @@ SolveResult Solver::solve(Sketch& sketch, EntityID draggedPoint) {
                 PointEntity* la = sketch.findPoint(line->startPt);
                 PointEntity* lb = sketch.findPoint(line->endPt);
                 if (!la || !lb) break;
-                float cx, cy, radius;
+                double cx, cy, radius;
                 CircleEntity* circ = sketch.findCircle(c.entityB);
                 ArcEntity* arc = sketch.findArc(c.entityB);
                 if (circ) {
@@ -1063,13 +1155,13 @@ SolveResult Solver::solve(Sketch& sketch, EntityID draggedPoint) {
                     PointEntity* sp = sketch.findPoint(arc->startPt);
                     if (!cp || !sp) break;
                     cx=cp->x; cy=cp->y;
-                    float dx=sp->x-cp->x, dy=sp->y-cp->y;
+                    double dx=sp->x-cp->x, dy=sp->y-cp->y;
                     radius=std::sqrt(dx*dx+dy*dy);
                 } else break;
-                float ldx=lb->x-la->x, ldy=lb->y-la->y;
-                float lineLen=std::sqrt(ldx*ldx+ldy*ldy);
-                if (lineLen<1e-6f) break;
-                float cross=(cx-la->x)*ldy-(cy-la->y)*ldx;
+                double ldx=lb->x-la->x, ldy=lb->y-la->y;
+                double lineLen=std::sqrt(ldx*ldx+ldy*ldy);
+                if (lineLen<1e-6) break;
+                double cross=(cx-la->x)*ldy-(cy-la->y)*ldx;
                 err = std::fabs(std::fabs(cross)/lineLen - radius);
                 break;
             }
@@ -1080,7 +1172,7 @@ SolveResult Solver::solve(Sketch& sketch, EntityID draggedPoint) {
                 PointEntity* la = sketch.findPoint(line->startPt);
                 PointEntity* lb = sketch.findPoint(line->endPt);
                 if (!la || !lb) break;
-                float mx=(la->x+lb->x)*0.5f, my=(la->y+lb->y)*0.5f;
+                double mx=(la->x+lb->x)*0.5, my=(la->y+lb->y)*0.5;
                 err = std::fabs(pt->x-mx) + std::fabs(pt->y-my);
                 break;
             }
@@ -1092,13 +1184,13 @@ SolveResult Solver::solve(Sketch& sketch, EntityID draggedPoint) {
                 PointEntity* aa = sketch.findPoint(axis->startPt);
                 PointEntity* ab = sketch.findPoint(axis->endPt);
                 if (!aa || !ab) break;
-                float adx=ab->x-aa->x, ady=ab->y-aa->y;
-                float alen2=adx*adx+ady*ady;
-                if (alen2<1e-12f) break;
-                float px=p1->x-aa->x, py=p1->y-aa->y;
-                float t=(px*adx+py*ady)/alen2;
-                float reflX=2*(aa->x+t*adx)-p1->x;
-                float reflY=2*(aa->y+t*ady)-p1->y;
+                double adx=ab->x-aa->x, ady=ab->y-aa->y;
+                double alen2=adx*adx+ady*ady;
+                if (alen2<1e-12) break;
+                double px=p1->x-aa->x, py=p1->y-aa->y;
+                double t=(px*adx+py*ady)/alen2;
+                double reflX=2*(aa->x+t*adx)-p1->x;
+                double reflY=2*(aa->y+t*ady)-p1->y;
                 err = std::fabs(p2->x-reflX) + std::fabs(p2->y-reflY);
                 break;
             }
@@ -1119,7 +1211,7 @@ SolveResult Solver::solve(Sketch& sketch, EntityID draggedPoint) {
             }
             default: break;
         }
-        result.totalError += err;
+        result.totalError += f(err);
         // Use type-appropriate tolerance: degrees for angles, mm for distances
         float tol = (c.type == ConstraintType::Angle) ? 0.5f : 0.01f;
         if (err > tol) {
