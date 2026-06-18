@@ -925,9 +925,9 @@ void App::drawToolbar() {
         ImGui::TextDisabled("|");
         ImGui::SameLine();
 
-        const char* toolNames[] = {"[None]", "[P]oint", "[L]ine", "[C]ircle", "[R]ect", "[A]rc 3pt", "Arc Ctr", "Ctr Rect", "[D]im"};
-        ToolType toolTypes[] = {ToolType::None, ToolType::Point, ToolType::Line, ToolType::Circle, ToolType::Rectangle, ToolType::Arc3Point, ToolType::ArcCenter, ToolType::CenterRect, ToolType::Dimension};
-        for (int i = 0; i < 9; i++) {
+        const char* toolNames[] = {"[None]", "[P]oint", "[L]ine", "[C]ircle", "[R]ect", "[A]rc 3pt", "Arc Ctr", "Ctr Rect", "[D]im", "[F]illet"};
+        ToolType toolTypes[] = {ToolType::None, ToolType::Point, ToolType::Line, ToolType::Circle, ToolType::Rectangle, ToolType::Arc3Point, ToolType::ArcCenter, ToolType::CenterRect, ToolType::Dimension, ToolType::Fillet};
+        for (int i = 0; i < 10; i++) {
             ImGui::SameLine();
             bool selected = (tool_.type == toolTypes[i]);
             if (selected) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.3f, 0.5f, 0.8f, 1.0f));
@@ -1008,6 +1008,7 @@ void App::drawToolbar() {
             CBtn cbtns[] = {
                 {"Perp",    ConstraintType::Perpendicular, nLines == 2 && sel.size() == 2},
                 {"Para",    ConstraintType::Parallel,      nLines == 2 && sel.size() == 2},
+                {"Colin",   ConstraintType::Collinear,     nLines == 2 && sel.size() == 2},
                 {"Equal",   ConstraintType::EqualLength,   nLines == 2 && sel.size() == 2},
                 {"Tang",    ConstraintType::Tangent,        nLines == 1 && (nCircles + nArcs) == 1 && sel.size() == 2},
                 {"OnLine",  ConstraintType::PointOnLine,   nPoints == 1 && nLines == 1 && sel.size() == 2},

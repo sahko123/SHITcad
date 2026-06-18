@@ -18,10 +18,11 @@ public:
     void shutdown();
 
     void renderSketch(const SketchPlane& plane, const float* view, const float* proj,
-                      bool isActive, const SelectionState& sel);
+                      bool isActive, const SelectionState& sel, int dof = 0);
 
     void renderGrid(const SketchPlane& plane, const float* view, const float* proj,
-                    float gridStep, float extent);
+                    float gridStep,
+                    float startU, float endU, float startV, float endV);
 
     void renderToolPreview(const SketchPlane& plane, const float* view, const float* proj,
                            const ToolState& tool, const ArcToolState& arcTool,

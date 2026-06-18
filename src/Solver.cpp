@@ -2,6 +2,7 @@
 #include "Constants.h"
 #include <cmath>
 #include <algorithm>
+#include <unordered_set>
 
 namespace shitcad {
 
@@ -691,6 +692,74 @@ SolveResult Solver::solve(Sketch& sketch, EntityID draggedPoint) {
                     break;
                 }
 
+                case ConstraintType::Collinear: {
+                    LineEntity* l1 = sketch.findLine(c.entityA);
+                    LineEntity* l2 = sketch.findLine(c.entityB);
+                    if (!l1 || !l2) break;
+                    PointEntity* a1 = sketch.findPoint(l1->startPt);
+                    PointEntity* b1 = sketch.findPoint(l1->endPt);
+                    PointEntity* a2 = sketch.findPoint(l2->startPt);
+                    PointEntity* b2 = sketch.findPoint(l2->endPt);
+                    if (!a1 || !b1 || !a2 || !b2) break;
+
+                    double dx1 = b1->x-a1->x, dy1 = b1->y-a1->y;
+                    double dx2 = b2->x-a2->x, dy2 = b2->y-a2->y;
+                    double len1 = std::sqrt(dx1*dx1 + dy1*dy1);
+                    double len2 = std::sqrt(dx2*dx2 + dy2*dy2);
+                    if (len1 < 1e-6 || len2 < 1e-6) break;
+
+                    int r1 = countLineRefs(l1);
+                    int r2 = countLineRefs(l2);
+                    double totalR = (double)(r1 + r2);
+                    if (totalR < 1.0) totalR = 1.0;
+                    double w1 = (double)r1 / totalR; // fraction of motion absorbed by l2
+
+                    // Step 1: make directions parallel (same as Parallel constraint)
+                    double cross = dx1*dy2 - dy1*dx2;
+                    if (std::fabs(cross) >= 1e-9) {
+                        double dot = dx1*dx2 + dy1*dy2;
+                        double totalAngle = std::atan2(cross, dot);
+                        double rot2 = -totalAngle * w1;
+                        double rot1 =  totalAngle * (1.0 - w1);
+                        auto rotatePt = [](PointEntity* p, double ox, double oy, double cosR, double sinR) {
+                            double rx = p->x-ox, ry = p->y-oy;
+                            p->x = ox + rx*cosR - ry*sinR;
+                            p->y = oy + rx*sinR + ry*cosR;
+                        };
+                        double cos1 = std::cos(rot1), sin1 = std::sin(rot1);
+                        double cos2 = std::cos(rot2), sin2 = std::sin(rot2);
+                        double mx1 = (a1->x+b1->x)*0.5, my1 = (a1->y+b1->y)*0.5;
+                        rotatePt(a1, mx1, my1, cos1, sin1);
+                        rotatePt(b1, mx1, my1, cos1, sin1);
+                        double mx2 = (a2->x+b2->x)*0.5, my2 = (a2->y+b2->y)*0.5;
+                        rotatePt(a2, mx2, my2, cos2, sin2);
+                        rotatePt(b2, mx2, my2, cos2, sin2);
+                        // Refresh direction after rotation
+                        dx1 = b1->x-a1->x; dy1 = b1->y-a1->y;
+                        len1 = std::sqrt(dx1*dx1 + dy1*dy1);
+                        changed = true;
+                    }
+
+                    // Step 2: translate to make lines colinear.
+                    // Perpendicular distance from a2 to the infinite line through a1,b1:
+                    // dist = ((a2-a1) × d1) / len1  where d1=(dx1,dy1), × is 2D cross product
+                    if (len1 > 1e-9) {
+                        double dist = ((a2->x - a1->x)*dy1 - (a2->y - a1->y)*dx1) / len1;
+                        if (std::fabs(dist) > 1e-9) {
+                            double nx = -dy1 / len1, ny = dx1 / len1; // unit normal to l1
+                            // Distribute the correction: l2 moves by -dist*w1, l1 by +dist*(1-w1)
+                            double move2 = -dist * w1;
+                            double move1 =  dist * (1.0 - w1);
+                            a2->x += nx * move2; a2->y += ny * move2;
+                            b2->x += nx * move2; b2->y += ny * move2;
+                            a1->x += nx * move1; a1->y += ny * move1;
+                            b1->x += nx * move1; b1->y += ny * move1;
+                            changed = true;
+                        }
+                    }
+                    break;
+                }
+
                 case ConstraintType::Tangent: {
                     // A=line, B=circle or arc
                     LineEntity* line = sketch.findLine(c.entityA);
@@ -916,11 +985,41 @@ SolveResult Solver::solve(Sketch& sketch, EntityID draggedPoint) {
             else
                 targetR = (rStart + rEnd) * 0.5;
 
-            sp->x = cp->x + dsx / rStart * targetR;
-            sp->y = cp->y + dsy / rStart * targetR;
-            ep->x = cp->x + dex / rEnd   * targetR;
-            ep->y = cp->y + dey / rEnd   * targetR;
-            changed = true;
+            // Choose whether to move center or endpoints based on which is less constrained.
+            // Fillet arcs share their endpoints with lines (high ref count on endpoints),
+            // so we move the center rather than pulling line endpoints off their angles.
+            int refC = countRefs(arc.centerPt);
+            int refS = countRefs(arc.startPt);
+            int refE = countRefs(arc.endPt);
+            bool moveCenter = (refC <= refS && refC <= refE);
+
+            if (moveCenter) {
+                // Move center along the perpendicular bisector of sp-ep to sit at targetR from both.
+                double midX = (sp->x + ep->x) * 0.5, midY = (sp->y + ep->y) * 0.5;
+                double halfSepX = (ep->x - sp->x) * 0.5, halfSepY = (ep->y - sp->y) * 0.5;
+                double halfSep2 = halfSepX*halfSepX + halfSepY*halfSepY;
+                double newH2 = targetR*targetR - halfSep2;
+                if (newH2 < 0.0) continue; // endpoints too far apart for this radius
+                double newH = std::sqrt(newH2);
+                // Perpendicular to (ep-sp), same side as current center
+                double perpX = -(ep->y - sp->y), perpY = ep->x - sp->x;
+                double perpLen = std::sqrt(perpX*perpX + perpY*perpY);
+                if (perpLen < 1e-9) continue;
+                perpX /= perpLen; perpY /= perpLen;
+                if ((cp->x - midX)*perpX + (cp->y - midY)*perpY < 0.0) { perpX = -perpX; perpY = -perpY; }
+                double newCX = midX + perpX * newH;
+                double newCY = midY + perpY * newH;
+                if (std::fabs(cp->x - newCX) > 1e-9 || std::fabs(cp->y - newCY) > 1e-9) {
+                    cp->x = newCX; cp->y = newCY;
+                    changed = true;
+                }
+            } else {
+                sp->x = cp->x + dsx / rStart * targetR;
+                sp->y = cp->y + dsy / rStart * targetR;
+                ep->x = cp->x + dex / rEnd   * targetR;
+                ep->y = cp->y + dey / rEnd   * targetR;
+                changed = true;
+            }
         }
 
         result.iterations = iter + 1;
@@ -928,6 +1027,52 @@ SolveResult Solver::solve(Sketch& sketch, EntityID draggedPoint) {
             result.converged = true;
             break;
         }
+    }
+
+    // Estimate degrees of freedom: entity free params minus constraint removals.
+    {
+        // Count all non-projected points (each contributes 2 DOF: x, y)
+        int rawDof = 0;
+        for (const auto& pt : sketch.points) {
+            if (!pt.projected) rawDof += 2;
+        }
+        // Each non-projected circle adds 1 extra DOF for radius
+        for (const auto& ci : sketch.circles) {
+            if (!ci.projected) rawDof += 1;
+        }
+        // Each non-projected arc internally enforces equal radius for start/end point (-1 DOF)
+        for (const auto& ar : sketch.arcs) {
+            if (!ar.projected) rawDof -= 1;
+        }
+        // Subtract DOF removed by each active constraint
+        for (const auto& c : sketch.constraints) {
+            if (c.driven) continue;
+            switch (c.type) {
+                case ConstraintType::Coincident:
+                case ConstraintType::Symmetric:
+                case ConstraintType::Concentric:
+                case ConstraintType::Midpoint:
+                case ConstraintType::Collinear:
+                    rawDof -= 2; break;
+                case ConstraintType::Horizontal:
+                case ConstraintType::Vertical:
+                case ConstraintType::Distance:
+                case ConstraintType::Radius:
+                case ConstraintType::Diameter:
+                case ConstraintType::PointDistance:
+                case ConstraintType::PointOnLine:
+                case ConstraintType::PointLineDistance:
+                case ConstraintType::EqualLength:
+                case ConstraintType::Perpendicular:
+                case ConstraintType::Parallel:
+                case ConstraintType::Tangent:
+                case ConstraintType::Angle:
+                case ConstraintType::PointOnCircle:
+                    rawDof -= 1; break;
+                default: break;
+            }
+        }
+        result.dof = std::max(0, rawDof);
     }
 
     // Check if all constraints are satisfied after solving
@@ -1135,6 +1280,28 @@ SolveResult Solver::solve(Sketch& sketch, EntityID draggedPoint) {
                 double len1=std::sqrt(dx1*dx1+dy1*dy1), len2=std::sqrt(dx2*dx2+dy2*dy2);
                 if (len1>1e-6 && len2>1e-6)
                     err = std::fabs(dx1*dy2-dy1*dx2) / (len1*len2);
+                break;
+            }
+            case ConstraintType::Collinear: {
+                LineEntity* l1 = sketch.findLine(c.entityA);
+                LineEntity* l2 = sketch.findLine(c.entityB);
+                if (!l1 || !l2) break;
+                PointEntity* a1 = sketch.findPoint(l1->startPt);
+                PointEntity* b1 = sketch.findPoint(l1->endPt);
+                PointEntity* a2 = sketch.findPoint(l2->startPt);
+                if (!a1||!b1||!a2) break;
+                double dx1=b1->x-a1->x, dy1=b1->y-a1->y;
+                double len1=std::sqrt(dx1*dx1+dy1*dy1);
+                if (len1 > 1e-6) {
+                    // Max of: angle error + distance error
+                    LineEntity* l2b = sketch.findLine(c.entityB);
+                    PointEntity* b2 = sketch.findPoint(l2b->endPt);
+                    double dx2=b2->x-a2->x, dy2=b2->y-a2->y;
+                    double len2=std::sqrt(dx2*dx2+dy2*dy2);
+                    double angleErr = len2>1e-6 ? std::fabs(dx1*dy2-dy1*dx2)/(len1*len2) : 0.0;
+                    double distErr  = std::fabs((a2->x-a1->x)*dy1 - (a2->y-a1->y)*dx1) / len1;
+                    err = angleErr + distErr;
+                }
                 break;
             }
             case ConstraintType::Tangent: {

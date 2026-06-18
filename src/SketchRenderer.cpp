@@ -222,7 +222,7 @@ void SketchRenderer::renderPlanePreview(const SketchPlane& plane, const float* v
 
 void SketchRenderer::renderSketch(const SketchPlane& plane, const float* view,
                                    const float* proj, bool isActive,
-                                   const SelectionState& sel) {
+                                   const SelectionState& sel, int dof) {
     float alpha = isActive ? 1.0f : 0.4f;
     std::vector<ColorVertex> lineVerts;
     std::vector<ColorVertex> pointVerts;
@@ -240,14 +240,16 @@ void SketchRenderer::renderSketch(const SketchPlane& plane, const float* view,
         if (!a || !b) continue;
 
         float wax, way, waz, wbx, wby, wbz;
-        plane.localToWorld(a->x, a->y, wax, way, waz);
-        plane.localToWorld(b->x, b->y, wbx, wby, wbz);
+        plane.localToWorld(f(a->x), f(a->y), wax, way, waz);
+        plane.localToWorld(f(b->x), f(b->y), wbx, wby, wbz);
         wax += nx; way += ny; waz += nz;
         wbx += nx; wby += ny; wbz += nz;
 
         bool selected = isActive && sel.isSelected(HitType::Line, line.id);
         const auto& tc = line.projected ? activeTheme().sketchProjected
-                       : selected ? activeTheme().sketchSelected : activeTheme().sketchLine;
+                       : selected ? activeTheme().sketchSelected
+                       : (dof > 0) ? activeTheme().sketchUnderconstrained
+                       : activeTheme().sketchLine;
         float r = tc[0], g = tc[1], bl = tc[2];
 
         lineVerts.push_back({wax, way, waz, r, g, bl, alpha});
@@ -261,21 +263,23 @@ void SketchRenderer::renderSketch(const SketchPlane& plane, const float* view,
 
         bool selected = isActive && sel.isSelected(HitType::Circle, circle.id);
         const auto& tc = circle.projected ? activeTheme().sketchProjected
-                       : selected ? activeTheme().sketchSelected : activeTheme().sketchLine;
+                       : selected ? activeTheme().sketchSelected
+                       : (dof > 0) ? activeTheme().sketchUnderconstrained
+                       : activeTheme().sketchLine;
         float r = tc[0], g = tc[1], bl = tc[2];
 
         int segments = 64;
         for (int i = 0; i < segments; i++) {
             float a0 = 2.0f * kPi * i / segments;
             float a1 = 2.0f * kPi * (i + 1) / segments;
-            float lx0 = center->x + circle.radius * std::cos(a0);
-            float ly0 = center->y + circle.radius * std::sin(a0);
-            float lx1 = center->x + circle.radius * std::cos(a1);
-            float ly1 = center->y + circle.radius * std::sin(a1);
+            double lx0 = center->x + circle.radius * std::cos(a0);
+            double ly0 = center->y + circle.radius * std::sin(a0);
+            double lx1 = center->x + circle.radius * std::cos(a1);
+            double ly1 = center->y + circle.radius * std::sin(a1);
 
             float wx0, wy0, wz0, wx1, wy1, wz1;
-            plane.localToWorld(lx0, ly0, wx0, wy0, wz0);
-            plane.localToWorld(lx1, ly1, wx1, wy1, wz1);
+            plane.localToWorld(f(lx0), f(ly0), wx0, wy0, wz0);
+            plane.localToWorld(f(lx1), f(ly1), wx1, wy1, wz1);
             wx0 += nx; wy0 += ny; wz0 += nz;
             wx1 += nx; wy1 += ny; wz1 += nz;
 
@@ -290,10 +294,12 @@ void SketchRenderer::renderSketch(const SketchPlane& plane, const float* view,
         const PointEntity* startP = plane.sketch.findPoint(arc.startPt);
         if (!center || !startP) continue;
 
-        float radius = distance({center->x, center->y}, {startP->x, startP->y});
+        double radius = distance({center->x, center->y}, {startP->x, startP->y});
         bool selected = isActive && sel.isSelected(HitType::Arc, arc.id);
         const auto& tc = arc.projected ? activeTheme().sketchProjected
-                       : selected ? activeTheme().sketchSelected : activeTheme().sketchLine;
+                       : selected ? activeTheme().sketchSelected
+                       : (dof > 0) ? activeTheme().sketchUnderconstrained
+                       : activeTheme().sketchLine;
         float r = tc[0], g = tc[1], bl = tc[2];
 
         float sweep = arc.endAngle - arc.startAngle;
@@ -302,14 +308,14 @@ void SketchRenderer::renderSketch(const SketchPlane& plane, const float* view,
         for (int i = 0; i < segments; i++) {
             float a0 = arc.startAngle + sweep * i / segments;
             float a1 = arc.startAngle + sweep * (i + 1) / segments;
-            float lx0 = center->x + radius * std::cos(a0);
-            float ly0 = center->y + radius * std::sin(a0);
-            float lx1 = center->x + radius * std::cos(a1);
-            float ly1 = center->y + radius * std::sin(a1);
+            double lx0 = center->x + radius * std::cos(a0);
+            double ly0 = center->y + radius * std::sin(a0);
+            double lx1 = center->x + radius * std::cos(a1);
+            double ly1 = center->y + radius * std::sin(a1);
 
             float wx0, wy0, wz0, wx1, wy1, wz1;
-            plane.localToWorld(lx0, ly0, wx0, wy0, wz0);
-            plane.localToWorld(lx1, ly1, wx1, wy1, wz1);
+            plane.localToWorld(f(lx0), f(ly0), wx0, wy0, wz0);
+            plane.localToWorld(f(lx1), f(ly1), wx1, wy1, wz1);
             wx0 += nx; wy0 += ny; wz0 += nz;
             wx1 += nx; wy1 += ny; wz1 += nz;
 
@@ -325,24 +331,26 @@ void SketchRenderer::renderSketch(const SketchPlane& plane, const float* view,
 
         bool selected = isActive && sel.isSelected(HitType::Ellipse, ellipse.id);
         const auto& tc = ellipse.projected ? activeTheme().sketchProjected
-                       : selected ? activeTheme().sketchSelected : activeTheme().sketchLine;
+                       : selected ? activeTheme().sketchSelected
+                       : (dof > 0) ? activeTheme().sketchUnderconstrained
+                       : activeTheme().sketchLine;
         float r = tc[0], g = tc[1], bl = tc[2];
 
         int segments = 64;
-        float cosR = std::cos(ellipse.rotation), sinR = std::sin(ellipse.rotation);
+        double cosR = std::cos(ellipse.rotation), sinR = std::sin(ellipse.rotation);
         for (int i = 0; i < segments; i++) {
             float a0 = 2.0f * kPi * i / segments;
             float a1 = 2.0f * kPi * (i + 1) / segments;
-            float ex0 = ellipse.semiMajor * std::cos(a0), ey0 = ellipse.semiMinor * std::sin(a0);
-            float ex1 = ellipse.semiMajor * std::cos(a1), ey1 = ellipse.semiMinor * std::sin(a1);
-            float lx0 = center->x + ex0 * cosR - ey0 * sinR;
-            float ly0 = center->y + ex0 * sinR + ey0 * cosR;
-            float lx1 = center->x + ex1 * cosR - ey1 * sinR;
-            float ly1 = center->y + ex1 * sinR + ey1 * cosR;
+            double ex0 = ellipse.semiMajor * std::cos(a0), ey0 = ellipse.semiMinor * std::sin(a0);
+            double ex1 = ellipse.semiMajor * std::cos(a1), ey1 = ellipse.semiMinor * std::sin(a1);
+            double lx0 = center->x + ex0 * cosR - ey0 * sinR;
+            double ly0 = center->y + ex0 * sinR + ey0 * cosR;
+            double lx1 = center->x + ex1 * cosR - ey1 * sinR;
+            double ly1 = center->y + ex1 * sinR + ey1 * cosR;
 
             float wx0, wy0, wz0, wx1, wy1, wz1;
-            plane.localToWorld(lx0, ly0, wx0, wy0, wz0);
-            plane.localToWorld(lx1, ly1, wx1, wy1, wz1);
+            plane.localToWorld(f(lx0), f(ly0), wx0, wy0, wz0);
+            plane.localToWorld(f(lx1), f(ly1), wx1, wy1, wz1);
             wx0 += nx; wy0 += ny; wz0 += nz;
             wx1 += nx; wy1 += ny; wz1 += nz;
 
@@ -358,26 +366,28 @@ void SketchRenderer::renderSketch(const SketchPlane& plane, const float* view,
 
         bool selected = isActive && sel.isSelected(HitType::EllipseArc, ea.id);
         const auto& tc = ea.projected ? activeTheme().sketchProjected
-                       : selected ? activeTheme().sketchSelected : activeTheme().sketchLine;
+                       : selected ? activeTheme().sketchSelected
+                       : (dof > 0) ? activeTheme().sketchUnderconstrained
+                       : activeTheme().sketchLine;
         float r = tc[0], g = tc[1], bl = tc[2];
 
         float sweep = ea.endAngle - ea.startAngle;
         if (sweep <= 0) sweep += 2.0f * kPi;
         int segments = std::max(8, (int)(std::fabs(sweep) / (2.0f * kPi) * 64));
-        float cosR = std::cos(ea.rotation), sinR = std::sin(ea.rotation);
+        double cosR = std::cos(ea.rotation), sinR = std::sin(ea.rotation);
         for (int i = 0; i < segments; i++) {
             float a0 = ea.startAngle + sweep * i / segments;
             float a1 = ea.startAngle + sweep * (i + 1) / segments;
-            float ex0 = ea.semiMajor * std::cos(a0), ey0 = ea.semiMinor * std::sin(a0);
-            float ex1 = ea.semiMajor * std::cos(a1), ey1 = ea.semiMinor * std::sin(a1);
-            float lx0 = center->x + ex0 * cosR - ey0 * sinR;
-            float ly0 = center->y + ex0 * sinR + ey0 * cosR;
-            float lx1 = center->x + ex1 * cosR - ey1 * sinR;
-            float ly1 = center->y + ex1 * sinR + ey1 * cosR;
+            double ex0 = ea.semiMajor * std::cos(a0), ey0 = ea.semiMinor * std::sin(a0);
+            double ex1 = ea.semiMajor * std::cos(a1), ey1 = ea.semiMinor * std::sin(a1);
+            double lx0 = center->x + ex0 * cosR - ey0 * sinR;
+            double ly0 = center->y + ex0 * sinR + ey0 * cosR;
+            double lx1 = center->x + ex1 * cosR - ey1 * sinR;
+            double ly1 = center->y + ex1 * sinR + ey1 * cosR;
 
             float wx0, wy0, wz0, wx1, wy1, wz1;
-            plane.localToWorld(lx0, ly0, wx0, wy0, wz0);
-            plane.localToWorld(lx1, ly1, wx1, wy1, wz1);
+            plane.localToWorld(f(lx0), f(ly0), wx0, wy0, wz0);
+            plane.localToWorld(f(lx1), f(ly1), wx1, wy1, wz1);
             wx0 += nx; wy0 += ny; wz0 += nz;
             wx1 += nx; wy1 += ny; wz1 += nz;
 
@@ -392,14 +402,16 @@ void SketchRenderer::renderSketch(const SketchPlane& plane, const float* view,
 
         bool selected = isActive && sel.isSelected(HitType::Spline, sp.id);
         const auto& tc = sp.projected ? activeTheme().sketchProjected
-                       : selected ? activeTheme().sketchSelected : activeTheme().sketchLine;
+                       : selected ? activeTheme().sketchSelected
+                       : (dof > 0) ? activeTheme().sketchUnderconstrained
+                       : activeTheme().sketchLine;
         float r = tc[0], g = tc[1], bl = tc[2];
 
         auto pts = sampleSpline(sp, plane.sketch, 64);
         for (int i = 0; i + 1 < (int)pts.size(); i++) {
             float wx0, wy0, wz0, wx1, wy1, wz1;
-            plane.localToWorld(pts[i].x, pts[i].y, wx0, wy0, wz0);
-            plane.localToWorld(pts[i+1].x, pts[i+1].y, wx1, wy1, wz1);
+            plane.localToWorld(f(pts[i].x), f(pts[i].y), wx0, wy0, wz0);
+            plane.localToWorld(f(pts[i+1].x), f(pts[i+1].y), wx1, wy1, wz1);
             wx0 += nx; wy0 += ny; wz0 += nz;
             wx1 += nx; wy1 += ny; wz1 += nz;
 
@@ -412,11 +424,13 @@ void SketchRenderer::renderSketch(const SketchPlane& plane, const float* view,
     for (const auto& pt : plane.sketch.points) {
         if (pt.projected) continue;
         float wx, wy, wz;
-        plane.localToWorld(pt.x, pt.y, wx, wy, wz);
+        plane.localToWorld(f(pt.x), f(pt.y), wx, wy, wz);
         wx += nx; wy += ny; wz += nz;
 
         bool selected = isActive && sel.isSelected(HitType::Point, pt.id);
-        const auto& tc = selected ? activeTheme().sketchSelected : activeTheme().sketchLine;
+        const auto& tc = selected ? activeTheme().sketchSelected
+                       : (dof > 0) ? activeTheme().sketchUnderconstrained
+                       : activeTheme().sketchLine;
         float r = tc[0], g = tc[1], bl = tc[2];
 
         pointVerts.push_back({wx, wy, wz, r, g, bl, alpha});
@@ -434,7 +448,8 @@ void SketchRenderer::renderSketch(const SketchPlane& plane, const float* view,
 }
 
 void SketchRenderer::renderGrid(const SketchPlane& plane, const float* view,
-                                 const float* proj, float gridStep, float extent) {
+                                 const float* proj, float gridStep,
+                                 float startU, float endU, float startV, float endV) {
     std::vector<ColorVertex> verts;
 
     // Normal offset to prevent z-fighting on body faces
@@ -443,37 +458,39 @@ void SketchRenderer::renderGrid(const SketchPlane& plane, const float* view,
     float ony = plane.normal[1] * nOff;
     float onz = plane.normal[2] * nOff;
 
-    float start = -extent;
-    float end = extent;
-
-    for (float i = std::ceil(start / gridStep) * gridStep; i <= end; i += gridStep) {
-        bool isMajor = std::fabs(std::fmod(i, gridStep * 10.0f)) < gridStep * 0.1f;
+    // Lines parallel to the V axis (varying U position)
+    for (float u = std::ceil(startU / gridStep) * gridStep; u <= endU; u += gridStep) {
+        if (std::fabs(u) < gridStep * 0.01f) continue; // drawn as axis below
+        bool isMajor = std::fabs(std::fmod(u, gridStep * 10.0f)) < gridStep * 0.1f;
         float c = isMajor ? activeTheme().sketchGridMajor : activeTheme().sketchGridMinor;
-        float a = 0.5f;
-
-        if (std::fabs(i) < gridStep * 0.01f) continue;
-
         float wx0, wy0, wz0, wx1, wy1, wz1;
-        plane.localToWorld(i, start, wx0, wy0, wz0);
-        plane.localToWorld(i, end,   wx1, wy1, wz1);
-        verts.push_back({wx0+onx, wy0+ony, wz0+onz, c, c, c, a});
-        verts.push_back({wx1+onx, wy1+ony, wz1+onz, c, c, c, a});
-
-        plane.localToWorld(start, i, wx0, wy0, wz0);
-        plane.localToWorld(end,   i, wx1, wy1, wz1);
-        verts.push_back({wx0+onx, wy0+ony, wz0+onz, c, c, c, a});
-        verts.push_back({wx1+onx, wy1+ony, wz1+onz, c, c, c, a});
+        plane.localToWorld(u, startV, wx0, wy0, wz0);
+        plane.localToWorld(u, endV,   wx1, wy1, wz1);
+        verts.push_back({wx0+onx, wy0+ony, wz0+onz, c, c, c, 0.5f});
+        verts.push_back({wx1+onx, wy1+ony, wz1+onz, c, c, c, 0.5f});
     }
 
-    // Local axes on sketch plane
+    // Lines parallel to the U axis (varying V position)
+    for (float v = std::ceil(startV / gridStep) * gridStep; v <= endV; v += gridStep) {
+        if (std::fabs(v) < gridStep * 0.01f) continue; // drawn as axis below
+        bool isMajor = std::fabs(std::fmod(v, gridStep * 10.0f)) < gridStep * 0.1f;
+        float c = isMajor ? activeTheme().sketchGridMajor : activeTheme().sketchGridMinor;
+        float wx0, wy0, wz0, wx1, wy1, wz1;
+        plane.localToWorld(startU, v, wx0, wy0, wz0);
+        plane.localToWorld(endU,   v, wx1, wy1, wz1);
+        verts.push_back({wx0+onx, wy0+ony, wz0+onz, c, c, c, 0.5f});
+        verts.push_back({wx1+onx, wy1+ony, wz1+onz, c, c, c, 0.5f});
+    }
+
+    // Local axes on sketch plane (always span the full visible range)
     float wx0, wy0, wz0, wx1, wy1, wz1;
-    plane.localToWorld(start, 0, wx0, wy0, wz0);
-    plane.localToWorld(end,   0, wx1, wy1, wz1);
+    plane.localToWorld(startU, 0, wx0, wy0, wz0);
+    plane.localToWorld(endU,   0, wx1, wy1, wz1);
     verts.push_back({wx0+onx, wy0+ony, wz0+onz, 0.7f, 0.2f, 0.2f, 0.8f});
     verts.push_back({wx1+onx, wy1+ony, wz1+onz, 0.7f, 0.2f, 0.2f, 0.8f});
 
-    plane.localToWorld(0, start, wx0, wy0, wz0);
-    plane.localToWorld(0, end,   wx1, wy1, wz1);
+    plane.localToWorld(0, startV, wx0, wy0, wz0);
+    plane.localToWorld(0, endV,   wx1, wy1, wz1);
     verts.push_back({wx0+onx, wy0+ony, wz0+onz, 0.2f, 0.7f, 0.2f, 0.8f});
     verts.push_back({wx1+onx, wy1+ony, wz1+onz, 0.2f, 0.7f, 0.2f, 0.8f});
 
@@ -502,10 +519,10 @@ void SketchRenderer::renderToolPreview(const SketchPlane& plane, const float* vi
 
     std::vector<ColorVertex> verts;
 
-    auto addSeg = [&](float lx0, float ly0, float lx1, float ly1) {
+    auto addSeg = [&](double lx0, double ly0, double lx1, double ly1) {
         float wx0, wy0, wz0, wx1, wy1, wz1;
-        plane.localToWorld(lx0, ly0, wx0, wy0, wz0);
-        plane.localToWorld(lx1, ly1, wx1, wy1, wz1);
+        plane.localToWorld(f(lx0), f(ly0), wx0, wy0, wz0);
+        plane.localToWorld(f(lx1), f(ly1), wx1, wy1, wz1);
         verts.push_back({wx0+onx, wy0+ony, wz0+onz, r, g, b, a});
         verts.push_back({wx1+onx, wy1+ony, wz1+onz, r, g, b, a});
     };
@@ -516,7 +533,7 @@ void SketchRenderer::renderToolPreview(const SketchPlane& plane, const float* vi
             break;
         case ToolType::Circle: {
             int segments = 64;
-            float radius = distance(tool.firstPoint, cursorLocal);
+            double radius = distance(tool.firstPoint, cursorLocal);
             for (int i = 0; i < segments; i++) {
                 float a0 = 2.0f * kPi * i / segments;
                 float a1 = 2.0f * kPi * (i + 1) / segments;
@@ -530,7 +547,7 @@ void SketchRenderer::renderToolPreview(const SketchPlane& plane, const float* vi
         case ToolType::Rectangle: {
             Point2D p1 = tool.firstPoint;
             Point2D p2 = cursorLocal;
-            float corners[4][2] = {{p1.x,p1.y},{p2.x,p1.y},{p2.x,p2.y},{p1.x,p2.y}};
+            float corners[4][2] = {{(float)p1.x,(float)p1.y},{(float)p2.x,(float)p1.y},{(float)p2.x,(float)p2.y},{(float)p1.x,(float)p2.y}};
             for (int i = 0; i < 4; i++) {
                 int next = (i+1) % 4;
                 addSeg(corners[i][0], corners[i][1], corners[next][0], corners[next][1]);
@@ -538,9 +555,9 @@ void SketchRenderer::renderToolPreview(const SketchPlane& plane, const float* vi
             break;
         }
         case ToolType::CenterRect: {
-            float cx = tool.firstPoint.x, cy = tool.firstPoint.y;
-            float dx = cursorLocal.x - cx, dy = cursorLocal.y - cy;
-            float corners[4][2] = {{cx-dx,cy-dy},{cx+dx,cy-dy},{cx+dx,cy+dy},{cx-dx,cy+dy}};
+            double cx = tool.firstPoint.x, cy = tool.firstPoint.y;
+            double dx = cursorLocal.x - cx, dy = cursorLocal.y - cy;
+            double corners[4][2] = {{cx-dx,cy-dy},{cx+dx,cy-dy},{cx+dx,cy+dy},{cx-dx,cy+dy}};
             for (int i = 0; i < 4; i++) {
                 int next = (i+1) % 4;
                 addSeg(corners[i][0], corners[i][1], corners[next][0], corners[next][1]);
@@ -554,40 +571,39 @@ void SketchRenderer::renderToolPreview(const SketchPlane& plane, const float* vi
             } else if (arcTool.clickCount == 2) {
                 // Compute circumcircle from 3 points and draw arc
                 Point2D p1 = arcTool.point1, p2 = arcTool.point2, p3 = cursorLocal;
-                float ax = p1.x, ay = p1.y;
-                float bx = p2.x, by = p2.y;
-                float cx = p3.x, cy = p3.y;
-                float D = 2.0f * (ax*(by-cy) + bx*(cy-ay) + cx*(ay-by));
-                if (std::fabs(D) < 1e-6f) {
+                double ax = p1.x, ay = p1.y;
+                double bx = p2.x, by = p2.y;
+                double cx = p3.x, cy = p3.y;
+                double D = 2.0 * (ax*(by-cy) + bx*(cy-ay) + cx*(ay-by));
+                if (std::fabs(D) < 1e-6) {
                     // Collinear — draw line
                     addSeg(p1.x, p1.y, p3.x, p3.y);
                 } else {
-                    float a2 = ax*ax+ay*ay, b2 = bx*bx+by*by, c2 = cx*cx+cy*cy;
-                    float ux = (a2*(by-cy)+b2*(cy-ay)+c2*(ay-by))/D;
-                    float uy = (a2*(cx-bx)+b2*(ax-cx)+c2*(bx-ax))/D;
-                    float rad = std::sqrt((p1.x-ux)*(p1.x-ux)+(p1.y-uy)*(p1.y-uy));
-                    float sa = std::atan2(p1.y-uy, p1.x-ux);
-                    float ea = std::atan2(p3.y-uy, p3.x-ux);
-                    float ta = std::atan2(p2.y-uy, p2.x-ux);
+                    double a2 = ax*ax+ay*ay, b2 = bx*bx+by*by, c2 = cx*cx+cy*cy;
+                    double ux = (a2*(by-cy)+b2*(cy-ay)+c2*(ay-by))/D;
+                    double uy = (a2*(cx-bx)+b2*(ax-cx)+c2*(bx-ax))/D;
+                    double rad = std::sqrt((p1.x-ux)*(p1.x-ux)+(p1.y-uy)*(p1.y-uy));
+                    double sa = std::atan2(p1.y-uy, p1.x-ux);
+                    double ea = std::atan2(p3.y-uy, p3.x-ux);
+                    double ta = std::atan2(p2.y-uy, p2.x-ux);
 
                     // Determine sweep direction so arc passes through p2
-                    auto normA = [](float ang) {
-                        const float kTwoPi = 6.28318530718f;
-                        ang = std::fmod(ang, kTwoPi);
+                    auto normA = [](double ang) {
+                        ang = std::fmod(ang, (double)kTwoPi);
                         if (ang < 0) ang += kTwoPi;
                         return ang;
                     };
-                    float nsa = normA(sa), nea = normA(ea), nta = normA(ta);
-                    float ccwSweep = nea - nsa;
-                    if (ccwSweep <= 0) ccwSweep += 6.28318530718f;
-                    float toThrough = nta - nsa;
-                    if (toThrough < 0) toThrough += 6.28318530718f;
-                    float sweep = (toThrough < ccwSweep) ? ccwSweep : -(6.28318530718f - ccwSweep);
+                    double nsa = normA(sa), nea = normA(ea), nta = normA(ta);
+                    double ccwSweep = nea - nsa;
+                    if (ccwSweep <= 0) ccwSweep += 6.28318530718;
+                    double toThrough = nta - nsa;
+                    if (toThrough < 0) toThrough += 6.28318530718;
+                    double sweep = (toThrough < ccwSweep) ? ccwSweep : -(6.28318530718 - ccwSweep);
 
-                    int segs = std::max(8, (int)(std::fabs(sweep) / (2.0f*kPi) * 64));
+                    int segs = std::max(8, (int)(std::fabs(sweep) / (2.0*kPi) * 64));
                     for (int i = 0; i < segs; i++) {
-                        float t0 = sa + sweep * i / segs;
-                        float t1 = sa + sweep * (i+1) / segs;
+                        double t0 = sa + sweep * i / segs;
+                        double t1 = sa + sweep * (i+1) / segs;
                         addSeg(ux+rad*std::cos(t0), uy+rad*std::sin(t0),
                                ux+rad*std::cos(t1), uy+rad*std::sin(t1));
                     }
@@ -598,7 +614,7 @@ void SketchRenderer::renderToolPreview(const SketchPlane& plane, const float* vi
         case ToolType::ArcCenter: {
             if (arcTool.clickCount == 1) {
                 // Radius line from center to cursor + full circle preview
-                float rad = distance(arcTool.point1, cursorLocal);
+                double rad = distance(arcTool.point1, cursorLocal);
                 addSeg(arcTool.point1.x, arcTool.point1.y, cursorLocal.x, cursorLocal.y);
                 int segments = 64;
                 for (int i = 0; i < segments; i++) {
@@ -611,17 +627,17 @@ void SketchRenderer::renderToolPreview(const SketchPlane& plane, const float* vi
                 }
             } else if (arcTool.clickCount == 2) {
                 // Arc from start point sweeping CCW to cursor angle
-                float rad = distance(arcTool.point1, arcTool.point2);
-                float sa = std::atan2(arcTool.point2.y - arcTool.point1.y,
-                                      arcTool.point2.x - arcTool.point1.x);
-                float ea = std::atan2(cursorLocal.y - arcTool.point1.y,
-                                      cursorLocal.x - arcTool.point1.x);
-                float sweep = ea - sa;
-                if (sweep <= 0) sweep += 2.0f * kPi;
-                int segs = std::max(8, (int)(std::fabs(sweep) / (2.0f*kPi) * 64));
+                double rad = distance(arcTool.point1, arcTool.point2);
+                double sa = std::atan2(arcTool.point2.y - arcTool.point1.y,
+                                       arcTool.point2.x - arcTool.point1.x);
+                double ea = std::atan2(cursorLocal.y - arcTool.point1.y,
+                                       cursorLocal.x - arcTool.point1.x);
+                double sweep = ea - sa;
+                if (sweep <= 0) sweep += 2.0 * kPi;
+                int segs = std::max(8, (int)(std::fabs(sweep) / (2.0*kPi) * 64));
                 for (int i = 0; i < segs; i++) {
-                    float t0 = sa + sweep * i / segs;
-                    float t1 = sa + sweep * (i+1) / segs;
+                    double t0 = sa + sweep * i / segs;
+                    double t1 = sa + sweep * (i+1) / segs;
                     addSeg(arcTool.point1.x + rad*std::cos(t0),
                            arcTool.point1.y + rad*std::sin(t0),
                            arcTool.point1.x + rad*std::cos(t1),
@@ -629,8 +645,8 @@ void SketchRenderer::renderToolPreview(const SketchPlane& plane, const float* vi
                 }
                 // Radius lines to start and end
                 addSeg(arcTool.point1.x, arcTool.point1.y, arcTool.point2.x, arcTool.point2.y);
-                float ex = arcTool.point1.x + rad * std::cos(ea);
-                float ey = arcTool.point1.y + rad * std::sin(ea);
+                double ex = arcTool.point1.x + rad * std::cos(ea);
+                double ey = arcTool.point1.y + rad * std::sin(ea);
                 addSeg(arcTool.point1.x, arcTool.point1.y, ex, ey);
             }
             break;
@@ -697,19 +713,19 @@ void SketchRenderer::renderProfileHighlights(const SketchPlane& plane, const flo
                 float a1 = 2.0f * kPi * (s + 1) / segments;
 
                 float wcx, wcy, wcz;
-                plane.localToWorld(center.x, center.y, wcx, wcy, wcz);
+                plane.localToWorld(f(center.x), f(center.y), wcx, wcy, wcz);
                 verts.push_back(wcx + nx); verts.push_back(wcy + ny); verts.push_back(wcz + nz);
 
-                float lx0 = center.x + circle->radius * std::cos(a0);
-                float ly0 = center.y + circle->radius * std::sin(a0);
+                double lx0 = center.x + circle->radius * std::cos(a0);
+                double ly0 = center.y + circle->radius * std::sin(a0);
                 float wx0, wy0, wz0;
-                plane.localToWorld(lx0, ly0, wx0, wy0, wz0);
+                plane.localToWorld(f(lx0), f(ly0), wx0, wy0, wz0);
                 verts.push_back(wx0 + nx); verts.push_back(wy0 + ny); verts.push_back(wz0 + nz);
 
-                float lx1 = center.x + circle->radius * std::cos(a1);
-                float ly1 = center.y + circle->radius * std::sin(a1);
+                double lx1 = center.x + circle->radius * std::cos(a1);
+                double ly1 = center.y + circle->radius * std::sin(a1);
                 float wx1, wy1, wz1;
-                plane.localToWorld(lx1, ly1, wx1, wy1, wz1);
+                plane.localToWorld(f(lx1), f(ly1), wx1, wy1, wz1);
                 verts.push_back(wx1 + nx); verts.push_back(wy1 + ny); verts.push_back(wz1 + nz);
             }
 
@@ -734,10 +750,10 @@ void SketchRenderer::renderProfileHighlights(const SketchPlane& plane, const flo
                 float a0 = 2.0f * kPi * s / segments;
                 float a1 = 2.0f * kPi * (s + 1) / segments;
                 float wx0, wy0, wz0, wx1, wy1, wz1;
-                plane.localToWorld(center.x + circle->radius * std::cos(a0),
-                                   center.y + circle->radius * std::sin(a0), wx0, wy0, wz0);
-                plane.localToWorld(center.x + circle->radius * std::cos(a1),
-                                   center.y + circle->radius * std::sin(a1), wx1, wy1, wz1);
+                plane.localToWorld(f(center.x + circle->radius * std::cos(a0)),
+                                   f(center.y + circle->radius * std::sin(a0)), wx0, wy0, wz0);
+                plane.localToWorld(f(center.x + circle->radius * std::cos(a1)),
+                                   f(center.y + circle->radius * std::sin(a1)), wx1, wy1, wz1);
                 edgeVerts.push_back({wx0+nx, wy0+ny, wz0+nz, edgeColor[0], edgeColor[1], edgeColor[2], edgeColor[3]});
                 edgeVerts.push_back({wx1+nx, wy1+ny, wz1+nz, edgeColor[0], edgeColor[1], edgeColor[2], edgeColor[3]});
             }
@@ -765,13 +781,13 @@ void SketchRenderer::renderProfileHighlights(const SketchPlane& plane, const flo
                 // Inline ear-clipping fallback (no holes)
                 std::vector<int> indices(n);
                 for (int j = 0; j < n; j++) indices[j] = j;
-                float signedArea = 0;
+                double signedArea = 0;
                 for (int j = 0; j < n; j++) {
                     int jn = (j + 1) % n;
                     signedArea += pts[j].x * pts[jn].y - pts[jn].x * pts[j].y;
                 }
                 if (signedArea < 0) std::reverse(indices.begin(), indices.end());
-                auto cross2D = [](Point2D o, Point2D a, Point2D b) -> float {
+                auto cross2D = [](Point2D o, Point2D a, Point2D b) -> double {
                     return (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
                 };
                 auto pointInTriangle = [&](Point2D p, Point2D a, Point2D b, Point2D c) -> bool {
@@ -815,7 +831,7 @@ void SketchRenderer::renderProfileHighlights(const SketchPlane& plane, const flo
                     int idx = triIdx[ti + k];
                     if (idx < 0 || idx >= n) continue;
                     float wx, wy, wz;
-                    plane.localToWorld(pts[idx].x, pts[idx].y, wx, wy, wz);
+                    plane.localToWorld(f(pts[idx].x), f(pts[idx].y), wx, wy, wz);
                     verts.push_back(wx + nx); verts.push_back(wy + ny); verts.push_back(wz + nz);
                 }
             }
@@ -844,8 +860,8 @@ void SketchRenderer::renderProfileHighlights(const SketchPlane& plane, const flo
                 for (int j = 0; j < bn; j++) {
                     int jn = (j + 1) % bn;
                     float wax, way, waz, wbx, wby, wbz;
-                    plane.localToWorld(bnd[j].x, bnd[j].y, wax, way, waz);
-                    plane.localToWorld(bnd[jn].x, bnd[jn].y, wbx, wby, wbz);
+                    plane.localToWorld(f(bnd[j].x), f(bnd[j].y), wax, way, waz);
+                    plane.localToWorld(f(bnd[jn].x), f(bnd[jn].y), wbx, wby, wbz);
                     edgeVerts.push_back({wax+nx, way+ny, waz+nz, edgeColor[0], edgeColor[1], edgeColor[2], edgeColor[3]});
                     edgeVerts.push_back({wbx+nx, wby+ny, wbz+nz, edgeColor[0], edgeColor[1], edgeColor[2], edgeColor[3]});
                 }
@@ -889,7 +905,7 @@ void SketchRenderer::renderSelectionOverlay(const SketchPlane& plane, const floa
         // Draw rectangle border
         Point2D a = sel.dragAnchor;
         Point2D b = cursorLocal;
-        float corners[4][2] = {{a.x, a.y}, {b.x, a.y}, {b.x, b.y}, {a.x, b.y}};
+        float corners[4][2] = {{(float)a.x,(float)a.y},{(float)b.x,(float)a.y},{(float)b.x,(float)b.y},{(float)a.x,(float)b.y}};
 
         ColorVertex border[8];
         for (int i = 0; i < 4; i++) {
@@ -927,24 +943,24 @@ void SketchRenderer::renderSelectionOverlay(const SketchPlane& plane, const floa
         std::vector<ColorVertex> verts;
         for (int i = 0; i < (int)sel.lassoPoints.size() - 1; i++) {
             float wa[3], wb[3];
-            plane.localToWorld(sel.lassoPoints[i].x, sel.lassoPoints[i].y, wa[0], wa[1], wa[2]);
-            plane.localToWorld(sel.lassoPoints[i+1].x, sel.lassoPoints[i+1].y, wb[0], wb[1], wb[2]);
+            plane.localToWorld(f(sel.lassoPoints[i].x), f(sel.lassoPoints[i].y), wa[0], wa[1], wa[2]);
+            plane.localToWorld(f(sel.lassoPoints[i+1].x), f(sel.lassoPoints[i+1].y), wb[0], wb[1], wb[2]);
             verts.push_back({wa[0]+nx, wa[1]+ny, wa[2]+nz, cyan[0], cyan[1], cyan[2], cyan[3]});
             verts.push_back({wb[0]+nx, wb[1]+ny, wb[2]+nz, cyan[0], cyan[1], cyan[2], cyan[3]});
         }
         // Closing segment back to cursor
         {
             float wa[3], wb[3];
-            plane.localToWorld(sel.lassoPoints.back().x, sel.lassoPoints.back().y, wa[0], wa[1], wa[2]);
-            plane.localToWorld(cursorLocal.x, cursorLocal.y, wb[0], wb[1], wb[2]);
+            plane.localToWorld(f(sel.lassoPoints.back().x), f(sel.lassoPoints.back().y), wa[0], wa[1], wa[2]);
+            plane.localToWorld(f(cursorLocal.x), f(cursorLocal.y), wb[0], wb[1], wb[2]);
             verts.push_back({wa[0]+nx, wa[1]+ny, wa[2]+nz, cyan[0], cyan[1], cyan[2], cyan[3]});
             verts.push_back({wb[0]+nx, wb[1]+ny, wb[2]+nz, cyan[0], cyan[1], cyan[2], cyan[3]});
         }
         // Close polygon: cursor back to first point
         {
             float wa[3], wb[3];
-            plane.localToWorld(cursorLocal.x, cursorLocal.y, wa[0], wa[1], wa[2]);
-            plane.localToWorld(sel.lassoPoints[0].x, sel.lassoPoints[0].y, wb[0], wb[1], wb[2]);
+            plane.localToWorld(f(cursorLocal.x), f(cursorLocal.y), wa[0], wa[1], wa[2]);
+            plane.localToWorld(f(sel.lassoPoints[0].x), f(sel.lassoPoints[0].y), wb[0], wb[1], wb[2]);
             verts.push_back({wa[0]+nx, wa[1]+ny, wa[2]+nz, cyan[0], cyan[1], cyan[2], cyan[3]});
             verts.push_back({wb[0]+nx, wb[1]+ny, wb[2]+nz, cyan[0], cyan[1], cyan[2], cyan[3]});
         }
@@ -973,17 +989,33 @@ void SketchRenderer::renderSnapIndicator(const SketchPlane& plane, const float* 
 
     std::vector<ColorVertex> verts;
 
-    // Cross indicator
     float wx0, wy0, wz0, wx1, wy1, wz1;
-    plane.localToWorld(snap.position.x - sz, snap.position.y, wx0, wy0, wz0);
-    plane.localToWorld(snap.position.x + sz, snap.position.y, wx1, wy1, wz1);
-    verts.push_back({wx0+onx, wy0+ony, wz0+onz, r, g, b, a});
-    verts.push_back({wx1+onx, wy1+ony, wz1+onz, r, g, b, a});
 
-    plane.localToWorld(snap.position.x, snap.position.y - sz, wx0, wy0, wz0);
-    plane.localToWorld(snap.position.x, snap.position.y + sz, wx1, wy1, wz1);
-    verts.push_back({wx0+onx, wy0+ony, wz0+onz, r, g, b, a});
-    verts.push_back({wx1+onx, wy1+ony, wz1+onz, r, g, b, a});
+    if (snap.type == SnapType::Quadrant) {
+        // Diamond indicator (rotated square) for quadrant snaps
+        auto addSeg = [&](float ax, float ay, float bx, float by) {
+            plane.localToWorld(ax, ay, wx0, wy0, wz0);
+            plane.localToWorld(bx, by, wx1, wy1, wz1);
+            verts.push_back({wx0+onx, wy0+ony, wz0+onz, r, g, b, a});
+            verts.push_back({wx1+onx, wy1+ony, wz1+onz, r, g, b, a});
+        };
+        float px = (float)snap.position.x, py = (float)snap.position.y;
+        addSeg(px,      py + sz, px + sz, py     ); // N → E
+        addSeg(px + sz, py,      px,      py - sz ); // E → S
+        addSeg(px,      py - sz, px - sz, py     ); // S → W
+        addSeg(px - sz, py,      px,      py + sz ); // W → N
+    } else {
+        // Cross indicator for all other snap types
+        plane.localToWorld(f(snap.position.x) - sz, f(snap.position.y), wx0, wy0, wz0);
+        plane.localToWorld(f(snap.position.x) + sz, f(snap.position.y), wx1, wy1, wz1);
+        verts.push_back({wx0+onx, wy0+ony, wz0+onz, r, g, b, a});
+        verts.push_back({wx1+onx, wy1+ony, wz1+onz, r, g, b, a});
+
+        plane.localToWorld(f(snap.position.x), f(snap.position.y) - sz, wx0, wy0, wz0);
+        plane.localToWorld(f(snap.position.x), f(snap.position.y) + sz, wx1, wy1, wz1);
+        verts.push_back({wx0+onx, wy0+ony, wz0+onz, r, g, b, a});
+        verts.push_back({wx1+onx, wy1+ony, wz1+onz, r, g, b, a});
+    }
 
     drawLines(view, proj, verts.data(), (int)verts.size());
 }

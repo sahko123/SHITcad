@@ -45,12 +45,14 @@ static const char* constraintTypeToStr(ConstraintType t) {
         case ConstraintType::EqualLength:   return "EqualLength";
         case ConstraintType::Perpendicular: return "Perpendicular";
         case ConstraintType::Parallel:      return "Parallel";
+        case ConstraintType::Collinear:     return "Collinear";
         case ConstraintType::Tangent:       return "Tangent";
         case ConstraintType::Angle:         return "Angle";
         case ConstraintType::Symmetric:     return "Symmetric";
         case ConstraintType::Concentric:    return "Concentric";
         case ConstraintType::Midpoint:      return "Midpoint";
         case ConstraintType::PointLineDistance: return "PointLineDistance";
+        case ConstraintType::PointOnCircle:     return "PointOnCircle";
     }
     return "Coincident";
 }
@@ -67,12 +69,14 @@ static ConstraintType constraintTypeFromStr(const std::string& s) {
     if (s == "EqualLength")   return ConstraintType::EqualLength;
     if (s == "Perpendicular") return ConstraintType::Perpendicular;
     if (s == "Parallel")      return ConstraintType::Parallel;
+    if (s == "Collinear")     return ConstraintType::Collinear;
     if (s == "Tangent")       return ConstraintType::Tangent;
     if (s == "Angle")         return ConstraintType::Angle;
     if (s == "Symmetric")     return ConstraintType::Symmetric;
     if (s == "Concentric")    return ConstraintType::Concentric;
     if (s == "Midpoint")      return ConstraintType::Midpoint;
     if (s == "PointLineDistance") return ConstraintType::PointLineDistance;
+    if (s == "PointOnCircle")     return ConstraintType::PointOnCircle;
     return ConstraintType::Coincident;
 }
 

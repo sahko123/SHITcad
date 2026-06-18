@@ -100,11 +100,13 @@ enum class ConstraintType : uint8_t {
     EqualLength,
     Perpendicular,
     Parallel,
+    Collinear,
     Tangent,
     Angle,
     Symmetric,
     Concentric,
     Midpoint,
+    PointOnCircle,
 };
 
 struct Constraint {
@@ -180,6 +182,9 @@ struct Sketch {
 
     // Check if a point is referenced by any line, circle, arc, ellipse, or spline
     bool isPointReferenced(EntityID pointID) const;
+
+    // Returns true if the point can be removed (not projected and not referenced)
+    bool canRemovePoint(EntityID pointID) const;
 
     // Remove all constraints that reference a given entity
     void removeConstraintsReferencing(EntityID id);

@@ -18,6 +18,7 @@ Theme Theme::dark() {
     t.gridMajor[0] = 0.35f; t.gridMajor[1] = 0.35f; t.gridMajor[2] = 0.35f;
 
     t.sketchLine[0] = 1.0f; t.sketchLine[1] = 1.0f; t.sketchLine[2] = 1.0f;
+    t.sketchUnderconstrained[0] = 0.4f; t.sketchUnderconstrained[1] = 0.65f; t.sketchUnderconstrained[2] = 1.0f;
     t.sketchSelected[0] = 1.0f; t.sketchSelected[1] = 0.65f; t.sketchSelected[2] = 0.0f;
     t.sketchGridMinor = 0.2f;
     t.sketchGridMajor = 0.35f;
@@ -44,6 +45,7 @@ Theme Theme::light() {
     t.gridMajor[0] = 0.55f; t.gridMajor[1] = 0.55f; t.gridMajor[2] = 0.55f;
 
     t.sketchLine[0] = 0.1f; t.sketchLine[1] = 0.1f; t.sketchLine[2] = 0.1f;
+    t.sketchUnderconstrained[0] = 0.2f; t.sketchUnderconstrained[1] = 0.45f; t.sketchUnderconstrained[2] = 0.85f;
     t.sketchSelected[0] = 1.0f; t.sketchSelected[1] = 0.5f; t.sketchSelected[2] = 0.0f;
     t.sketchGridMinor = 0.78f;
     t.sketchGridMajor = 0.65f;

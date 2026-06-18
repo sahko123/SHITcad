@@ -13,6 +13,7 @@
 #include <cmath>
 #include <algorithm>
 #include <string>
+#include <unordered_map>
 
 namespace shitcad {
 
@@ -30,50 +31,50 @@ static void renderTwoPointDim(ImDrawList* dl, const SketchPlane& sp, const Const
     bool selected = false, std::vector<DimLabelRectOut>* labelRects = nullptr, int planeIndex = -1) {
 
     // All geometry is computed in sketch-plane local 2D, then projected to screen.
-    float ldx = b2d.x - a2d.x, ldy = b2d.y - a2d.y;
-    float llen = std::sqrt(ldx * ldx + ldy * ldy);
-    if (llen < 1e-6f) return;
+    double ldx = b2d.x - a2d.x, ldy = b2d.y - a2d.y;
+    double llen = std::sqrt(ldx * ldx + ldy * ldy);
+    if (llen < 1e-6) return;
 
-    float lux = ldx / llen, luy = ldy / llen; // unit along measurement (local)
-    float lpx = -luy, lpy = lux;              // perpendicular (local)
+    double lux = ldx / llen, luy = ldy / llen; // unit along measurement (local)
+    double lpx = -luy, lpy = lux;              // perpendicular (local)
 
     // Convert screen-pixel sizes to local units
     float s = (pxPerLocal > 1e-6f) ? pxPerLocal : 1.0f;
-    float arrowLenL = arrowLen / s;
-    float arrowWidthL = arrowWidth / s;
-    float extGapL = extGap / s;
-    float extOverL = extOvershoot / s;
+    double arrowLenL = arrowLen / s;
+    double arrowWidthL = arrowWidth / s;
+    double extGapL = extGap / s;
+    double extOverL = extOvershoot / s;
 
     // Perpendicular offset in local coords
     bool hasPlacement = (c.dimOffsetX != 0 || c.dimOffsetY != 0);
-    float offsetLocal;
+    double offsetLocal;
     if (hasPlacement) {
         offsetLocal = c.dimOffsetX * lpx + c.dimOffsetY * lpy;
     } else {
-        offsetLocal = 22.0f / s;
+        offsetLocal = 22.0 / s;
     }
 
     // Dimension line endpoints in local space
-    float dax = a2d.x + lpx * offsetLocal, day = a2d.y + lpy * offsetLocal;
-    float dbx = b2d.x + lpx * offsetLocal, dby = b2d.y + lpy * offsetLocal;
+    double dax = a2d.x + lpx * offsetLocal, day = a2d.y + lpy * offsetLocal;
+    double dbx = b2d.x + lpx * offsetLocal, dby = b2d.y + lpy * offsetLocal;
 
     // Extension lines in local space
-    float signExt = (offsetLocal >= 0) ? 1.0f : -1.0f;
-    float ea0x = a2d.x + lpx * extGapL * signExt,  ea0y = a2d.y + lpy * extGapL * signExt;
-    float ea1x = a2d.x + lpx * (offsetLocal + extOverL * signExt), ea1y = a2d.y + lpy * (offsetLocal + extOverL * signExt);
-    float eb0x = b2d.x + lpx * extGapL * signExt,  eb0y = b2d.y + lpy * extGapL * signExt;
-    float eb1x = b2d.x + lpx * (offsetLocal + extOverL * signExt), eb1y = b2d.y + lpy * (offsetLocal + extOverL * signExt);
+    double signExt = (offsetLocal >= 0) ? 1.0 : -1.0;
+    double ea0x = a2d.x + lpx * extGapL * signExt,  ea0y = a2d.y + lpy * extGapL * signExt;
+    double ea1x = a2d.x + lpx * (offsetLocal + extOverL * signExt), ea1y = a2d.y + lpy * (offsetLocal + extOverL * signExt);
+    double eb0x = b2d.x + lpx * extGapL * signExt,  eb0y = b2d.y + lpy * extGapL * signExt;
+    double eb1x = b2d.x + lpx * (offsetLocal + extOverL * signExt), eb1y = b2d.y + lpy * (offsetLocal + extOverL * signExt);
 
     // Arrow geometry in local space
-    float aA1x = dax + lux*arrowLenL + lpx*arrowWidthL, aA1y = day + luy*arrowLenL + lpy*arrowWidthL;
-    float aA2x = dax + lux*arrowLenL - lpx*arrowWidthL, aA2y = day + luy*arrowLenL - lpy*arrowWidthL;
-    float aB1x = dbx - lux*arrowLenL + lpx*arrowWidthL, aB1y = dby - luy*arrowLenL + lpy*arrowWidthL;
-    float aB2x = dbx - lux*arrowLenL - lpx*arrowWidthL, aB2y = dby - luy*arrowLenL - lpy*arrowWidthL;
+    double aA1x = dax + lux*arrowLenL + lpx*arrowWidthL, aA1y = day + luy*arrowLenL + lpy*arrowWidthL;
+    double aA2x = dax + lux*arrowLenL - lpx*arrowWidthL, aA2y = day + luy*arrowLenL - lpy*arrowWidthL;
+    double aB1x = dbx - lux*arrowLenL + lpx*arrowWidthL, aB1y = dby - luy*arrowLenL + lpy*arrowWidthL;
+    double aB2x = dbx - lux*arrowLenL - lpx*arrowWidthL, aB2y = dby - luy*arrowLenL - lpy*arrowWidthL;
 
     // Project all local-space points to screen
-    auto toScr = [&](float lx, float ly, float& sx, float& sy) -> bool {
+    auto toScr = [&](double lx, double ly, float& sx, float& sy) -> bool {
         float w[3];
-        sp.localToWorld(lx, ly, w[0], w[1], w[2]);
+        sp.localToWorld(f(lx), f(ly), w[0], w[1], w[2]);
         return worldToScreen(w, view, proj, vpW, vpH, sx, sy);
     };
 
@@ -105,11 +106,15 @@ static void renderTwoPointDim(ImDrawList* dl, const SketchPlane& sp, const Const
     // Text at midpoint of dimension line (screen-aligned for readability)
     char buf[80];
     char valBuf[64];
-    formatDimensionText(valBuf, sizeof(valBuf), c.value, c.inputUnit, c.inputValue);
-    if (c.driven)
+    if (c.driven) {
+        // Show the actual current measurement so driven dims always reflect geometry state.
+        // llen is the distance between the two geometry points passed in (already in mm).
+        formatDimensionText(valBuf, sizeof(valBuf), f(llen), "", 0.0f);
         snprintf(buf, sizeof(buf), "(%s%s)", prefix, valBuf);
-    else
+    } else {
+        formatDimensionText(valBuf, sizeof(valBuf), f(c.value), c.inputUnit, f(c.inputValue));
         snprintf(buf, sizeof(buf), "%s%s", prefix, valBuf);
+    }
     ImVec2 textSize = ImGui::CalcTextSize(buf);
     float tmx = (sda[0] + sdb[0]) * 0.5f, tmy = (sda[1] + sdb[1]) * 0.5f;
     float pad = 2.0f;
@@ -145,18 +150,18 @@ static void renderAngleDim(ImDrawList* dl, const SketchPlane& sp, const Sketch& 
     // Find shared vertex or line-line intersection
     Point2D vertex;
     Point2D dir1End, dir2End;
-    float eps = 1e-3f;
+    double eps = 1e-3;
     auto ptEq = [eps](Point2D a, Point2D b) { return std::fabs(a.x-b.x)<eps && std::fabs(a.y-b.y)<eps; };
 
     if (ptEq(a1, a2) || ptEq(a1, b2))      { vertex = a1; }
     else if (ptEq(b1, a2) || ptEq(b1, b2)) { vertex = b1; }
     else {
         // No shared vertex — compute intersection of infinite lines
-        float ldx1 = b1.x-a1.x, ldy1 = b1.y-a1.y;
-        float ldx2 = b2.x-a2.x, ldy2 = b2.y-a2.y;
-        float denom = ldx1*ldy2 - ldy1*ldx2;
-        if (std::fabs(denom) < 1e-6f) return; // parallel
-        float t = ((a2.x-a1.x)*ldy2 - (a2.y-a1.y)*ldx2) / denom;
+        double ldx1 = b1.x-a1.x, ldy1 = b1.y-a1.y;
+        double ldx2 = b2.x-a2.x, ldy2 = b2.y-a2.y;
+        double denom = ldx1*ldy2 - ldy1*ldx2;
+        if (std::fabs(denom) < 1e-6) return; // parallel
+        double t = ((a2.x-a1.x)*ldy2 - (a2.y-a1.y)*ldx2) / denom;
         vertex = { a1.x + t*ldx1, a1.y + t*ldy1 };
     }
     // Direction from vertex toward farther endpoint of each line
@@ -164,35 +169,35 @@ static void renderAngleDim(ImDrawList* dl, const SketchPlane& sp, const Sketch& 
     dir2End = (distance(vertex, b2) >= distance(vertex, a2)) ? b2 : a2;
 
     // Direction vectors from vertex
-    float dx1 = dir1End.x - vertex.x, dy1 = dir1End.y - vertex.y;
-    float dx2 = dir2End.x - vertex.x, dy2 = dir2End.y - vertex.y;
-    float len1 = std::sqrt(dx1*dx1 + dy1*dy1);
-    float len2 = std::sqrt(dx2*dx2 + dy2*dy2);
-    if (len1 < 1e-6f || len2 < 1e-6f) return;
+    double dx1 = dir1End.x - vertex.x, dy1 = dir1End.y - vertex.y;
+    double dx2 = dir2End.x - vertex.x, dy2 = dir2End.y - vertex.y;
+    double len1 = std::sqrt(dx1*dx1 + dy1*dy1);
+    double len2 = std::sqrt(dx2*dx2 + dy2*dy2);
+    if (len1 < 1e-6 || len2 < 1e-6) return;
 
-    float angle1 = std::atan2(dy1, dx1); // local angle of dir1
+    double angle1 = std::atan2(dy1, dx1); // local angle of dir1
 
     // Determine sweep direction: CCW or CW from dir1
     // Compute the CCW angle from dir1 to dir2
-    float crossV = dx1*dy2 - dy1*dx2;
-    float dotV = dx1*dx2 + dy1*dy2;
-    float ccwRad = std::atan2(crossV, dotV);
-    if (ccwRad < 0) ccwRad += 2.0f * 3.14159265358979f;
-    float ccwDeg = ccwRad * 180.0f / 3.14159265358979f;
-    float cwDeg = 360.0f - ccwDeg;
+    double crossV = dx1*dy2 - dy1*dx2;
+    double dotV = dx1*dx2 + dy1*dy2;
+    double ccwRad = std::atan2(crossV, dotV);
+    if (ccwRad < 0) ccwRad += 2.0 * 3.14159265358979;
+    double ccwDeg = ccwRad * 180.0 / 3.14159265358979;
+    double cwDeg = 360.0 - ccwDeg;
 
     // If c.value is closer to the CCW angle, sweep CCW; otherwise sweep CW
-    float spanRad;
+    double spanRad;
     if (std::fabs(c.value - ccwDeg) <= std::fabs(c.value - cwDeg))
-        spanRad = c.value * 3.14159265358979f / 180.0f;   // CCW (positive)
+        spanRad = c.value * 3.14159265358979 / 180.0;   // CCW (positive)
     else
-        spanRad = -c.value * 3.14159265358979f / 180.0f;  // CW (negative)
+        spanRad = -c.value * 3.14159265358979 / 180.0;  // CW (negative)
 
     // Arc radius in local coords — use dimOffset to control, default ~20% of shortest line
-    float arcRadiusLocal = std::min(len1, len2) * 0.3f;
+    double arcRadiusLocal = std::min(len1, len2) * 0.3;
     if (c.dimOffsetX != 0 || c.dimOffsetY != 0) {
-        float offDist = std::sqrt(c.dimOffsetX * c.dimOffsetX + c.dimOffsetY * c.dimOffsetY);
-        if (offDist > 1e-3f) arcRadiusLocal = offDist;
+        double offDist = std::sqrt(c.dimOffsetX * c.dimOffsetX + c.dimOffsetY * c.dimOffsetY);
+        if (offDist > 1e-3) arcRadiusLocal = offDist;
     }
 
     ImU32 dimColor = c.driven ? theme.dimDrivenLineColor : theme.dimLineColor;
@@ -203,12 +208,12 @@ static void renderAngleDim(ImDrawList* dl, const SketchPlane& sp, const Sketch& 
     std::vector<ImVec2> arcScreen(steps + 1);
     bool allVisible = true;
     for (int i = 0; i <= steps; i++) {
-        float t = (float)i / steps;
-        float a = angle1 + t * spanRad;
-        float lx = vertex.x + arcRadiusLocal * std::cos(a);
-        float ly = vertex.y + arcRadiusLocal * std::sin(a);
+        double t = (double)i / steps;
+        double a = angle1 + t * spanRad;
+        double lx = vertex.x + arcRadiusLocal * std::cos(a);
+        double ly = vertex.y + arcRadiusLocal * std::sin(a);
         float w[3];
-        sp.localToWorld(lx, ly, w[0], w[1], w[2]);
+        sp.localToWorld(f(lx), f(ly), w[0], w[1], w[2]);
         float sc[2];
         if (!worldToScreen(w, view, proj, vpW, vpH, sc[0], sc[1])) { allVisible = false; break; }
         arcScreen[i] = { sc[0], sc[1] };
@@ -223,26 +228,26 @@ static void renderAngleDim(ImDrawList* dl, const SketchPlane& sp, const Sketch& 
     // Arrowheads at arc endpoints — computed in local space
     float arrowLenL = 8.0f / pxPerLocal, arrowWidthL = 3.5f / pxPerLocal;
 
-    auto toScr = [&](float lx, float ly, float& sx, float& sy) -> bool {
+    auto toScr = [&](double lx, double ly, float& sx, float& sy) -> bool {
         float w[3];
-        sp.localToWorld(lx, ly, w[0], w[1], w[2]);
+        sp.localToWorld(f(lx), f(ly), w[0], w[1], w[2]);
         return worldToScreen(w, view, proj, vpW, vpH, sx, sy);
     };
 
     // Arrow at start (tangent into arc in local space)
     {
-        float startA = angle1;
-        float nextA = angle1 + spanRad / steps;
-        float tipLx = vertex.x + arcRadiusLocal * std::cos(startA);
-        float tipLy = vertex.y + arcRadiusLocal * std::sin(startA);
-        float tdx = std::cos(nextA) - std::cos(startA);
-        float tdy = std::sin(nextA) - std::sin(startA);
-        float tlen = std::sqrt(tdx*tdx + tdy*tdy);
-        if (tlen > 1e-8f) {
-            float tux = tdx / tlen, tuy = tdy / tlen;
-            float pnx = -tuy, pny = tux;
-            float a1x = tipLx + tux*arrowLenL + pnx*arrowWidthL, a1y = tipLy + tuy*arrowLenL + pny*arrowWidthL;
-            float a2x = tipLx + tux*arrowLenL - pnx*arrowWidthL, a2y = tipLy + tuy*arrowLenL - pny*arrowWidthL;
+        double startA = angle1;
+        double nextA = angle1 + spanRad / steps;
+        double tipLx = vertex.x + arcRadiusLocal * std::cos(startA);
+        double tipLy = vertex.y + arcRadiusLocal * std::sin(startA);
+        double tdx = std::cos(nextA) - std::cos(startA);
+        double tdy = std::sin(nextA) - std::sin(startA);
+        double tlen = std::sqrt(tdx*tdx + tdy*tdy);
+        if (tlen > 1e-8) {
+            double tux = tdx / tlen, tuy = tdy / tlen;
+            double pnx = -tuy, pny = tux;
+            double a1x = tipLx + tux*arrowLenL + pnx*arrowWidthL, a1y = tipLy + tuy*arrowLenL + pny*arrowWidthL;
+            double a2x = tipLx + tux*arrowLenL - pnx*arrowWidthL, a2y = tipLy + tuy*arrowLenL - pny*arrowWidthL;
             float st[2], s1[2], s2[2];
             if (toScr(tipLx, tipLy, st[0], st[1]) && toScr(a1x, a1y, s1[0], s1[1]) && toScr(a2x, a2y, s2[0], s2[1]))
                 dl->AddTriangleFilled({st[0], st[1]}, {s1[0], s1[1]}, {s2[0], s2[1]}, dimColor);
@@ -250,18 +255,18 @@ static void renderAngleDim(ImDrawList* dl, const SketchPlane& sp, const Sketch& 
     }
     // Arrow at end (tangent backward into arc in local space)
     {
-        float endA = angle1 + spanRad;
-        float prevA = angle1 + spanRad * (steps - 1.0f) / steps;
-        float tipLx = vertex.x + arcRadiusLocal * std::cos(endA);
-        float tipLy = vertex.y + arcRadiusLocal * std::sin(endA);
-        float tdx = std::cos(prevA) - std::cos(endA);
-        float tdy = std::sin(prevA) - std::sin(endA);
-        float tlen = std::sqrt(tdx*tdx + tdy*tdy);
-        if (tlen > 1e-8f) {
-            float tux = tdx / tlen, tuy = tdy / tlen;
-            float pnx = -tuy, pny = tux;
-            float a1x = tipLx + tux*arrowLenL + pnx*arrowWidthL, a1y = tipLy + tuy*arrowLenL + pny*arrowWidthL;
-            float a2x = tipLx + tux*arrowLenL - pnx*arrowWidthL, a2y = tipLy + tuy*arrowLenL - pny*arrowWidthL;
+        double endA = angle1 + spanRad;
+        double prevA = angle1 + spanRad * (steps - 1.0) / steps;
+        double tipLx = vertex.x + arcRadiusLocal * std::cos(endA);
+        double tipLy = vertex.y + arcRadiusLocal * std::sin(endA);
+        double tdx = std::cos(prevA) - std::cos(endA);
+        double tdy = std::sin(prevA) - std::sin(endA);
+        double tlen = std::sqrt(tdx*tdx + tdy*tdy);
+        if (tlen > 1e-8) {
+            double tux = tdx / tlen, tuy = tdy / tlen;
+            double pnx = -tuy, pny = tux;
+            double a1x = tipLx + tux*arrowLenL + pnx*arrowWidthL, a1y = tipLy + tuy*arrowLenL + pny*arrowWidthL;
+            double a2x = tipLx + tux*arrowLenL - pnx*arrowWidthL, a2y = tipLy + tuy*arrowLenL - pny*arrowWidthL;
             float st[2], s1[2], s2[2];
             if (toScr(tipLx, tipLy, st[0], st[1]) && toScr(a1x, a1y, s1[0], s1[1]) && toScr(a2x, a2y, s2[0], s2[1]))
                 dl->AddTriangleFilled({st[0], st[1]}, {s1[0], s1[1]}, {s2[0], s2[1]}, dimColor);
@@ -269,15 +274,15 @@ static void renderAngleDim(ImDrawList* dl, const SketchPlane& sp, const Sketch& 
     }
 
     // Text at arc midpoint — offset outward from vertex in local space
-    float midA = angle1 + spanRad * 0.5f;
-    float textOffL = 10.0f / pxPerLocal;
-    float textLx = vertex.x + (arcRadiusLocal + textOffL) * std::cos(midA);
-    float textLy = vertex.y + (arcRadiusLocal + textOffL) * std::sin(midA);
+    double midA = angle1 + spanRad * 0.5;
+    double textOffL = 10.0 / pxPerLocal;
+    double textLx = vertex.x + (arcRadiusLocal + textOffL) * std::cos(midA);
+    double textLy = vertex.y + (arcRadiusLocal + textOffL) * std::sin(midA);
     float tmx, tmy;
     if (!toScr(textLx, textLy, tmx, tmy)) return;
 
     char buf[80];
-    formatAngleText(buf, sizeof(buf), c.value);
+    formatAngleText(buf, sizeof(buf), f(c.value));
     if (c.driven) {
         char tmp[80];
         snprintf(tmp, sizeof(tmp), "(%s)", buf);
@@ -338,9 +343,9 @@ void App::handleDimToolClick(Sketch& sketch) {
                     dimTool_.selType = HitType::Line;
                 dimTool_.entityA = cc->entityA;
                 dimTool_.entityB = cc->entityB;
-                dimTool_.measuredMm = cc->value;
+                dimTool_.measuredMm = f(cc->value);
                 if (cc->type == ConstraintType::Angle)
-                    formatAngleText(dimTool_.inputBuf, sizeof(dimTool_.inputBuf), cc->value);
+                    formatAngleText(dimTool_.inputBuf, sizeof(dimTool_.inputBuf), f(cc->value));
                 else if (!cc->inputUnit.empty())
                     snprintf(dimTool_.inputBuf, sizeof(dimTool_.inputBuf), "%.4g%s", cc->inputValue, cc->inputUnit.c_str());
                 else
@@ -390,18 +395,19 @@ void App::handleDimToolClick(Sketch& sketch) {
             }
             Point2D la = sketch.getPointPos(line->startPt);
             Point2D lb = sketch.getPointPos(line->endPt);
-            float ldx = lb.x - la.x, ldy = lb.y - la.y;
-            float lineLen = std::sqrt(ldx*ldx + ldy*ldy);
-            if (lineLen < 1e-6f) return;
-            float cross = (pt->x - la.x)*ldy - (pt->y - la.y)*ldx;
+            double ldx = lb.x - la.x, ldy = lb.y - la.y;
+            double lineLen = std::sqrt(ldx*ldx + ldy*ldy);
+            if (lineLen < 1e-6) return;
+            double cross = (pt->x - la.x)*ldy - (pt->y - la.y)*ldx;
             bool negativeSide = (cross < 0);
-            dimTool_.measuredMm = std::fabs(cross) / lineLen;
+            dimTool_.measuredMm = f(std::fabs(cross) / lineLen);
             dimTool_.entityB = hit.entityID;
             snprintf(dimTool_.inputBuf, sizeof(dimTool_.inputBuf), "%.4gmm", dimTool_.measuredMm);
 
             auto ptsBak = sketch.points; auto circBak = sketch.circles;
             EntityID cid = sketch.addConstraint(ConstraintType::PointLineDistance, dimTool_.entityA, hit.entityID, dimTool_.measuredMm, false);
             auto res = solver_.solve(sketch);
+            lastSketchDof_ = res.dof;
             if (!res.ok) { sketch.points = ptsBak; sketch.circles = circBak; dimTool_.driven = true; }
             Constraint* cc = sketch.findConstraint(cid);
             if (cc) { cc->driven = dimTool_.driven; cc->negativeSide = negativeSide; }
@@ -427,12 +433,13 @@ void App::handleDimToolClick(Sketch& sketch) {
                 dimTool_.selType = HitType::Circle;
                 dimTool_.entityA = hit.entityID;
                 dimTool_.entityB = NullID;
-                dimTool_.measuredMm = circle->radius;
+                dimTool_.measuredMm = f(circle->radius);
                 snprintf(dimTool_.inputBuf, sizeof(dimTool_.inputBuf), "%.4gmm", dimTool_.measuredMm);
 
                 auto ptsBak = sketch.points; auto circBak = sketch.circles;
                 EntityID cid = sketch.addConstraint(ConstraintType::Radius, hit.entityID, NullID, dimTool_.measuredMm, false);
                 auto res = solver_.solve(sketch);
+                lastSketchDof_ = res.dof;
                 if (!res.ok) { sketch.points = ptsBak; sketch.circles = circBak; dimTool_.driven = true; }
                 Constraint* cc = sketch.findConstraint(cid);
                 if (cc) cc->driven = dimTool_.driven;
@@ -456,13 +463,14 @@ void App::handleDimToolClick(Sketch& sketch) {
             if (!line) return;
             Point2D a = sketch.getPointPos(line->startPt);
             Point2D b = sketch.getPointPos(line->endPt);
-            dimTool_.measuredMm = distance(a, b);
+            dimTool_.measuredMm = f(distance(a, b));
             snprintf(dimTool_.inputBuf, sizeof(dimTool_.inputBuf), "%.4gmm", dimTool_.measuredMm);
 
             // Create constraint immediately
             auto ptsBak = sketch.points; auto circBak = sketch.circles;
             EntityID cid = sketch.addConstraint(ConstraintType::Distance, hit.entityID, NullID, dimTool_.measuredMm, false);
             auto res = solver_.solve(sketch);
+            lastSketchDof_ = res.dof;
             if (!res.ok) { sketch.points = ptsBak; sketch.circles = circBak; dimTool_.driven = true; }
             Constraint* cc = sketch.findConstraint(cid);
             if (cc) cc->driven = dimTool_.driven;
@@ -483,12 +491,13 @@ void App::handleDimToolClick(Sketch& sketch) {
             dimTool_.entityB = NullID;
             CircleEntity* circle = sketch.findCircle(hit.entityID);
             if (!circle) return;
-            dimTool_.measuredMm = circle->radius * 2.0f;
+            dimTool_.measuredMm = f(circle->radius * 2.0);
             snprintf(dimTool_.inputBuf, sizeof(dimTool_.inputBuf), "%.4gmm", dimTool_.measuredMm);
 
             auto ptsBak = sketch.points; auto circBak = sketch.circles;
             EntityID cid = sketch.addConstraint(ConstraintType::Diameter, hit.entityID, NullID, dimTool_.measuredMm, false);
             auto res = solver_.solve(sketch);
+            lastSketchDof_ = res.dof;
             if (!res.ok) { sketch.points = ptsBak; sketch.circles = circBak; dimTool_.driven = true; }
             Constraint* cc = sketch.findConstraint(cid);
             if (cc) cc->driven = dimTool_.driven;
@@ -516,12 +525,13 @@ void App::handleDimToolClick(Sketch& sketch) {
                 dimTool_.entityB = hit.entityID;
                 Point2D a = sketch.getPointPos(dimTool_.entityA);
                 Point2D b = sketch.getPointPos(dimTool_.entityB);
-                dimTool_.measuredMm = distance(a, b);
+                dimTool_.measuredMm = f(distance(a, b));
                 snprintf(dimTool_.inputBuf, sizeof(dimTool_.inputBuf), "%.4gmm", dimTool_.measuredMm);
 
                 auto ptsBak = sketch.points; auto circBak = sketch.circles;
                 EntityID cid = sketch.addConstraint(ConstraintType::PointDistance, dimTool_.entityA, dimTool_.entityB, dimTool_.measuredMm, false);
                 auto res = solver_.solve(sketch);
+                lastSketchDof_ = res.dof;
                 if (!res.ok) { sketch.points = ptsBak; sketch.circles = circBak; dimTool_.driven = true; }
                 Constraint* cc = sketch.findConstraint(cid);
                 if (cc) cc->driven = dimTool_.driven;
@@ -663,36 +673,34 @@ void App::drawDimensionPanel(Sketch& sketch) {
                             PointEntity* pa2 = sketch.findPoint(l2->startPt);
                             PointEntity* pb2 = sketch.findPoint(l2->endPt);
                             if (pa1 && pb1 && pa2 && pb2) {
-                                constexpr float kPi = 3.14159265358979f;
-                                constexpr float kTwoPi = 2.0f * kPi;
                                 float eps = 1e-3f;
                                 auto pEq = [eps](PointEntity* p, PointEntity* q) {
                                     return std::fabs(p->x-q->x)<eps && std::fabs(p->y-q->y)<eps;
                                 };
-                                float vx, vy;
+                                double vx = 0.0, vy = 0.0;
                                 bool hasV = false;
                                 if (pEq(pa1,pa2)||pEq(pa1,pb2))      { vx=pa1->x; vy=pa1->y; hasV=true; }
                                 else if (pEq(pb1,pa2)||pEq(pb1,pb2)) { vx=pb1->x; vy=pb1->y; hasV=true; }
                                 else {
-                                    float ldx1=pb1->x-pa1->x, ldy1=pb1->y-pa1->y;
-                                    float ldx2=pb2->x-pa2->x, ldy2=pb2->y-pa2->y;
-                                    float denom=ldx1*ldy2-ldy1*ldx2;
-                                    if (std::fabs(denom)>1e-6f) {
-                                        float t=((pa2->x-pa1->x)*ldy2-(pa2->y-pa1->y)*ldx2)/denom;
+                                    double ldx1=pb1->x-pa1->x, ldy1=pb1->y-pa1->y;
+                                    double ldx2=pb2->x-pa2->x, ldy2=pb2->y-pa2->y;
+                                    double denom=ldx1*ldy2-ldy1*ldx2;
+                                    if (std::fabs(denom)>1e-6) {
+                                        double t=((pa2->x-pa1->x)*ldy2-(pa2->y-pa1->y)*ldx2)/denom;
                                         vx=pa1->x+t*ldx1; vy=pa1->y+t*ldy1; hasV=true;
                                     }
                                 }
                                 if (hasV) {
-                                    auto d2 = [](float ax,float ay,float bx,float by){ float dx=ax-bx,dy=ay-by; return dx*dx+dy*dy; };
+                                    auto d2 = [](double ax,double ay,double bx,double by){ double dx=ax-bx,dy=ay-by; return dx*dx+dy*dy; };
                                     PointEntity* f1=(d2(vx,vy,pb1->x,pb1->y)>=d2(vx,vy,pa1->x,pa1->y))?pb1:pa1;
                                     PointEntity* f2=(d2(vx,vy,pb2->x,pb2->y)>=d2(vx,vy,pa2->x,pa2->y))?pb2:pa2;
-                                    float dx1=f1->x-vx, dy1=f1->y-vy;
-                                    float dx2=f2->x-vx, dy2=f2->y-vy;
-                                    float cross=dx1*dy2-dy1*dx2, dot=dx1*dx2+dy1*dy2;
-                                    float ccwRad=std::atan2(cross,dot);
+                                    double dx1=f1->x-vx, dy1=f1->y-vy;
+                                    double dx2=f2->x-vx, dy2=f2->y-vy;
+                                    double cross=dx1*dy2-dy1*dx2, dot=dx1*dx2+dy1*dy2;
+                                    double ccwRad=std::atan2(cross,dot);
                                     if (ccwRad<0) ccwRad+=kTwoPi;
-                                    float ccwDeg=ccwRad*180.0f/kPi;
-                                    float cwDeg=360.0f-ccwDeg;
+                                    double ccwDeg=ccwRad*180.0/kPi;
+                                    double cwDeg=360.0-ccwDeg;
                                     // Pick the sector closest to the user's typed value
                                     cc->angleCW = (std::fabs(cwDeg-deg) < std::fabs(ccwDeg-deg));
                                 }
@@ -719,7 +727,21 @@ void App::drawDimensionPanel(Sketch& sketch) {
                 if (valueOk && !cc->driven) {
                     auto ptsBak = sketch.points;
                     auto circBak = sketch.circles;
+                    PointEntity* pinA = nullptr, *pinB = nullptr;
+                    bool wasA = false, wasB = false;
+                    if (cc->type == ConstraintType::PointLineDistance) {
+                        LineEntity* refLine = sketch.findLine(cc->entityB);
+                        if (refLine) {
+                            pinA = sketch.findPoint(refLine->startPt);
+                            pinB = sketch.findPoint(refLine->endPt);
+                            if (pinA) { wasA = pinA->projected; pinA->projected = true; }
+                            if (pinB) { wasB = pinB->projected; pinB->projected = true; }
+                        }
+                    }
                     auto res = solver_.solve(sketch);
+                    lastSketchDof_ = res.dof;
+                    if (pinA) pinA->projected = wasA;
+                    if (pinB) pinB->projected = wasB;
                     if (!res.ok) {
                         sketch.points = ptsBak;
                         sketch.circles = circBak;
@@ -830,10 +852,10 @@ void App::renderDimensions(const float view[16], const float proj[16], float vpW
                 if (!line) continue;
                 Point2D la = sketch.getPointPos(line->startPt);
                 Point2D lb = sketch.getPointPos(line->endPt);
-                float ldx = lb.x - la.x, ldy = lb.y - la.y;
-                float len2 = ldx*ldx + ldy*ldy;
-                if (len2 < 1e-12f) continue;
-                float t = ((pt2d.x - la.x)*ldx + (pt2d.y - la.y)*ldy) / len2;
+                double ldx = lb.x - la.x, ldy = lb.y - la.y;
+                double len2 = ldx*ldx + ldy*ldy;
+                if (len2 < 1e-12) continue;
+                double t = ((pt2d.x - la.x)*ldx + (pt2d.y - la.y)*ldy) / len2;
                 Point2D projPt = {la.x + t*ldx, la.y + t*ldy};
                 renderTwoPointDim(dl, sp, c, pt2d, projPt, "",
                     view, proj, vpW, vpH, theme, arrowLen, arrowWidth, extGap, extOvershoot,
@@ -882,7 +904,7 @@ void App::renderDimensions(const float view[16], const float proj[16], float vpW
 
         auto toScreen = [&](Point2D local, float& sx, float& sy) -> bool {
             float w3[3];
-            sp.localToWorld(local.x, local.y, w3[0], w3[1], w3[2]);
+            sp.localToWorld(f(local.x), f(local.y), w3[0], w3[1], w3[2]);
             return worldToScreen(w3, view, proj, vpW, vpH, sx, sy);
         };
 
@@ -913,7 +935,7 @@ void App::renderDimensions(const float view[16], const float proj[16], float vpW
                 }
                 case ConstraintType::Coincident: {
                     Point2D p = sketch.getPointPos(c.entityA);
-                    addIcon(p, 8, -8, "\xe2\x97\x8b"); // small circle
+                    addIcon(p, 8, -8, "c");
                     break;
                 }
                 case ConstraintType::Perpendicular: {
@@ -931,6 +953,14 @@ void App::renderDimensions(const float view[16], const float proj[16], float vpW
                     Point2D a = sketch.getPointPos(line->startPt);
                     Point2D b = sketch.getPointPos(line->endPt);
                     addIcon(midpoint(a, b), 0, -14, "//");
+                    break;
+                }
+                case ConstraintType::Collinear: {
+                    const LineEntity* line = sketch.findLine(c.entityB);
+                    if (!line) { line = sketch.findLine(c.entityA); if (!line) break; }
+                    Point2D a = sketch.getPointPos(line->startPt);
+                    Point2D b = sketch.getPointPos(line->endPt);
+                    addIcon(midpoint(a, b), 0, -14, "—");
                     break;
                 }
                 case ConstraintType::EqualLength: {
@@ -961,7 +991,12 @@ void App::renderDimensions(const float view[16], const float proj[16], float vpW
                 }
                 case ConstraintType::PointOnLine: {
                     Point2D p = sketch.getPointPos(c.entityA);
-                    addIcon(p, 8, -8, "\xc3\x97");
+                    addIcon(p, 8, -8, "c");
+                    break;
+                }
+                case ConstraintType::PointOnCircle: {
+                    Point2D p = sketch.getPointPos(c.entityA);
+                    addIcon(p, 8, -8, "c");
                     break;
                 }
                 case ConstraintType::Midpoint: {
@@ -990,6 +1025,20 @@ void App::renderDimensions(const float view[16], const float proj[16], float vpW
                 }
                 default:
                     break; // Distance, Radius, Diameter, Angle handled above as dimensions
+            }
+        }
+
+        // Coincident indicators at shared junction points (structural — no explicit constraint
+        // entity exists; coincidence is implicit through shared point IDs).
+        {
+            std::unordered_map<EntityID, int> refCount;
+            auto ref = [&](EntityID ptID) { if (ptID != NullID) refCount[ptID]++; };
+            for (const auto& l  : sketch.lines)      { ref(l.startPt);  ref(l.endPt); }
+            for (const auto& a  : sketch.arcs)       { ref(a.startPt);  ref(a.endPt); }
+            for (const auto& spl : sketch.splines)   { for (auto id : spl.controlPtIDs) ref(id); }
+            for (const auto& [ptID, cnt] : refCount) {
+                if (cnt < 2) continue;
+                addIcon(sketch.getPointPos(ptID), 6, -6, "c");
             }
         }
 

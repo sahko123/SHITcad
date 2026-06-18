@@ -18,6 +18,7 @@ struct Theme {
 
     // Sketch
     float sketchLine[3];
+    float sketchUnderconstrained[3];
     float sketchSelected[3];
     float sketchGridMinor;
     float sketchGridMajor;
@@ -57,7 +58,7 @@ struct Preferences {
     float edgeThickness = 1.0f;
     float sketchLineColor[3] = {0.1f, 0.1f, 0.1f};
     float sketchLineThickness = 1.5f;
-    float tangentSnapPx = 15.0f; // tangent snap distance in pixels
+    float tangentSnapPx = 6.0f; // tangent snap distance in pixels
 
     // Profile detection backend
     ProfileDetectorBackend profileBackend = ProfileDetectorBackend::Custom;

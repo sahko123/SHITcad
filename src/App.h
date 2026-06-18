@@ -74,7 +74,10 @@ private:
     // Sketch editing state
     ToolState tool_;
     ArcToolState arcTool_;
+    FilletToolState filletTool_;
+    int lastSketchDof_ = 0;
     SnapEngine snapEngine_;
+    EntityID hvCrossEntityID_ = NullID; // line/circle/arc crossed by the H/V rail this frame
     History history_;
     Solver solver_;
     SnapResult currentSnap_;

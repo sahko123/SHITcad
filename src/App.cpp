@@ -217,8 +217,9 @@ void App::render3DScene(int w, int h) {
     float view[16], proj[16];
     getViewProj(w, h, view, proj);
 
-    // Ground grid
-    viewport3D_.drawGroundGrid(view, proj);
+    // Ground grid — hidden in sketch mode since the adaptive sketch grid takes over
+    if (mode_ != InteractionMode::Sketching)
+        viewport3D_.drawGroundGrid(view, proj);
 
     // Bodies — push faces back slightly so wireframe edges render cleanly on top
     float eye[3];
@@ -284,7 +285,7 @@ void App::render3DScene(int w, int h) {
         bool isActive = (i == activeSketchPlane_);
         // Active sketch renders on top of all geometry so it's visible through solids
         if (isActive) glDisable(GL_DEPTH_TEST);
-        sketchRenderer_.renderSketch(sp, view, proj, isActive, isActive ? selection_ : SelectionState{});
+        sketchRenderer_.renderSketch(sp, view, proj, isActive, isActive ? selection_ : SelectionState{}, isActive ? lastSketchDof_ : 0);
         if (isActive) glEnable(GL_DEPTH_TEST);
     }
     glLineWidth(1.0f);
@@ -313,14 +314,56 @@ void App::render3DScene(int w, int h) {
 
         // Grid on active plane
         float apparentScale = computeApparentScale(sp, view, proj, (float)w, (float)h);
+        float safeScale = std::max(apparentScale, 1e-9f); // never divide by zero
         float gridStep = 1.0f;
-        if (apparentScale > 0.1f) {
-            float worldSpacing = 50.0f / apparentScale;
+        {
+            float worldSpacing = 20.0f * dpiScale_ / safeScale;
             gridStep = std::pow(10.0f, std::floor(std::log10(worldSpacing)));
-            if (gridStep * apparentScale < 10.0f) gridStep *= 10.0f;
+            if (gridStep * safeScale < 5.0f * dpiScale_) gridStep *= 10.0f;
         }
 
-        sketchRenderer_.renderGrid(sp, view, proj, gridStep, 50.0f);
+        // Compute visible local-space bounds for the grid.
+        // Primary: viewport-diagonal / apparentScale centred on the plane hit of the screen centre.
+        // Secondary: screen corners are projected and expand the bounds for oblique views.
+        float gStartU, gEndU, gStartV, gEndV;
+        {
+            // Half-extent large enough to cover the full viewport diagonal at this zoom level.
+            // Use safeScale so this works at any zoom, including extreme zoom-out.
+            float halfExt = std::sqrt((float)(w * w + h * h)) / safeScale;
+
+            // Centre the extent on where the viewport centre hits the sketch plane
+            float cro[3], crd[3];
+            screenToRay((float)w * 0.5f, (float)h * 0.5f, 0, 0, (float)w, (float)h, view, proj, cro, crd);
+            float cLx = 0.0f, cLy = 0.0f, cT;
+            if (sp.rayIntersect(cro, crd, cLx, cLy, cT) && cT > 0.0f && cT < 1e6f) {
+                gStartU = cLx - halfExt; gEndU = cLx + halfExt;
+                gStartV = cLy - halfExt; gEndV = cLy + halfExt;
+            } else {
+                gStartU = -halfExt; gEndU = halfExt;
+                gStartV = -halfExt; gEndV = halfExt;
+            }
+
+            // Expand with screen corner projections (handles oblique viewing angles)
+            float cx[4] = {0.0f, (float)w, (float)w, 0.0f};
+            float cy[4] = {0.0f, 0.0f,     (float)h, (float)h};
+            for (int ci = 0; ci < 4; ci++) {
+                float ro[3], rd[3];
+                screenToRay(cx[ci], cy[ci], 0, 0, (float)w, (float)h, view, proj, ro, rd);
+                float lx, ly, t;
+                if (sp.rayIntersect(ro, rd, lx, ly, t) && t > 0.0f && t < 1e5f) {
+                    gStartU = std::min(gStartU, lx); gEndU = std::max(gEndU, lx);
+                    gStartV = std::min(gStartV, ly); gEndV = std::max(gEndV, ly);
+                }
+            }
+
+            // Small margin so lines don't pop at the exact viewport edge
+            float mU = (gEndU - gStartU) * 0.05f;
+            float mV = (gEndV - gStartV) * 0.05f;
+            gStartU -= mU; gEndU += mU;
+            gStartV -= mV; gEndV += mV;
+        }
+
+        sketchRenderer_.renderGrid(sp, view, proj, gridStep, gStartU, gEndU, gStartV, gEndV);
 
         // Tool preview (use snapped position for visual feedback)
         Point2D previewCursor = (currentSnap_.type != SnapType::None)
@@ -334,7 +377,7 @@ void App::render3DScene(int w, int h) {
         if (selection_.dragMode == SelectionDragMode::BoxSelect) {
             // Draw box in screen space using ImGui
             ImDrawList* dl = ImGui::GetForegroundDrawList();
-            ImVec2 a(selection_.dragAnchorScreen.x, selection_.dragAnchorScreen.y);
+            ImVec2 a(f(selection_.dragAnchorScreen.x), f(selection_.dragAnchorScreen.y));
             ImVec2 b = ImGui::GetIO().MousePos;
             ImVec2 mn(std::min(a.x, b.x), std::min(a.y, b.y));
             ImVec2 mx(std::max(a.x, b.x), std::max(a.y, b.y));
@@ -505,6 +548,53 @@ void App::renderFrame() {
         getViewProj(w, h, view, proj);
         renderDimensions(view, proj, (float)w, (float)h);
     }
+
+    // Scale ruler — bottom-left of viewport, only in sketch mode
+    if (mode_ == InteractionMode::Sketching && hasActiveSketch()) {
+        int fbW, fbH;
+        glfwGetFramebufferSize(window_, &fbW, &fbH);
+        float view[16], proj[16];
+        getViewProj(fbW, fbH, view, proj);
+        const auto& sp = activePlane();
+        float apparentScale = computeApparentScale(sp, view, proj, (float)fbW, (float)fbH);
+        float safeScale = std::max(apparentScale, 1e-9f);
+
+        // Target ruler length ~100 logical px; round to nearest 1/2/5 × 10^n
+        float targetPx  = 100.0f * dpiScale_;
+        float rawMm     = targetPx / safeScale;
+        float mag       = std::pow(10.0f, std::floor(std::log10(rawMm)));
+        float norm      = rawMm / mag;
+        float rulerMm;
+        if      (norm < 1.5f) rulerMm = 1.0f * mag;
+        else if (norm < 3.5f) rulerMm = 2.0f * mag;
+        else if (norm < 7.5f) rulerMm = 5.0f * mag;
+        else                  rulerMm = 10.0f * mag;
+
+        // Back to logical screen pixels
+        float rulerPx = rulerMm * safeScale / dpiScale_;
+
+        // Format label
+        char label[64];
+        if      (rulerMm >= 1'000'000.0f) snprintf(label, sizeof(label), "%.4g km", rulerMm / 1'000'000.0f);
+        else if (rulerMm >= 1000.0f)      snprintf(label, sizeof(label), "%.4g m",  rulerMm / 1000.0f);
+        else                              snprintf(label, sizeof(label), "%.4g mm", rulerMm);
+
+        // Position: bottom-left of viewport, above any timeline
+        float margin  = 16.0f;
+        float rulerX  = panelW + margin;
+        float rulerY  = vpH - margin - 24.0f;
+
+        ImDrawList* dl = ImGui::GetForegroundDrawList();
+        ImU32 col = IM_COL32(160, 160, 160, 220);
+        float capH = 5.0f;
+
+        dl->AddLine(ImVec2(rulerX,           rulerY), ImVec2(rulerX + rulerPx, rulerY), col, 1.5f);
+        dl->AddLine(ImVec2(rulerX,           rulerY - capH), ImVec2(rulerX,           rulerY + capH), col, 1.5f);
+        dl->AddLine(ImVec2(rulerX + rulerPx, rulerY - capH), ImVec2(rulerX + rulerPx, rulerY + capH), col, 1.5f);
+
+        ImVec2 ts = ImGui::CalcTextSize(label);
+        dl->AddText(ImVec2(rulerX + rulerPx * 0.5f - ts.x * 0.5f, rulerY - ts.y - 3.0f), col, label);
+    }
 }
 
 
@@ -649,8 +739,49 @@ void App::enterSketchMode(int planeIndex) {
         }
     }
 
+    // Ensure a projected anchor exists at the sketch origin so users can snap to it
+    // and geometry placed there won't drift when constraints are later applied.
+    {
+        Sketch& sk = sketchPlanes_[planeIndex].sketch;
+        bool hasOrigin = false;
+        for (const auto& pt : sk.points) {
+            if (pt.projected && std::fabs(pt.x) < 1e-9 && std::fabs(pt.y) < 1e-9) {
+                hasOrigin = true;
+                break;
+            }
+        }
+        if (!hasOrigin) {
+            EntityID oid = sk.addPoint(0.0, 0.0);
+            PointEntity* op = sk.findPoint(oid);
+            if (op) op->projected = true;
+        }
+
+        // Add projected X/Y axis lines if none exist yet
+        bool hasProjectedLines = false;
+        for (const auto& l : sk.lines) {
+            if (l.projected) { hasProjectedLines = true; break; }
+        }
+        if (!hasProjectedLines) {
+            constexpr double kAxisHalfLen = 10000.0;
+            EntityID xNeg = sk.addPoint(-kAxisHalfLen, 0.0);
+            EntityID xPos = sk.addPoint( kAxisHalfLen, 0.0);
+            EntityID xAxis = sk.addLine(xNeg, xPos);
+            if (auto* p = sk.findPoint(xNeg)) p->projected = true;
+            if (auto* p = sk.findPoint(xPos)) p->projected = true;
+            if (auto* l = sk.findLine(xAxis)) l->projected = true;
+
+            EntityID yNeg = sk.addPoint(0.0, -kAxisHalfLen);
+            EntityID yPos = sk.addPoint(0.0,  kAxisHalfLen);
+            EntityID yAxis = sk.addLine(yNeg, yPos);
+            if (auto* p = sk.findPoint(yNeg)) p->projected = true;
+            if (auto* p = sk.findPoint(yPos)) p->projected = true;
+            if (auto* l = sk.findLine(yAxis)) l->projected = true;
+        }
+    }
+
     history_.clear();
     history_.pushState(sketchPlanes_[planeIndex].sketch);
+    lastSketchDof_ = solver_.solve(sketchPlanes_[planeIndex].sketch).dof;
     // Hide all reference planes (they stay hidden unless user unhides via object tree)
     for (int i = 0; i < kRefPlaneCount && i < (int)sketchPlanes_.size(); i++) {
         sketchPlanes_[i].visible = false;
@@ -659,12 +790,17 @@ void App::enterSketchMode(int planeIndex) {
 }
 
 void App::finishSketch(bool recordFeature) {
+    lastSketchDof_ = 0;
     if (tool_.type == ToolType::Extrude) cancelExtrude();
 
     // Record/update sketch feature and trigger replay if editing existing
     if (recordFeature && activeSketchPlane_ >= 0) {
         const Sketch& sk = activeSketch();
-        bool sketchHasGeometry = !sk.lines.empty() || !sk.circles.empty() || !sk.arcs.empty();
+        auto hasUserGeom = [](const auto& vec) {
+            for (const auto& e : vec) if (!e.projected) return true;
+            return false;
+        };
+        bool sketchHasGeometry = hasUserGeom(sk.lines) || hasUserGeom(sk.circles) || hasUserGeom(sk.arcs);
         FeatureID existing = featureHistory_.findSketchFeatureForPlane(activeSketchPlane_);
 
         if (existing != NullFeatureID) {

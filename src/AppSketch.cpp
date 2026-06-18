@@ -41,6 +41,7 @@ void App::applyGeometricConstraint(Sketch& sketch, ConstraintType type) {
     switch (type) {
         case ConstraintType::Perpendicular:
         case ConstraintType::Parallel:
+        case ConstraintType::Collinear:
         case ConstraintType::EqualLength:
             eA = findSelOfType(HitType::Line, 0);
             eB = findSelOfType(HitType::Line, 1);
@@ -104,6 +105,7 @@ void App::applyGeometricConstraint(Sketch& sketch, ConstraintType type) {
     }
 
     auto res = solver_.solve(sketch);
+    lastSketchDof_ = res.dof;
     if (!res.ok) {
         // Solver couldn't satisfy — mark as driven
         sketch.points = ptsBak;
@@ -134,7 +136,7 @@ void App::handleSketchInput(float vpW, float vpH) {
     getViewProj(w, h, view, proj);
 
     float apparentScale = computeApparentScale(plane, view, proj, vpW, vpH);
-    if (apparentScale < 0.01f) apparentScale = 40.0f;
+    if (apparentScale < 1e-9f) apparentScale = 1e-9f; // guard against degenerate projection
 
     if (!mouseOverUI) {
         // Project mouse to sketch plane
@@ -186,12 +188,12 @@ void App::handleSketchInput(float vpW, float vpH) {
                         if (line) {
                             Point2D la = sketch.getPointPos(line->startPt);
                             Point2D lb = sketch.getPointPos(line->endPt);
-                            float ldx = lb.x - la.x, ldy = lb.y - la.y;
-                            float len2 = ldx*ldx + ldy*ldy;
-                            if (len2 > 1e-12f) {
-                                float t = ((pt.x - la.x)*ldx + (pt.y - la.y)*ldy) / len2;
+                            double ldx = lb.x - la.x, ldy = lb.y - la.y;
+                            double len2 = ldx*ldx + ldy*ldy;
+                            if (len2 > 1e-12) {
+                                double t = ((pt.x - la.x)*ldx + (pt.y - la.y)*ldy) / len2;
                                 Point2D projPt = {la.x + t*ldx, la.y + t*ldy};
-                                return Point2D{(pt.x + projPt.x) * 0.5f, (pt.y + projPt.y) * 0.5f};
+                                return Point2D{(pt.x + projPt.x) * 0.5, (pt.y + projPt.y) * 0.5};
                             }
                         }
                         return pt;
@@ -208,14 +210,14 @@ void App::handleSketchInput(float vpW, float vpH) {
                             if (ptEq(a1, a2) || ptEq(a1, b2)) return a1;
                             if (ptEq(b1, a2) || ptEq(b1, b2)) return b1;
                             // No shared vertex — compute intersection
-                            float ldx1 = b1.x-a1.x, ldy1 = b1.y-a1.y;
-                            float ldx2 = b2.x-a2.x, ldy2 = b2.y-a2.y;
-                            float denom = ldx1*ldy2 - ldy1*ldx2;
-                            if (std::fabs(denom) > 1e-6f) {
-                                float t = ((a2.x-a1.x)*ldy2 - (a2.y-a1.y)*ldx2) / denom;
+                            double ldx1 = b1.x-a1.x, ldy1 = b1.y-a1.y;
+                            double ldx2 = b2.x-a2.x, ldy2 = b2.y-a2.y;
+                            double denom = ldx1*ldy2 - ldy1*ldx2;
+                            if (std::fabs(denom) > 1e-6) {
+                                double t = ((a2.x-a1.x)*ldy2 - (a2.y-a1.y)*ldx2) / denom;
                                 return Point2D{ a1.x + t*ldx1, a1.y + t*ldy1 };
                             }
-                            return Point2D{ (a1.x + a2.x) * 0.5f, (a1.y + a2.y) * 0.5f };
+                            return Point2D{ (a1.x + a2.x) * 0.5, (a1.y + a2.y) * 0.5 };
                         }
                     }
                     break;
@@ -237,36 +239,35 @@ void App::handleSketchInput(float vpW, float vpH) {
                     Point2D a2 = sketch.getPointPos(l2->startPt);
                     Point2D b2 = sketch.getPointPos(l2->endPt);
                     Point2D vtx = mid;
-                    constexpr float kTwoPi = 2.0f * 3.14159265358979f;
                     Point2D d1 = (distance(vtx, b1) >= distance(vtx, a1)) ? b1 : a1;
                     Point2D d2 = (distance(vtx, b2) >= distance(vtx, a2)) ? b2 : a2;
-                    float dx1 = d1.x - vtx.x, dy1 = d1.y - vtx.y;
-                    float dx2 = d2.x - vtx.x, dy2 = d2.y - vtx.y;
-                    float crossV = dx1*dy2 - dy1*dx2;
-                    float dotV = dx1*dx2 + dy1*dy2;
-                    float ccwRad = std::atan2(crossV, dotV);
+                    double dx1 = d1.x - vtx.x, dy1 = d1.y - vtx.y;
+                    double dx2 = d2.x - vtx.x, dy2 = d2.y - vtx.y;
+                    double crossV = dx1*dy2 - dy1*dx2;
+                    double dotV = dx1*dx2 + dy1*dy2;
+                    double ccwRad = std::atan2(crossV, dotV);
                     if (ccwRad < 0) ccwRad += kTwoPi;
-                    float dir1A = std::atan2(dy1, dx1);
-                    float dxm = cursorLocal_.x - vtx.x, dym = cursorLocal_.y - vtx.y;
-                    float mouseA = std::atan2(dym, dxm);
-                    float mouseSpan = mouseA - dir1A;
+                    double dir1A = std::atan2(dy1, dx1);
+                    double dxm = cursorLocal_.x - vtx.x, dym = cursorLocal_.y - vtx.y;
+                    double mouseA = std::atan2(dym, dxm);
+                    double mouseSpan = mouseA - dir1A;
                     if (mouseSpan < 0) mouseSpan += kTwoPi;
                     // Mouse in CCW sector → use CCW angle; else CW
-                    float sideDeg = (mouseSpan < ccwRad)
-                        ? ccwRad * 180.0f / 3.14159265358979f
-                        : (kTwoPi - ccwRad) * 180.0f / 3.14159265358979f;
-                    if (sideDeg < 0.001f) sideDeg = 0.001f;
-                    if (sideDeg > 359.999f) sideDeg = 359.999f;
+                    double sideDeg = (mouseSpan < ccwRad)
+                        ? ccwRad * 180.0 / 3.14159265358979
+                        : (kTwoPi - ccwRad) * 180.0 / 3.14159265358979;
+                    if (sideDeg < 0.001) sideDeg = 0.001;
+                    if (sideDeg > 359.999) sideDeg = 359.999;
                     // Only flip if we're crossing from one sector to the other
-                    float ccwDeg = ccwRad * 180.0f / 3.14159265358979f;
-                    float cwDeg = 360.0f - ccwDeg;
+                    double ccwDeg = ccwRad * 180.0 / 3.14159265358979;
+                    double cwDeg = 360.0 - ccwDeg;
                     bool wasInCcw = (std::fabs(cc->value - ccwDeg) <= std::fabs(cc->value - cwDeg));
                     bool nowInCcw = (mouseSpan < ccwRad);
                     if (wasInCcw != nowInCcw) {
                         cc->value = sideDeg;
                         // Update dim tool inputBuf so live sync doesn't overwrite the flip
                         if (dimTool_.phase == DimToolState::Editing && dimTool_.constraintID == selection_.dragDimID) {
-                            formatAngleText(dimTool_.inputBuf, sizeof(dimTool_.inputBuf), sideDeg);
+                            formatAngleText(dimTool_.inputBuf, sizeof(dimTool_.inputBuf), f(sideDeg));
                             GImGui->ActiveId = 0;
                         }
                     }
@@ -315,16 +316,15 @@ void App::handleSketchInput(float vpW, float vpH) {
                     Point2D a2 = sketch.getPointPos(l2->startPt);
                     Point2D b2 = sketch.getPointPos(l2->endPt);
                     float eps = 1e-3f;
-                    constexpr float kTwoPi = 2.0f * 3.14159265358979f;
                     auto ptEq = [eps](Point2D p, Point2D q) { return std::fabs(p.x-q.x)<eps && std::fabs(p.y-q.y)<eps; };
                     if (ptEq(a1, a2) || ptEq(a1, b2)) mid = a1;
                     else if (ptEq(b1, a2) || ptEq(b1, b2)) mid = b1;
                     else {
-                        float ldx1 = b1.x-a1.x, ldy1 = b1.y-a1.y;
-                        float ldx2 = b2.x-a2.x, ldy2 = b2.y-a2.y;
-                        float denom = ldx1*ldy2 - ldy1*ldx2;
-                        if (std::fabs(denom) > 1e-6f) {
-                            float t = ((a2.x-a1.x)*ldy2 - (a2.y-a1.y)*ldx2) / denom;
+                        double ldx1 = b1.x-a1.x, ldy1 = b1.y-a1.y;
+                        double ldx2 = b2.x-a2.x, ldy2 = b2.y-a2.y;
+                        double denom = ldx1*ldy2 - ldy1*ldx2;
+                        if (std::fabs(denom) > 1e-6) {
+                            double t = ((a2.x-a1.x)*ldy2 - (a2.y-a1.y)*ldx2) / denom;
                             mid = { a1.x + t*ldx1, a1.y + t*ldy1 };
                         }
                     }
@@ -338,39 +338,39 @@ void App::handleSketchInput(float vpW, float vpH) {
                             Point2D vtx = mid;
                             Point2D d1 = (distance(vtx, b1) >= distance(vtx, a1)) ? b1 : a1;
                             Point2D d2 = (distance(vtx, b2) >= distance(vtx, a2)) ? b2 : a2;
-                            float dx1 = d1.x - vtx.x, dy1 = d1.y - vtx.y;
-                            float dx2 = d2.x - vtx.x, dy2 = d2.y - vtx.y;
-                            float dir1A = std::atan2(dy1, dx1);
-                            float crossV = dx1*dy2 - dy1*dx2;
-                            float dotV = dx1*dx2 + dy1*dy2;
+                            double dx1 = d1.x - vtx.x, dy1 = d1.y - vtx.y;
+                            double dx2 = d2.x - vtx.x, dy2 = d2.y - vtx.y;
+                            double dir1A = std::atan2(dy1, dx1);
+                            double crossV = dx1*dy2 - dy1*dx2;
+                            double dotV = dx1*dx2 + dy1*dy2;
                             // CCW angle from dir1 to dir2 (0 to 2pi)
-                            float ccwRad = std::atan2(crossV, dotV);
+                            double ccwRad = std::atan2(crossV, dotV);
                             if (ccwRad < 0) ccwRad += kTwoPi;
 
                             // Where is mouse relative to dir1?
-                            float dxm = cursorLocal_.x - vtx.x, dym = cursorLocal_.y - vtx.y;
-                            float mouseA = std::atan2(dym, dxm);
-                            float mouseSpan = mouseA - dir1A;
+                            double dxm = cursorLocal_.x - vtx.x, dym = cursorLocal_.y - vtx.y;
+                            double mouseA = std::atan2(dym, dxm);
+                            double mouseSpan = mouseA - dir1A;
                             if (mouseSpan < 0) mouseSpan += kTwoPi;
 
                             // Mouse in CCW sector → use CCW angle; else use CW (reflex)
-                            float newDeg;
+                            double newDeg;
                             bool newCW;
                             if (mouseSpan < ccwRad) {
-                                newDeg = ccwRad * 180.0f / 3.14159265358979f;
+                                newDeg = ccwRad * 180.0 / 3.14159265358979;
                                 newCW = false;
                             } else {
-                                newDeg = (kTwoPi - ccwRad) * 180.0f / 3.14159265358979f;
+                                newDeg = (kTwoPi - ccwRad) * 180.0 / 3.14159265358979;
                                 newCW = true;
                             }
 
-                            if (newDeg < 0.001f) newDeg = 0.001f;
-                            if (newDeg > 359.999f) newDeg = 359.999f;
+                            if (newDeg < 0.001) newDeg = 0.001;
+                            if (newDeg > 359.999) newDeg = 359.999;
 
                             cc->value = newDeg;
                             cc->angleCW = newCW;
-                            dimTool_.measuredMm = newDeg;
-                            formatAngleText(dimTool_.inputBuf, sizeof(dimTool_.inputBuf), newDeg);
+                            dimTool_.measuredMm = f(newDeg);
+                            formatAngleText(dimTool_.inputBuf, sizeof(dimTool_.inputBuf), f(newDeg));
                             GImGui->ActiveId = 0; // force InputText to re-read buffer
                         }
                     }
@@ -393,12 +393,12 @@ void App::handleSketchInput(float vpW, float vpH) {
                     if (line) {
                         Point2D la = sketch.getPointPos(line->startPt);
                         Point2D lb = sketch.getPointPos(line->endPt);
-                        float ldx = lb.x - la.x, ldy = lb.y - la.y;
-                        float len2 = ldx*ldx + ldy*ldy;
-                        if (len2 > 1e-12f) {
-                            float t = ((a.x - la.x)*ldx + (a.y - la.y)*ldy) / len2;
+                        double ldx = lb.x - la.x, ldy = lb.y - la.y;
+                        double len2 = ldx*ldx + ldy*ldy;
+                        if (len2 > 1e-12) {
+                            double t = ((a.x - la.x)*ldx + (a.y - la.y)*ldy) / len2;
                             Point2D projPt = {la.x + t*ldx, la.y + t*ldy};
-                            mid = {(a.x + projPt.x) * 0.5f, (a.y + projPt.y) * 0.5f};
+                            mid = {(a.x + projPt.x) * 0.5, (a.y + projPt.y) * 0.5};
                         }
                     }
                 } else {
@@ -419,6 +419,94 @@ void App::handleSketchInput(float vpW, float vpH) {
                 if (dimTool_.selType == HitType::Line && dimTool_.entityB == NullID) {
                     HitResult hit2 = hitTest(cursorLocal_, apparentScale, sketch, 10.0f);
                     if (hit2.type == HitType::Line && hit2.entityID != dimTool_.entityA) {
+                        // Check if lines are parallel — if so, make a distance dimension instead of angle
+                        {
+                            LineEntity* l1 = sketch.findLine(dimTool_.entityA);
+                            LineEntity* l2 = sketch.findLine(hit2.entityID);
+                            if (l1 && l2) {
+                                Point2D a1 = sketch.getPointPos(l1->startPt);
+                                Point2D b1 = sketch.getPointPos(l1->endPt);
+                                Point2D a2 = sketch.getPointPos(l2->startPt);
+                                Point2D b2 = sketch.getPointPos(l2->endPt);
+                                double d1x = b1.x - a1.x, d1y = b1.y - a1.y;
+                                double d2x = b2.x - a2.x, d2y = b2.y - a2.y;
+                                double len1 = std::sqrt(d1x*d1x + d1y*d1y);
+                                double len2 = std::sqrt(d2x*d2x + d2y*d2y);
+                                if (len1 > 1e-6 && len2 > 1e-6) {
+                                    d1x /= len1; d1y /= len1;
+                                    d2x /= len2; d2y /= len2;
+                                    double cross = d1x*d2y - d1y*d2x;
+                                    constexpr float kParallelSin = 0.087f; // ~5°
+                                    if (std::fabs(cross) < kParallelSin) {
+                                        // Parallel lines — create point-line distance
+                                        // Check for duplicate
+                                        bool dupPLD = false;
+                                        for (const auto& cx : sketch.constraints) {
+                                            if (cx.type == ConstraintType::PointLineDistance) {
+                                                if ((cx.entityA == l1->startPt || cx.entityA == l1->endPt) && cx.entityB == hit2.entityID) {
+                                                    dupPLD = true; break;
+                                                }
+                                            }
+                                        }
+                                        if (dupPLD) {
+                                            snprintf(dimTool_.warningMsg, sizeof(dimTool_.warningMsg),
+                                                     "These parallel lines already have a distance constraint");
+                                            dimTool_.warningTimer = 3.0f;
+                                        } else {
+                                            sketch.removeConstraint(dimTool_.constraintID);
+
+                                            // Use whichever endpoint of l1 is farther from l2's line
+                                            // (gives the more representative measurement)
+                                            EntityID ptID = l1->startPt;
+                                            {
+                                                Point2D la = sketch.getPointPos(l2->startPt);
+                                                Point2D lb = sketch.getPointPos(l2->endPt);
+                                                double ldx = lb.x - la.x, ldy = lb.y - la.y;
+                                                double ll = std::sqrt(ldx*ldx + ldy*ldy);
+                                                if (ll > 1e-6) {
+                                                    auto ptDist = [&](EntityID id) {
+                                                        Point2D p = sketch.getPointPos(id);
+                                                        return std::fabs((p.x - la.x)*ldy - (p.y - la.y)*ldx) / ll;
+                                                    };
+                                                    if (ptDist(l1->endPt) > ptDist(l1->startPt))
+                                                        ptID = l1->endPt;
+                                                }
+                                            }
+
+                                            Point2D pt = sketch.getPointPos(ptID);
+                                            Point2D la = sketch.getPointPos(l2->startPt);
+                                            Point2D lb = sketch.getPointPos(l2->endPt);
+                                            double ldx = lb.x - la.x, ldy = lb.y - la.y;
+                                            double ll = std::sqrt(ldx*ldx + ldy*ldy);
+                                            double measDist = 0.0;
+                                            bool negSide = false;
+                                            if (ll > 1e-6) {
+                                                double cr = (pt.x - la.x)*ldy - (pt.y - la.y)*ldx;
+                                                negSide = (cr < 0);
+                                                measDist = std::fabs(cr) / ll;
+                                            }
+
+                                            EntityID cid = sketch.addConstraint(ConstraintType::PointLineDistance, ptID, hit2.entityID, measDist, false);
+                                            Constraint* newCon = sketch.findConstraint(cid);
+                                            if (newCon) { newCon->driven = dimTool_.driven; newCon->negativeSide = negSide; }
+
+                                            dimTool_.selType = HitType::Point;
+                                            dimTool_.entityA = ptID;
+                                            dimTool_.entityB = hit2.entityID;
+                                            dimTool_.constraintID = cid;
+                                            dimTool_.measuredMm = f(measDist);
+                                            snprintf(dimTool_.inputBuf, sizeof(dimTool_.inputBuf), "%.4gmm", measDist);
+                                            dimTool_.focusNeeded = true;
+                                            dimTool_.placingFirstFrame = true;
+                                            selection_.select(HitType::Dimension, cid);
+                                            GImGui->ActiveId = 0;
+                                        }
+                                        goto skipFinalize;
+                                    }
+                                }
+                            }
+                        }
+
                         // Check duplicate angle
                         bool dupAngle = false;
                         for (const auto& cx : sketch.constraints) {
@@ -449,7 +537,6 @@ void App::handleSketchInput(float vpW, float vpH) {
                                 Point2D a2 = sketch.getPointPos(l2->startPt);
                                 Point2D b2 = sketch.getPointPos(l2->endPt);
                                 float eps = 1e-3f;
-                                constexpr float kTwoPi = 2.0f * 3.14159265358979f;
                                 auto ptEq2 = [eps](Point2D p, Point2D q) { return std::fabs(p.x-q.x)<eps && std::fabs(p.y-q.y)<eps; };
 
                                 // Find vertex: shared endpoint or line-line intersection
@@ -458,11 +545,11 @@ void App::handleSketchInput(float vpW, float vpH) {
                                 if (ptEq2(a1, a2) || ptEq2(a1, b2))      { vtx = a1; hasVtx = true; }
                                 else if (ptEq2(b1, a2) || ptEq2(b1, b2)) { vtx = b1; hasVtx = true; }
                                 else {
-                                    float ldx1 = b1.x-a1.x, ldy1 = b1.y-a1.y;
-                                    float ldx2 = b2.x-a2.x, ldy2 = b2.y-a2.y;
-                                    float denom = ldx1*ldy2 - ldy1*ldx2;
-                                    if (std::fabs(denom) > 1e-6f) {
-                                        float t = ((a2.x-a1.x)*ldy2 - (a2.y-a1.y)*ldx2) / denom;
+                                    double ldx1 = b1.x-a1.x, ldy1 = b1.y-a1.y;
+                                    double ldx2 = b2.x-a2.x, ldy2 = b2.y-a2.y;
+                                    double denom = ldx1*ldy2 - ldy1*ldx2;
+                                    if (std::fabs(denom) > 1e-6) {
+                                        double t = ((a2.x-a1.x)*ldy2 - (a2.y-a1.y)*ldx2) / denom;
                                         vtx = { a1.x + t*ldx1, a1.y + t*ldy1 };
                                         hasVtx = true;
                                     }
@@ -471,13 +558,13 @@ void App::handleSketchInput(float vpW, float vpH) {
                                     // Direction from vertex toward farther endpoint
                                     Point2D d1 = (distance(vtx, b1) >= distance(vtx, a1)) ? b1 : a1;
                                     Point2D d2 = (distance(vtx, b2) >= distance(vtx, a2)) ? b2 : a2;
-                                    float dx1 = d1.x - vtx.x, dy1 = d1.y - vtx.y;
-                                    float dx2 = d2.x - vtx.x, dy2 = d2.y - vtx.y;
-                                    float dot = dx1*dx2 + dy1*dy2;
-                                    float cross = dx1*dy2 - dy1*dx2;
+                                    double dx1 = d1.x - vtx.x, dy1 = d1.y - vtx.y;
+                                    double dx2 = d2.x - vtx.x, dy2 = d2.y - vtx.y;
+                                    double dot = dx1*dx2 + dy1*dy2;
+                                    double cross = dx1*dy2 - dy1*dx2;
                                     // Unsigned angle between lines (0-180°), always pick the smaller one
-                                    float rad = std::atan2(std::fabs(cross), dot); // 0 to pi
-                                    angleDeg = rad * 180.0f / 3.14159265358979f;
+                                    double rad = std::atan2(std::fabs(cross), dot); // 0 to pi
+                                    angleDeg = f(rad * 180.0 / 3.14159265358979);
 
                                     if (angleDeg < 0.001f) angleDeg = 0.001f;
                                     if (angleDeg > 179.999f) angleDeg = 179.999f;
@@ -536,25 +623,25 @@ void App::handleSketchInput(float vpW, float vpH) {
 
                                 Point2D la = sketch.getPointPos(line->startPt);
                                 Point2D lb = sketch.getPointPos(line->endPt);
-                                float ldx = lb.x - la.x, ldy = lb.y - la.y;
-                                float lineLen = std::sqrt(ldx*ldx + ldy*ldy);
-                                float measDist = 0;
+                                double ldx = lb.x - la.x, ldy = lb.y - la.y;
+                                double lineLen = std::sqrt(ldx*ldx + ldy*ldy);
+                                double measDist = 0;
                                 bool negSide = false;
-                                if (lineLen > 1e-6f) {
-                                    float cross = (pt->x - la.x)*ldy - (pt->y - la.y)*ldx;
+                                if (lineLen > 1e-6) {
+                                    double cross = (pt->x - la.x)*ldy - (pt->y - la.y)*ldx;
                                     negSide = (cross < 0);
                                     measDist = std::fabs(cross) / lineLen;
                                 }
 
                                 EntityID cid = sketch.addConstraint(ConstraintType::PointLineDistance, hit2.entityID, lineID, measDist, false);
-                                Constraint* cc = sketch.findConstraint(cid);
-                                if (cc) { cc->driven = dimTool_.driven; cc->negativeSide = negSide; }
+                                Constraint* newCon = sketch.findConstraint(cid);
+                                if (newCon) { newCon->driven = dimTool_.driven; newCon->negativeSide = negSide; }
 
                                 dimTool_.selType = HitType::Point;
                                 dimTool_.entityA = hit2.entityID;
                                 dimTool_.entityB = lineID;
                                 dimTool_.constraintID = cid;
-                                dimTool_.measuredMm = measDist;
+                                dimTool_.measuredMm = f(measDist);
                                 snprintf(dimTool_.inputBuf, sizeof(dimTool_.inputBuf), "%.4gmm", measDist);
                                 dimTool_.focusNeeded = true;
                                 dimTool_.placingFirstFrame = true;
@@ -580,15 +667,16 @@ void App::handleSketchInput(float vpW, float vpH) {
                             }
                             if (!dupRadius) {
                                 sketch.removeConstraint(dimTool_.constraintID);
-                                float radius = circle->radius;
+                                double radius = circle->radius;
                                 EntityID cid = sketch.addConstraint(ConstraintType::Radius, dimTool_.entityA, NullID, radius, false);
                                 auto ptsBak = sketch.points; auto circBak = sketch.circles;
                                 auto res = solver_.solve(sketch);
+                                lastSketchDof_ = res.dof;
                                 if (!res.ok) { sketch.points = ptsBak; sketch.circles = circBak; dimTool_.driven = true; }
                                 Constraint* rc = sketch.findConstraint(cid);
                                 if (rc) rc->driven = dimTool_.driven;
                                 dimTool_.constraintID = cid;
-                                dimTool_.measuredMm = radius;
+                                dimTool_.measuredMm = f(radius);
                                 snprintf(dimTool_.inputBuf, sizeof(dimTool_.inputBuf), "%.4gmm", radius);
                                 dimTool_.focusNeeded = true;
                                 dimTool_.placingFirstFrame = true;
@@ -600,12 +688,28 @@ void App::handleSketchInput(float vpW, float vpH) {
                     }
                 }
 
-                // Apply the constraint value and solve before finalizing
+                // Apply the constraint value and solve before finalizing.
+                // For PointLineDistance, pin the reference line (entityB) so only
+                // the point side moves to satisfy the constraint.
                 Constraint* fc = sketch.findConstraint(dimTool_.constraintID);
                 if (fc && !fc->driven) {
                     auto ptsBak = sketch.points;
                     auto circBak = sketch.circles;
+                    PointEntity* pinA = nullptr, *pinB = nullptr;
+                    bool wasA = false, wasB = false;
+                    if (fc->type == ConstraintType::PointLineDistance) {
+                        LineEntity* refLine = sketch.findLine(fc->entityB);
+                        if (refLine) {
+                            pinA = sketch.findPoint(refLine->startPt);
+                            pinB = sketch.findPoint(refLine->endPt);
+                            if (pinA) { wasA = pinA->projected; pinA->projected = true; }
+                            if (pinB) { wasB = pinB->projected; pinB->projected = true; }
+                        }
+                    }
                     auto res = solver_.solve(sketch);
+                    lastSketchDof_ = res.dof;
+                    if (pinA) pinA->projected = wasA;
+                    if (pinB) pinB->projected = wasB;
                     if (!res.ok) {
                         sketch.points = ptsBak;
                         sketch.circles = circBak;
@@ -623,12 +727,11 @@ void App::handleSketchInput(float vpW, float vpH) {
 
     // Grid step
     float gridStep = 1.0f;
-    float worldSpacing = 50.0f / apparentScale;
+    float worldSpacing = 20.0f * dpiScale_ / apparentScale;
     gridStep = std::pow(10.0f, std::floor(std::log10(worldSpacing)));
-    if (gridStep * apparentScale < 10.0f) gridStep *= 10.0f;
+    if (gridStep * apparentScale < 5.0f * dpiScale_) gridStep *= 10.0f;
 
     // Snap
-    snapEngine_.curveSnapTolerancePx = prefs_.tangentSnapPx;
     currentSnap_ = snapEngine_.snap(cursorLocal_, apparentScale, sketch, gridStep);
 
     // Tangent snap override: when line tool has a first point and cursor is near a circle/arc,
@@ -638,7 +741,7 @@ void App::handleSketchInput(float vpW, float vpH) {
         currentSnap_.type == SnapType::NearestOnCurve && currentSnap_.curveID != NullID) {
         Point2D anchor = tool_.firstPoint;
         Point2D center;
-        float radius = 0;
+        double radius = 0;
         CircleEntity* circ = sketch.findCircle(currentSnap_.curveID);
         ArcEntity* arcE = sketch.findArc(currentSnap_.curveID);
         if (circ) {
@@ -649,32 +752,32 @@ void App::handleSketchInput(float vpW, float vpH) {
             Point2D sp = sketch.getPointPos(arcE->startPt);
             radius = distance(center, sp);
         }
-        float d = distance(anchor, center);
-        if (d > radius + 1e-6f) {
+        double d = distance(anchor, center);
+        if (d > radius + 1e-6) {
             // External point: compute two tangent points
-            float halfAngle = std::acos(radius / d);
-            float baseAngle = std::atan2(anchor.y - center.y, anchor.x - center.x);
+            double halfAngle = std::acos(radius / d);
+            double baseAngle = std::atan2(anchor.y - center.y, anchor.x - center.x);
             Point2D t1 = {center.x + radius * std::cos(baseAngle + halfAngle),
                           center.y + radius * std::sin(baseAngle + halfAngle)};
             Point2D t2 = {center.x + radius * std::cos(baseAngle - halfAngle),
                           center.y + radius * std::sin(baseAngle - halfAngle)};
-            // Pick the tangent point closest to cursor
-            float d1 = distance(cursorLocal_, t1);
-            float d2 = distance(cursorLocal_, t2);
-            currentSnap_.position = (d1 <= d2) ? t1 : t2;
-            showTangentLabel = true;
+            double d1 = distance(cursorLocal_, t1);
+            double d2 = distance(cursorLocal_, t2);
+            // Only override if cursor is actually close to a tangent point (tight zone)
+            constexpr float kTangentSnapPx = 12.0f;
+            float worldTol = kTangentSnapPx / apparentScale;
+            double best = std::min(d1, d2);
+            if (best < worldTol) {
+                currentSnap_.position = (d1 <= d2) ? t1 : t2;
+                currentSnap_.type = SnapType::Tangent;
+                showTangentLabel = true;
+            }
         }
     }
-    // Also show "T" when starting a line from a curve (first click on curve, no first point yet)
-    if (tool_.type == ToolType::Line && !tool_.hasFirstPoint &&
-        currentSnap_.type == SnapType::NearestOnCurve && currentSnap_.curveID != NullID) {
-        showTangentLabel = true;
-    }
-
     // Draw "T" constraint label near the snap indicator
     if (showTangentLabel) {
         float w3[3];
-        plane.localToWorld(currentSnap_.position.x, currentSnap_.position.y, w3[0], w3[1], w3[2]);
+        plane.localToWorld(f(currentSnap_.position.x), f(currentSnap_.position.y), w3[0], w3[1], w3[2]);
         float sx, sy;
         if (worldToScreen(w3, view, proj, vpW, vpH, sx, sy)) {
             ImDrawList* dl = ImGui::GetForegroundDrawList();
@@ -684,9 +787,183 @@ void App::handleSketchInput(float vpW, float vpH) {
         }
     }
 
+    // H/V snap: when the in-progress line is near-horizontal or near-vertical, lock
+    // currentSnap_.position to the H/V axis so the rubber-band line itself snaps.
+    // Also snaps to intersections of the H/V rail with existing geometry.
+    // Tangent snap takes priority (more specific geometric lock).
+    hvCrossEntityID_ = NullID;
+    if (tool_.type == ToolType::Line && tool_.hasFirstPoint && !mouseOverUI &&
+        currentSnap_.type != SnapType::Tangent) {
+        float dx = (float)(cursorLocal_.x - tool_.firstPoint.x);
+        float dy = (float)(cursorLocal_.y - tool_.firstPoint.y);
+        float len = std::sqrt(dx * dx + dy * dy);
+        if (len > 0.5f / apparentScale) {
+            constexpr float kThreshDeg = 5.0f;
+            const float sinThresh = std::sin(kThreshDeg * 3.14159265f / 180.0f);
+            bool nearH = std::fabs(dy / len) < sinThresh;
+            bool nearV = !nearH && std::fabs(dx / len) < sinThresh;
+
+            if (nearH || nearV) {
+                // Project raw cursor onto H or V axis through the start point
+                Point2D hvPos = nearH
+                    ? Point2D{cursorLocal_.x, tool_.firstPoint.y}
+                    : Point2D{tool_.firstPoint.x, cursorLocal_.y};
+
+                double worldTol = snapEngine_.snapTolerancePx / (double)apparentScale;
+                EntityID hvPtID = NullID;
+                EntityID hvCrossID = NullID;
+                double bestDist = worldTol;
+
+                // 1. Existing coincident points on the rail
+                for (const auto& pt : sketch.points) {
+                    if (pt.id == tool_.firstPointID) continue;
+                    double d = distance(hvPos, {pt.x, pt.y});
+                    if (d < bestDist) {
+                        bestDist = d;
+                        hvPtID   = pt.id;
+                        hvCrossID = NullID;
+                    }
+                }
+
+                // 2. Intersections of the H/V rail with existing lines
+                for (const auto& line : sketch.lines) {
+                    Point2D P = sketch.getPointPos(line.startPt);
+                    Point2D Q = sketch.getPointPos(line.endPt);
+                    Point2D ix;
+                    if (nearH) {
+                        double denom = Q.y - P.y;
+                        if (std::fabs(denom) < 1e-10) continue;
+                        double t = (tool_.firstPoint.y - P.y) / denom;
+                        if (t < 0.0 || t > 1.0) continue;
+                        ix = {P.x + t*(Q.x - P.x), tool_.firstPoint.y};
+                    } else {
+                        double denom = Q.x - P.x;
+                        if (std::fabs(denom) < 1e-10) continue;
+                        double t = (tool_.firstPoint.x - P.x) / denom;
+                        if (t < 0.0 || t > 1.0) continue;
+                        ix = {tool_.firstPoint.x, P.y + t*(Q.y - P.y)};
+                    }
+                    double d = distance(hvPos, ix);
+                    if (d < bestDist) {
+                        bestDist  = d;
+                        hvPos     = ix;
+                        hvPtID    = NullID;
+                        hvCrossID = line.id;
+                    }
+                }
+
+                // 3. Intersections of the H/V rail with circles
+                for (const auto& circ : sketch.circles) {
+                    Point2D c = sketch.getPointPos(circ.centerPt);
+                    double r = circ.radius;
+                    Point2D pts[2]; int nPts = 0;
+                    if (nearH) {
+                        double dy2 = tool_.firstPoint.y - c.y;
+                        if (std::fabs(dy2) > r) continue;
+                        double dxC = std::sqrt(r*r - dy2*dy2);
+                        pts[nPts++] = {c.x + dxC, tool_.firstPoint.y};
+                        pts[nPts++] = {c.x - dxC, tool_.firstPoint.y};
+                    } else {
+                        double dx2 = tool_.firstPoint.x - c.x;
+                        if (std::fabs(dx2) > r) continue;
+                        double dyC = std::sqrt(r*r - dx2*dx2);
+                        pts[nPts++] = {tool_.firstPoint.x, c.y + dyC};
+                        pts[nPts++] = {tool_.firstPoint.x, c.y - dyC};
+                    }
+                    for (int i = 0; i < nPts; i++) {
+                        double d = distance(hvPos, pts[i]);
+                        if (d < bestDist) {
+                            bestDist  = d;
+                            hvPos     = pts[i];
+                            hvPtID    = NullID;
+                            hvCrossID = circ.id;
+                        }
+                    }
+                }
+
+                // 4. Intersections of the H/V rail with arcs
+                {
+                    static constexpr double kPiD = 3.14159265358979323846;
+                    auto normA = [](double a) {
+                        a = std::fmod(a, 2.0*3.14159265358979323846);
+                        if (a < 0.0) a += 2.0*3.14159265358979323846;
+                        return a;
+                    };
+                    for (const auto& arc : sketch.arcs) {
+                        Point2D c  = sketch.getPointPos(arc.centerPt);
+                        Point2D sp = sketch.getPointPos(arc.startPt);
+                        double r = distance(c, sp);
+                        double nSA = normA(arc.startAngle);
+                        double nEA = normA(arc.endAngle);
+                        double sweep = nEA - nSA;
+                        if (sweep <= 0.0) sweep += 2.0*kPiD;
+
+                        Point2D pts[2]; int nPts = 0;
+                        double angles[2];
+                        if (nearH) {
+                            double dy2 = tool_.firstPoint.y - c.y;
+                            if (std::fabs(dy2) > r) continue;
+                            double dxC = std::sqrt(r*r - dy2*dy2);
+                            pts[nPts] = {c.x + dxC, tool_.firstPoint.y};
+                            angles[nPts] = std::atan2(tool_.firstPoint.y - c.y,  dxC); nPts++;
+                            pts[nPts] = {c.x - dxC, tool_.firstPoint.y};
+                            angles[nPts] = std::atan2(tool_.firstPoint.y - c.y, -dxC); nPts++;
+                        } else {
+                            double dx2 = tool_.firstPoint.x - c.x;
+                            if (std::fabs(dx2) > r) continue;
+                            double dyC = std::sqrt(r*r - dx2*dx2);
+                            pts[nPts] = {tool_.firstPoint.x, c.y + dyC};
+                            angles[nPts] = std::atan2( dyC, tool_.firstPoint.x - c.x); nPts++;
+                            pts[nPts] = {tool_.firstPoint.x, c.y - dyC};
+                            angles[nPts] = std::atan2(-dyC, tool_.firstPoint.x - c.x); nPts++;
+                        }
+                        for (int i = 0; i < nPts; i++) {
+                            double toA = normA(angles[i]) - nSA;
+                            if (toA < 0.0) toA += 2.0*kPi;
+                            if (toA >= sweep) continue; // outside arc
+                            double d = distance(hvPos, pts[i]);
+                            if (d < bestDist) {
+                                bestDist  = d;
+                                hvPos     = pts[i];
+                                hvPtID    = NullID;
+                                hvCrossID = arc.id;
+                            }
+                        }
+                    }
+                }
+
+                // If a coincident point won, snap exactly to it
+                if (hvPtID != NullID)
+                    hvPos = sketch.getPointPos(hvPtID);
+
+                // Record crossing entity for actionCompleted to add constraints
+                hvCrossEntityID_ = hvCrossID;
+
+                // Lock snap to the H/V position
+                currentSnap_.position = hvPos;
+                currentSnap_.pointID  = hvPtID;
+                currentSnap_.curveID  = NullID;
+                currentSnap_.type     = (hvPtID != NullID) ? SnapType::Point : SnapType::Grid;
+
+                // Show H or V label at the snap indicator position
+                float wb[3];
+                plane.localToWorld((float)hvPos.x, (float)hvPos.y, wb[0], wb[1], wb[2]);
+                float sbx, sby;
+                if (worldToScreen(wb, view, proj, vpW, vpH, sbx, sby)) {
+                    ImDrawList* dl = ImGui::GetForegroundDrawList();
+                    const auto& sc = activeTheme().snapColor;
+                    ImU32 col = IM_COL32((int)(sc[0]*255), (int)(sc[1]*255), (int)(sc[2]*255), 200);
+                    dl->AddText(ImVec2(sbx + 7.0f, sby - 9.0f), col, nearH ? "H" : "V");
+                }
+            }
+        }
+    }
+
     // Inline dimension input — intercept number keys when circle tool has center placed
+    // or fillet tool has vertex placed
     if (!io.WantCaptureKeyboard && !tool_.inlineInputActive &&
-        tool_.type == ToolType::Circle && tool_.hasFirstPoint) {
+        ((tool_.type == ToolType::Circle && tool_.hasFirstPoint) ||
+         (tool_.type == ToolType::Fillet && tool_.hasFirstPoint))) {
         // Check for number, decimal key press to activate inline input (main + numpad)
         auto activateInline = [&](char ch) {
             tool_.inlineInputActive = true;
@@ -738,17 +1015,32 @@ void App::handleSketchInput(float vpW, float vpH) {
         if (submitted) {
             std::string unit;
             float inputVal = 0;
-            float diameterMm = parseUnitInput(tool_.inlineInputBuf, unit, inputVal);
-            if (diameterMm > 0.001f) {
-                float radius = diameterMm * 0.5f;
-                EntityID circID = sketch.addCircle(tool_.firstPointID, radius);
-                sketch.addConstraint(ConstraintType::Diameter, circID, NullID, diameterMm, false);
-                solver_.solve(sketch);
-                history_.pushState(sketch);
-                tool_.reset();
-            } else {
-                tool_.inlineInputActive = false;
-                tool_.inlineInputBuf[0] = '\0';
+            float valueMm = parseUnitInput(tool_.inlineInputBuf, unit, inputVal);
+            if (tool_.type == ToolType::Circle) {
+                if (valueMm > 0.001f) {
+                    float radius = valueMm * 0.5f;
+                    EntityID circID = sketch.addCircle(tool_.firstPointID, radius);
+                    sketch.addConstraint(ConstraintType::Diameter, circID, NullID, valueMm, false);
+                    lastSketchDof_ = solver_.solve(sketch).dof;
+                    history_.pushState(sketch);
+                    tool_.reset();
+                } else {
+                    tool_.inlineInputActive = false;
+                    tool_.inlineInputBuf[0] = '\0';
+                }
+            } else if (tool_.type == ToolType::Fillet) {
+                if (valueMm > 0.001f) {
+                    bool ok = applyFillet(sketch, filletTool_, tool_.firstPointID, valueMm);
+                    if (ok) {
+                        lastSketchDof_ = solver_.solve(sketch).dof;
+                        history_.pushState(sketch);
+                    }
+                    tool_.reset();
+                    filletTool_.reset();
+                } else {
+                    tool_.inlineInputActive = false;
+                    tool_.inlineInputBuf[0] = '\0';
+                }
             }
         }
 
@@ -792,6 +1084,7 @@ void App::handleSketchInput(float vpW, float vpH) {
         }
 
         if (ImGui::IsKeyPressed(ImGuiKey_D)) { switchTool(ToolType::Dimension); }
+        if (ImGui::IsKeyPressed(ImGuiKey_F)) { switchTool(ToolType::Fillet); }
 
         if (ImGui::IsKeyPressed(ImGuiKey_Delete) || ImGui::IsKeyPressed(ImGuiKey_Backspace)) {
             handleDeletion(sketch);
@@ -822,8 +1115,9 @@ void App::handleSketchInput(float vpW, float vpH) {
     // Left click
     if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
         if (tool_.type != ToolType::None) {
-            Point2D effectivePos = (currentSnap_.type != SnapType::None)
-                ? currentSnap_.position : cursorLocal_;
+            // Always use currentSnap_.position: for type=None it equals cursorLocal_,
+            // but H/V snap may have overridden it to the guide-locked position.
+            Point2D effectivePos = currentSnap_.position;
             handleToolAction(sketch, effectivePos);
         } else {
             handleSelection(sketch, io.KeyCtrl);
@@ -844,7 +1138,7 @@ void App::handleSketchInput(float vpW, float vpH) {
                     const PointEntity* ptEnt = sketch.findPoint(e.id);
                     if (ptEnt && ptEnt->projected) continue;
                     Point2D ptPos = sketch.getPointPos(e.id);
-                    float ptDist = distance(ptPos, cursorLocal_) * apparentScale;
+                    double ptDist = distance(ptPos, cursorLocal_) * apparentScale;
                     if (ptDist < 20.0f) {
                         selection_.dragMode = SelectionDragMode::PointDrag;
                         selection_.dragPointID = e.id;
@@ -874,7 +1168,7 @@ void App::handleSketchInput(float vpW, float vpH) {
     // During lasso drag: append cursor with distance threshold
     if (selection_.dragMode == SelectionDragMode::LassoSelect) {
         if (!selection_.lassoPoints.empty()) {
-            float dist = distance(selection_.lassoPoints.back(), cursorLocal_);
+            double dist = distance(selection_.lassoPoints.back(), cursorLocal_);
             float threshold = 5.0f / apparentScale; // ~5 screen pixels
             if (dist > threshold) {
                 selection_.lassoPoints.push_back(cursorLocal_);
@@ -908,14 +1202,14 @@ void App::handleSketchInput(float vpW, float vpH) {
             Point2D mx = {std::max(a.x, b.x), std::max(a.y, b.y)};
 
             // Helper: project a local sketch point to screen space
-            auto localToScreen = [&](float lx, float ly, float& sx, float& sy) -> bool {
+            auto localToScreen = [&](double lx, double ly, float& sx, float& sy) -> bool {
                 float wx, wy, wz;
-                plane.localToWorld(lx, ly, wx, wy, wz);
+                plane.localToWorld(f(lx), f(ly), wx, wy, wz);
                 float w3[3] = {wx, wy, wz};
                 return worldToScreen(w3, view, proj, vpW, vpH, sx, sy);
             };
 
-            auto screenPtInRect = [&](float lx, float ly) -> bool {
+            auto screenPtInRect = [&](double lx, double ly) -> bool {
                 float sx, sy;
                 if (!localToScreen(lx, ly, sx, sy)) return false;
                 return sx >= mn.x && sx <= mx.x && sy >= mn.y && sy <= mx.y;
@@ -953,15 +1247,15 @@ void App::handleSketchInput(float vpW, float vpH) {
             for (const auto& el : sketch.ellipses) {
                 Point2D center = sketch.getPointPos(el.centerPt);
                 // Check 4 rotated extremal points
-                float cosR = std::cos(el.rotation), sinR = std::sin(el.rotation);
+                double cosR = std::cos(el.rotation), sinR = std::sin(el.rotation);
                 bool allIn = true;
-                float testPts[4][2] = {
-                    { el.semiMajor, 0}, {-el.semiMajor, 0},
-                    {0,  el.semiMinor}, {0, -el.semiMinor}
+                double testPts[4][2] = {
+                    { el.semiMajor, 0.0}, {-el.semiMajor, 0.0},
+                    {0.0,  el.semiMinor}, {0.0, -el.semiMinor}
                 };
                 for (auto& tp : testPts) {
-                    float rx = tp[0]*cosR - tp[1]*sinR + center.x;
-                    float ry = tp[0]*sinR + tp[1]*cosR + center.y;
+                    double rx = tp[0]*cosR - tp[1]*sinR + center.x;
+                    double ry = tp[0]*sinR + tp[1]*cosR + center.y;
                     if (!screenPtInRect(rx, ry)) { allIn = false; break; }
                 }
                 if (allIn) selection_.addToSelection(HitType::Ellipse, el.id);
@@ -1016,12 +1310,12 @@ void App::handleSketchInput(float vpW, float vpH) {
                 }
                 for (const auto& el : sketch.ellipses) {
                     Point2D center = sketch.getPointPos(el.centerPt);
-                    float cosR = std::cos(el.rotation), sinR = std::sin(el.rotation);
+                    double cosR = std::cos(el.rotation), sinR = std::sin(el.rotation);
                     bool allIn = pointInPolygon(center, poly);
                     if (allIn) {
                         for (int si = 0; si < 16 && allIn; si++) {
-                            float a = 2.0f * 3.14159265f * si / 16.0f;
-                            float ex = el.semiMajor * std::cos(a), ey = el.semiMinor * std::sin(a);
+                            double a = 2.0 * 3.14159265358979 * si / 16.0;
+                            double ex = el.semiMajor * std::cos(a), ey = el.semiMinor * std::sin(a);
                             Point2D p = {center.x + ex*cosR - ey*sinR, center.y + ex*sinR + ey*cosR};
                             if (!pointInPolygon(p, poly)) allIn = false;
                         }
@@ -1068,10 +1362,14 @@ void App::handleSketchInput(float vpW, float vpH) {
 void App::handleToolAction(Sketch& sketch, Point2D localPos) {
     EntityID snapPtID = currentSnap_.pointID;
     EntityID snapCurveID = currentSnap_.curveID;
+    bool snapWasTangent = (currentSnap_.type == SnapType::Tangent);
+    // Save before handleLineTool overwrites it with the end-point curve
+    EntityID startCurveID = tool_.tangentSourceID;
     bool actionCompleted = false;
 
-    // Save tangent source before handleLineTool overwrites it for next segment
-    EntityID lineTangentSource = tool_.tangentSourceID;
+    // Capture before dispatch — rect/center-rect handlers call tool_.reset() on completion
+    ToolType dispatchedToolType = tool_.type;
+    EntityID dispatchedFirstPtID = tool_.firstPointID;
 
     switch (tool_.type) {
         case ToolType::Point:
@@ -1095,6 +1393,19 @@ void App::handleToolAction(Sketch& sketch, Point2D localPos) {
         case ToolType::CenterRect:
             actionCompleted = handleCenterRectTool(sketch, tool_, localPos, snapPtID);
             break;
+        case ToolType::Fillet:
+            if (!tool_.hasFirstPoint) {
+                // Must snap to an existing vertex point
+                if (snapPtID == NullID) break;
+                if (handleFilletVertexClick(sketch, filletTool_, snapPtID)) {
+                    tool_.firstPointID = snapPtID;
+                    tool_.firstPoint = sketch.getPointPos(snapPtID);
+                    tool_.hasFirstPoint = true;
+                    tool_.inlineInputActive = true;
+                    tool_.inlineInputFocus = true;
+                }
+            }
+            break;
         case ToolType::Dimension: {
             handleDimToolClick(sketch);
             break;
@@ -1105,19 +1416,83 @@ void App::handleToolAction(Sketch& sketch, Point2D localPos) {
     }
 
     if (actionCompleted) {
-        if (tool_.type == ToolType::Line && !sketch.lines.empty()) {
+        if (dispatchedToolType == ToolType::Line && !sketch.lines.empty()) {
             EntityID lastLineID = sketch.lines.back().id;
-            // Auto-tangent constraint if line started or ended on a circle/arc
-            EntityID tangentCurve = (lineTangentSource != NullID) ? lineTangentSource : snapCurveID;
-            if (tangentCurve != NullID) {
-                sketch.addConstraint(ConstraintType::Tangent, lastLineID, tangentCurve, 0.0f, true);
+            EntityID startPtID  = sketch.lines.back().startPt;
+
+            // Auto-tangent only when the user explicitly snapped to the geometric tangent
+            // point on a circle/arc (SnapType::Tangent). A plain NearestOnCurve snap means
+            // the user just wants the endpoint to land on the curve — no tangent implied.
+            EntityID endPtID = sketch.lines.back().endPt;
+
+            // Auto-apply PointOnCircle for endpoints snapped to circle/arc curves.
+            // Only when a new point was created (curve snap, no existing pointID).
+            auto addPointOnCircle = [&](EntityID ptID, EntityID curveID) {
+                if (curveID == NullID || ptID == NullID) return;
+                bool isCircle = sketch.findCircle(curveID) != nullptr;
+                bool isArc    = !isCircle && sketch.findArc(curveID) != nullptr;
+                if (!isCircle && !isArc) return;
+                // Check for existing PointOnCircle to avoid duplicates
+                for (const auto& c : sketch.constraints) {
+                    if (c.type == ConstraintType::PointOnCircle &&
+                        c.entityA == ptID && c.entityB == curveID) return;
+                }
+                sketch.addConstraint(ConstraintType::PointOnCircle, ptID, curveID, 0.0f, true);
+            };
+
+            // Start point: startCurveID was captured before handleLineTool ran
+            // (only set when first click had no existing pointID to snap to)
+            addPointOnCircle(startPtID, startCurveID);
+
+            // End point: snapCurveID is the curve snapped at this click
+            if (!snapWasTangent)
+                addPointOnCircle(endPtID, snapCurveID);
+
+            if (snapWasTangent && snapCurveID != NullID) {
+                sketch.addConstraint(ConstraintType::Tangent, lastLineID, snapCurveID, 0.0f, true);
+            } else {
+                // Apply H/V auto-constraints based on the line's actual geometry.
+                auto pending = detectLineAutoConstraints(sketch, lastLineID);
+                for (const auto& pc : pending) {
+                    sketch.addConstraint(pc.type, pc.entityA, pc.entityB, pc.value, true);
+                }
+
+                // If the H/V rail crossed an existing entity, add the appropriate constraint.
+                // Line cross → PointOnLine; circle/arc cross → PointOnCircle.
+                // (When H/V rail is active it clears snapCurveID, so this is the only
+                //  path that can add PointOnCircle for the end point in H/V mode.)
+                if (hvCrossEntityID_ != NullID) {
+                    if (sketch.findLine(hvCrossEntityID_)) {
+                        sketch.addConstraint(ConstraintType::PointOnLine, endPtID, hvCrossEntityID_, 0.0f, true);
+                    } else {
+                        addPointOnCircle(endPtID, hvCrossEntityID_);
+                    }
+                }
+                hvCrossEntityID_ = NullID;
             }
-            auto pending = detectLineAutoConstraints(sketch, lastLineID);
-            for (const auto& pc : pending) {
-                sketch.addConstraint(pc.type, pc.entityA, pc.entityB, pc.value, true);
+
+            // Temporarily pin the start point so auto-constraints only move the new
+            // free endpoint, leaving previously placed geometry undisturbed.
+            PointEntity* startPt = nullptr;
+            for (auto& pt : sketch.points) {
+                if (pt.id == startPtID) { startPt = &pt; break; }
             }
+            bool wasPinned = startPt && startPt->projected;
+            if (startPt) startPt->projected = true;
+            lastSketchDof_ = solver_.solve(sketch).dof;
+            if (startPt) startPt->projected = wasPinned;
+        } else if ((dispatchedToolType == ToolType::Rectangle ||
+                    dispatchedToolType == ToolType::CenterRect) &&
+                   dispatchedFirstPtID != NullID) {
+            // Pin the first corner so H/V constraints settle without drifting the anchor.
+            PointEntity* anchorPt = sketch.findPoint(dispatchedFirstPtID);
+            bool wasPinned = anchorPt && anchorPt->projected;
+            if (anchorPt) anchorPt->projected = true;
+            lastSketchDof_ = solver_.solve(sketch).dof;
+            if (anchorPt) anchorPt->projected = wasPinned;
+        } else {
+            lastSketchDof_ = solver_.solve(sketch).dof;
         }
-        solver_.solve(sketch);
 
         // Refresh tool's first point from solved position (solver may have moved it)
         if (tool_.hasFirstPoint && tool_.firstPointID != NullID) {
@@ -1134,6 +1509,8 @@ void App::switchTool(ToolType newTool) {
         // Remove orphan points left by incomplete tools
         auto isOrphan = [&](EntityID ptID) {
             if (ptID == NullID) return false;
+            const PointEntity* pt = sketch.findPoint(ptID);
+            if (pt && pt->projected) return false;
             if (sketch.isPointReferenced(ptID)) return false;
             for (const auto& co : sketch.constraints)
                 if (co.entityA == ptID || co.entityB == ptID || co.entityC == ptID) return false;
@@ -1149,6 +1526,7 @@ void App::switchTool(ToolType newTool) {
     tool_.type = newTool;
     tool_.reset();
     arcTool_.reset();
+    filletTool_.reset();
     dimTool_.reset();
     selection_.clear();
 }
@@ -1197,10 +1575,10 @@ void App::handleSelection(Sketch& sketch, bool ctrlHeld) {
                 dimTool_.selType = HitType::Line;
             dimTool_.entityA = cc->entityA;
             dimTool_.entityB = cc->entityB;
-            dimTool_.measuredMm = cc->value;
+            dimTool_.measuredMm = f(cc->value);
             // Fill input buffer with current value
             if (cc->type == ConstraintType::Angle)
-                formatAngleText(dimTool_.inputBuf, sizeof(dimTool_.inputBuf), cc->value);
+                formatAngleText(dimTool_.inputBuf, sizeof(dimTool_.inputBuf), f(cc->value));
             else if (!cc->inputUnit.empty())
                 snprintf(dimTool_.inputBuf, sizeof(dimTool_.inputBuf), "%.4g%s", cc->inputValue, cc->inputUnit.c_str());
             else
@@ -1240,7 +1618,7 @@ void App::handleDrag(Sketch& sketch) {
     pt->x = dragPos.x;
     pt->y = dragPos.y;
     selection_.dragStarted = true;
-    solver_.solve(sketch, selection_.dragPointID);
+    lastSketchDof_ = solver_.solve(sketch, selection_.dragPointID).dof;
 }
 
 void App::handleDeletion(Sketch& sketch) {
