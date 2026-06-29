@@ -495,16 +495,26 @@ bool handleArcCenterTool(Sketch& sketch, ArcToolState& arcTool, Point2D worldPos
         return false;
     }
 
-    // End point: snap to existing point if provided (connecting to existing geometry),
-    // otherwise project cursor direction onto the arc circle.
+    // End point: snap to existing point if provided AND it lies close to the circle.
+    // If it's off-circle, project instead — connecting an arc to an off-circle constrained
+    // point would make the arc geometry enforcement fight other constraints.
     EntityID endID;
-    if (snapPointID != NullID) {
-        endID = snapPointID; // reuse existing point so profiles close properly
-    } else {
+    auto projectOnCircle = [&]() {
         double endAngle = std::atan2(worldPos.y - arcTool.point1.y, worldPos.x - arcTool.point1.x);
         double ex = arcTool.point1.x + radius * std::cos(endAngle);
         double ey = arcTool.point1.y + radius * std::sin(endAngle);
-        endID = sketch.addPoint(ex, ey);
+        return sketch.addPoint(ex, ey);
+    };
+    if (snapPointID != NullID) {
+        Point2D snapPos = sketch.getPointPos(snapPointID);
+        double snapDist = distance(arcTool.point1, snapPos);
+        if (std::fabs(snapDist - radius) < radius * 0.05 + 0.5) {
+            endID = snapPointID; // on (or very near) the circle — reuse for profile closure
+        } else {
+            endID = projectOnCircle();
+        }
+    } else {
+        endID = projectOnCircle();
     }
 
     sketch.addArc(arcTool.point1ID, arcTool.point2ID, endID);

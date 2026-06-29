@@ -1475,9 +1475,15 @@ void App::handleToolAction(Sketch& sketch, Point2D localPos) {
             }
             break;
         }
-        case ToolType::CenterRect:
+        case ToolType::CenterRect: {
+            bool hadFirst = tool_.hasFirstPoint;
             actionCompleted = handleCenterRectTool(sketch, tool_, localPos, snapPtID);
+            if (hadFirst && !actionCompleted && !tool_.hasFirstPoint) {
+                snprintf(sketchMsg_, sizeof(sketchMsg_), "Rectangle too small — click further away");
+                sketchMsgTimer_ = 2.0f;
+            }
             break;
+        }
         case ToolType::Fillet:
             if (!tool_.hasFirstPoint) {
                 if (snapPtID == NullID) {
