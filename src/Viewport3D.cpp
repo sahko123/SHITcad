@@ -76,7 +76,7 @@ void OrbitCamera::pan(float dx, float dy, float viewportW, float viewportH) {
 
 void OrbitCamera::zoom(float delta) {
     distance *= std::pow(1.1f, -delta);
-    distance = std::clamp(distance, 1.0f, 10000.0f);
+    distance = std::clamp(distance, 0.5f, 1'000'000.0f);
 }
 
 void OrbitCamera::getEyePosition(float* out) const {
@@ -120,12 +120,15 @@ void OrbitCamera::getViewMatrix(float* out) const {
 }
 
 void OrbitCamera::getProjection(float* out, float aspect) const {
+    // Scale near/far with distance so the depth ratio stays ~200000:1
+    // at any zoom level — safe for a 24-bit depth buffer without z-fighting.
+    float nearP = std::max(0.1f, distance * 0.001f);
+    float farP  = distance * 200.0f + 5000.0f;
     if (orthographic) {
-        // Use a large symmetric depth range so nothing clips
-        float depthRange = 5000.0f;
+        float depthRange = farP;
         makeOrthographic(out, distance, aspect, -depthRange, depthRange);
     } else {
-        makePerspective(out, 45.0f, aspect, 0.1f, 5000.0f);
+        makePerspective(out, 45.0f, aspect, nearP, farP);
     }
 }
 

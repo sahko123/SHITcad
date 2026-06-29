@@ -13,6 +13,7 @@ enum class ToolType : uint8_t {
     ArcCenter,
     CenterRect,
     Dimension,
+    Fillet,
     Extrude,
     Revolve,
     Loft,
@@ -52,6 +53,14 @@ struct ArcToolState {
     void reset() { *this = {}; }
 };
 
+struct FilletToolState {
+    EntityID entity1ID = NullID;  // first entity at the corner vertex
+    EntityID entity2ID = NullID;  // second entity at the corner vertex
+    bool entity1IsArc = false;
+    bool entity2IsArc = false;
+    void reset() { *this = {}; }
+};
+
 struct SnapResult;
 
 // Tool handler functions. Return true if an action was completed (for undo snapshot).
@@ -62,5 +71,10 @@ bool handleArc3PointTool(Sketch& sketch, ArcToolState& arcTool, Point2D worldPos
 bool handleArcCenterTool(Sketch& sketch, ArcToolState& arcTool, Point2D worldPos, EntityID snapPointID);
 bool handleCenterRectTool(Sketch& sketch, ToolState& tool, Point2D worldPos, EntityID snapPointID);
 bool handlePointTool(Sketch& sketch, Point2D worldPos, EntityID snapPointID);
+
+// Fillet: click on vertex to select it (returns true if exactly 2 entities found).
+bool handleFilletVertexClick(const Sketch& sketch, FilletToolState& filletTool, EntityID vertexID);
+// Apply fillet geometry. Returns true on success.
+bool applyFillet(Sketch& sketch, FilletToolState& filletTool, EntityID vertexID, double radius);
 
 } // namespace shitcad

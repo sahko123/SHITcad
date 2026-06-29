@@ -119,21 +119,21 @@ static void earClipTriangulate(const std::vector<Point2D>& pts, std::vector<int>
     for (int j = 0; j < n; j++) indices[j] = j;
 
     // Ensure CCW winding
-    float signedArea = 0;
+    double signedArea = 0;
     for (int j = 0; j < n; j++) {
         int jn = (j + 1) % n;
         signedArea += pts[j].x * pts[jn].y - pts[jn].x * pts[j].y;
     }
     if (signedArea < 0) std::reverse(indices.begin(), indices.end());
 
-    auto cross2D = [](Point2D o, Point2D a, Point2D b) -> float {
+    auto cross2D = [](Point2D o, Point2D a, Point2D b) -> double {
         return (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
     };
 
     auto pointInTriangle = [&](Point2D p, Point2D a, Point2D b, Point2D c) -> bool {
-        float d1 = cross2D(p, a, b);
-        float d2 = cross2D(p, b, c);
-        float d3 = cross2D(p, c, a);
+        double d1 = cross2D(p, a, b);
+        double d2 = cross2D(p, b, c);
+        double d3 = cross2D(p, c, a);
         bool hasNeg = (d1 < 0) || (d2 < 0) || (d3 < 0);
         bool hasPos = (d1 > 0) || (d2 > 0) || (d3 > 0);
         return !(hasNeg && hasPos);
@@ -195,11 +195,11 @@ static std::vector<Point2D> mergePolygonWithHoles(
 
         // Find closest vertex on result polygon
         int bestIdx = 0;
-        float bestDist = std::numeric_limits<float>::max();
+        double bestDist = std::numeric_limits<double>::max();
         for (int i = 0; i < (int)result.size(); i++) {
-            float dx = result[i].x - holePoint.x;
-            float dy = result[i].y - holePoint.y;
-            float dist = dx * dx + dy * dy;
+            double dx = result[i].x - holePoint.x;
+            double dy = result[i].y - holePoint.y;
+            double dist = dx * dx + dy * dy;
             if (dist < bestDist) {
                 bestDist = dist;
                 bestIdx = i;

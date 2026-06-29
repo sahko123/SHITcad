@@ -1,6 +1,7 @@
 #include "Snap.h"
 #include "Intersect.h"
 #include "HitTest.h"
+#include "Constants.h"
 #include <cmath>
 #include <limits>
 #include <algorithm>
@@ -49,7 +50,7 @@ SnapResult SnapEngine::snap(Point2D cursorWorld, float pixelsPerUnit,
             for (const auto& line : sketch.lines) {
                 Point2D a = sketch.getPointPos(line.startPt);
                 Point2D b = sketch.getPointPos(line.endPt);
-                auto hits = circleLineIntersection(center, circle.radius, a, b);
+                auto hits = circleLineIntersection(center, f(circle.radius), a, b);
                 for (const auto& h : hits) {
                     double dist = distance(cursorWorld, h.point);
                     if (dist < worldTolerance && dist < bestDist) {
@@ -69,7 +70,7 @@ SnapResult SnapEngine::snap(Point2D cursorWorld, float pixelsPerUnit,
             for (int cj = ci + 1; cj < (int)sketch.circles.size(); cj++) {
                 Point2D c2 = sketch.getPointPos(sketch.circles[cj].centerPt);
                 double r2 = sketch.circles[cj].radius;
-                auto hits = circleCircleIntersection(c1, r1, c2, r2);
+                auto hits = circleCircleIntersection(c1, f(r1), c2, f(r2));
                 for (const auto& h : hits) {
                     double dist = distance(cursorWorld, h.point);
                     if (dist < worldTolerance && dist < bestDist) {
@@ -101,6 +102,68 @@ SnapResult SnapEngine::snap(Point2D cursorWorld, float pixelsPerUnit,
             }
         }
         if (result.type == SnapType::Midpoint)
+            return result;
+    }
+
+    // Priority 3.5: Quadrant snap — N/S/E/W extremes of circles and arcs
+    {
+        static constexpr double kPiD = 3.14159265358979323846;
+        auto normA = [](double a) {
+            a = std::fmod(a, 2.0 * 3.14159265358979323846);
+            if (a < 0.0) a += 2.0 * 3.14159265358979323846;
+            return a;
+        };
+
+        for (const auto& circle : sketch.circles) {
+            Point2D center = sketch.getPointPos(circle.centerPt);
+            double r = circle.radius;
+            const Point2D quads[4] = {
+                {center.x + r, center.y},  // East  0°
+                {center.x, center.y + r},  // North 90°
+                {center.x - r, center.y},  // West  180°
+                {center.x, center.y - r},  // South 270°
+            };
+            for (const auto& qp : quads) {
+                double dist = distance(cursorWorld, qp);
+                if (dist < worldTolerance && dist < bestDist) {
+                    bestDist = dist;
+                    result.type = SnapType::Quadrant;
+                    result.position = qp;
+                    result.pointID = NullID;
+                    result.curveID = circle.id;
+                }
+            }
+        }
+
+        for (const auto& arc : sketch.arcs) {
+            Point2D center = sketch.getPointPos(arc.centerPt);
+            Point2D sp = sketch.getPointPos(arc.startPt);
+            double r = distance(center, sp);
+            double nSA = normA(arc.startAngle);
+            double nEA = normA(arc.endAngle);
+            double sweep = nEA - nSA;
+            if (sweep <= 0.0) sweep += 2.0 * kPiD;
+
+            const double quadAngles[4] = {0.0, kPiD * 0.5, kPiD, kPiD * 1.5};
+            for (double qa : quadAngles) {
+                double nQA = normA(qa);
+                double toQ = nQA - nSA;
+                if (toQ < 0.0) toQ += 2.0 * kPiD;
+                if (toQ >= sweep) continue; // outside arc sweep
+
+                Point2D qp = {center.x + r * std::cos(qa), center.y + r * std::sin(qa)};
+                double dist = distance(cursorWorld, qp);
+                if (dist < worldTolerance && dist < bestDist) {
+                    bestDist = dist;
+                    result.type = SnapType::Quadrant;
+                    result.position = qp;
+                    result.pointID = NullID;
+                    result.curveID = arc.id;
+                }
+            }
+        }
+
+        if (result.type == SnapType::Quadrant)
             return result;
     }
 

@@ -165,6 +165,7 @@ void App::updateBooleanPreview() {
 }
 
 void App::renderBooleanPreview(const float* view, const float* proj, const float* eyePos) {
+    (void)view; (void)proj; (void)eyePos;
     if (!booleanTool_.previewValid) return;
 
     // Highlight target body in green, tool body in red/blue

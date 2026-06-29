@@ -791,7 +791,32 @@ SolveResult Solver::solve(Sketch& sketch, EntityID draggedPoint) {
                     PointEntity* contact = (distA < distB) ? la : lb;
                     PointEntity* far = (contact == la) ? lb : la;
 
-                    // Step 1: Snap contact point onto the circle
+                    // Fillet detection: contact point is a shared endpoint of the arc.
+                    EntityID contactPtID = (contact == la) ? line->startPt : line->endPt;
+                    bool isFillet = arc && (contactPtID == arc->startPt || contactPtID == arc->endPt);
+
+                    if (isFillet && curveCenterPt) {
+                        // Fillet case: slide the contact point (line trim endpoint) along the line
+                        // to the foot of perpendicular from the arc center. This makes the arc
+                        // tangent to the line at the contact point without moving C or the far endpoint.
+                        // The arc geometry enforcement (move-center path) will equalise the radius.
+                        double fullDx = lb->x - la->x, fullDy = lb->y - la->y;
+                        double fullLen = std::sqrt(fullDx*fullDx + fullDy*fullDy);
+                        if (fullLen < 1e-9) break;
+                        double unitDx = fullDx / fullLen, unitDy = fullDy / fullLen;
+                        double t = (cx - la->x) * unitDx + (cy - la->y) * unitDy;
+                        double footX = la->x + t * unitDx;
+                        double footY = la->y + t * unitDy;
+                        if (std::fabs(contact->x - footX) > 1e-6 || std::fabs(contact->y - footY) > 1e-6) {
+                            contact->x = footX;
+                            contact->y = footY;
+                            sketch.recomputeArcAngles(*arc);
+                            changed = true;
+                        }
+                        break;
+                    }
+
+                    // Non-fillet: Step 1 — snap contact point onto the circle
                     double dcx = contact->x - cx, dcy = contact->y - cy;
                     double dcLen = std::sqrt(dcx*dcx + dcy*dcy);
                     if (dcLen < 1e-7) break;
@@ -806,29 +831,8 @@ SolveResult Solver::solve(Sketch& sketch, EntityID draggedPoint) {
                     double lineLen = std::sqrt(ldx*ldx + ldy*ldy);
                     if (lineLen < 1e-6) break;
 
-                    // Step 2: Enforce tangency.
-                    // Fillet case: contact is a shared endpoint of the arc — the line was
-                    // trimmed to exactly meet the arc. Keep the line fixed and slide the arc
-                    // center perpendicular to the line at the contact point. This avoids
-                    // rotating the triangle vertex (the line's far endpoint).
-                    // External circle/arc case: rotate the far endpoint to be tangential.
-                    EntityID contactPtID = (contact == la) ? line->startPt : line->endPt;
-                    bool isFillet = arc && (contactPtID == arc->startPt || contactPtID == arc->endPt);
-
-                    if (isFillet && curveCenterPt) {
-                        double perpX = -ldy / lineLen, perpY = ldx / lineLen;
-                        double dotToCenter = (cx - contact->x) * perpX + (cy - contact->y) * perpY;
-                        if (dotToCenter < 0.0) { perpX = -perpX; perpY = -perpY; }
-                        double newCX = contact->x + perpX * radius;
-                        double newCY = contact->y + perpY * radius;
-                        if (std::fabs(curveCenterPt->x - newCX) > 1e-6 ||
-                            std::fabs(curveCenterPt->y - newCY) > 1e-6) {
-                            curveCenterPt->x = newCX;
-                            curveCenterPt->y = newCY;
-                            sketch.recomputeArcAngles(*arc);
-                            changed = true;
-                        }
-                    } else {
+                    // Non-fillet Step 2: rotate far endpoint to make line perpendicular to radius.
+                    {
                         // Rotate far endpoint around contact so line is perpendicular to radius
                         double rx = contact->x - cx, ry = contact->y - cy;
                         double dot1 = ldx * ry + ldy * (-rx);

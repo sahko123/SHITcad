@@ -643,6 +643,7 @@ bool isCylindricalFace(const TopoDS_Face& face) {
 
 bool buildCylinderTangentPlane(const TopoDS_Face& face, float angleDeg,
                                 const float* hitWorld, SketchPlane& out) {
+    (void)hitWorld;
     if (face.IsNull()) return false;
     BRepAdaptor_Surface adaptor(face);
     if (adaptor.GetType() != GeomAbs_Cylinder) return false;

@@ -37,9 +37,9 @@
 
 namespace shitcad {
 
-static gp_Pnt localToGpPnt(const SketchPlane& plane, float lx, float ly) {
+static gp_Pnt localToGpPnt(const SketchPlane& plane, double lx, double ly) {
     float wx, wy, wz;
-    plane.localToWorld(lx, ly, wx, wy, wz);
+    plane.localToWorld(static_cast<float>(lx), static_cast<float>(ly), wx, wy, wz);
     return gp_Pnt(wx, wy, wz);
 }
 

@@ -27,4 +27,8 @@ constexpr int   kPreviewThrottleMs       = 50;       // minimum ms between previ
 constexpr float kDegenerateLen           = 1e-6f;    // length below which geometry is degenerate
 constexpr float kMinLineLength           = 0.001f;   // minimum line/radius to create
 
+// ─── Rendering helpers ──────────────────────────────────────────────
+// Explicit double→float narrowing for rendering/UI call sites
+inline float f(double x) { return static_cast<float>(x); }
+
 } // namespace shitcad

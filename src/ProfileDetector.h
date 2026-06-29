@@ -117,9 +117,9 @@ inline std::vector<Point2D> tessellateProfile(const Sketch& sketch, const Closed
                 double paramSpan = seg.splineParamEnd - seg.splineParamStart;
                 for (int s = 1; s < steps; s++) {
                     double t = seg.splineParamStart + paramSpan * (double)s / steps;
-                    Point2D pt = evaluateBSpline(seg.splineControlPts, seg.splineKnots,
-                                                  seg.splineWeights, seg.splineDegree, t);
-                    tess.push_back(pt);
+                    Point2D segPt = evaluateBSpline(seg.splineControlPts, seg.splineKnots,
+                                                     seg.splineWeights, seg.splineDegree, t);
+                    tess.push_back(segPt);
                 }
             }
         }

@@ -91,7 +91,7 @@ float ProfileSignature::centroidDistTo(const ClosedProfile& profile, const Sketc
     Point2D c = polygonCentroid(tessellateProfile(sketch, profile));
     double dx = c.x - centroidX;
     double dy = c.y - centroidY;
-    return std::sqrt(dx * dx + dy * dy);
+    return static_cast<float>(std::sqrt(dx * dx + dy * dy));
 }
 
 // --- FeatureHistory ---

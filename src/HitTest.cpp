@@ -92,12 +92,12 @@ HitResult hitTest(Point2D cursorWorld, float pixelsPerUnit,
 
     // Priority 1: Points (smallest entities, easiest to miss without priority)
     for (const auto& pt : sketch.points) {
-        float dist = distance(cursorWorld, {pt.x, pt.y});
-        float screenDist = dist * pixelsPerUnit;
+        double dist = distance(cursorWorld, {pt.x, pt.y});
+        double screenDist = dist * pixelsPerUnit;
         if (screenDist < tolerancePx && screenDist < best.distance) {
             best.type = HitType::Point;
             best.entityID = pt.id;
-            best.distance = screenDist;
+            best.distance = f(screenDist);
         }
     }
 
@@ -109,12 +109,12 @@ HitResult hitTest(Point2D cursorWorld, float pixelsPerUnit,
     for (const auto& line : sketch.lines) {
         Point2D a = sketch.getPointPos(line.startPt);
         Point2D b = sketch.getPointPos(line.endPt);
-        float dist = pointToSegmentDist(cursorWorld, a, b);
-        float screenDist = dist * pixelsPerUnit;
+        double dist = pointToSegmentDist(cursorWorld, a, b);
+        double screenDist = dist * pixelsPerUnit;
         if (screenDist < tolerancePx && screenDist < best.distance) {
             best.type = HitType::Line;
             best.entityID = line.id;
-            best.distance = screenDist;
+            best.distance = f(screenDist);
         }
     }
 
@@ -124,74 +124,74 @@ HitResult hitTest(Point2D cursorWorld, float pixelsPerUnit,
     // Priority 3: Circles and Arcs
     for (const auto& circle : sketch.circles) {
         Point2D center = sketch.getPointPos(circle.centerPt);
-        float dist = pointToCircleDist(cursorWorld, center, circle.radius);
-        float screenDist = dist * pixelsPerUnit;
+        double dist = pointToCircleDist(cursorWorld, center, circle.radius);
+        double screenDist = dist * pixelsPerUnit;
         if (screenDist < tolerancePx && screenDist < best.distance) {
             best.type = HitType::Circle;
             best.entityID = circle.id;
-            best.distance = screenDist;
+            best.distance = f(screenDist);
         }
     }
 
     for (const auto& arc : sketch.arcs) {
         Point2D center = sketch.getPointPos(arc.centerPt);
         Point2D startP = sketch.getPointPos(arc.startPt);
-        float radius = distance(center, startP);
-        float dist = pointToArcDist(cursorWorld, center, radius, arc.startAngle, arc.endAngle);
-        float screenDist = dist * pixelsPerUnit;
+        double radius = distance(center, startP);
+        double dist = pointToArcDist(cursorWorld, center, radius, arc.startAngle, arc.endAngle);
+        double screenDist = dist * pixelsPerUnit;
         if (screenDist < tolerancePx && screenDist < best.distance) {
             best.type = HitType::Arc;
             best.entityID = arc.id;
-            best.distance = screenDist;
+            best.distance = f(screenDist);
         }
     }
 
     for (const auto& ellipse : sketch.ellipses) {
         Point2D center = sketch.getPointPos(ellipse.centerPt);
-        float dist = pointToEllipseDist(cursorWorld, center, ellipse.semiMajor, ellipse.semiMinor, ellipse.rotation);
-        float screenDist = dist * pixelsPerUnit;
+        double dist = pointToEllipseDist(cursorWorld, center, ellipse.semiMajor, ellipse.semiMinor, ellipse.rotation);
+        double screenDist = dist * pixelsPerUnit;
         if (screenDist < tolerancePx && screenDist < best.distance) {
             best.type = HitType::Ellipse;
             best.entityID = ellipse.id;
-            best.distance = screenDist;
+            best.distance = f(screenDist);
         }
     }
 
     for (const auto& ea : sketch.ellipseArcs) {
         Point2D center = sketch.getPointPos(ea.centerPt);
         // Sample the ellipse arc and find closest segment
-        float cosR = std::cos(ea.rotation), sinR = std::sin(ea.rotation);
-        float sweep = ea.endAngle - ea.startAngle;
+        double cosR = std::cos(ea.rotation), sinR = std::sin(ea.rotation);
+        double sweep = ea.endAngle - ea.startAngle;
         if (sweep <= 0) sweep += kTwoPi;
         int segments = std::max(8, (int)(std::fabs(sweep) / (kTwoPi) * 64));
-        float bestSegDist = std::numeric_limits<float>::max();
+        double bestSegDist = std::numeric_limits<double>::max();
         for (int i = 0; i < segments; i++) {
-            float a0 = ea.startAngle + sweep * i / segments;
-            float a1 = ea.startAngle + sweep * (i + 1) / segments;
-            float ex0 = ea.semiMajor * std::cos(a0), ey0 = ea.semiMinor * std::sin(a0);
-            float ex1 = ea.semiMajor * std::cos(a1), ey1 = ea.semiMinor * std::sin(a1);
+            double a0 = ea.startAngle + sweep * i / segments;
+            double a1 = ea.startAngle + sweep * (i + 1) / segments;
+            double ex0 = ea.semiMajor * std::cos(a0), ey0 = ea.semiMinor * std::sin(a0);
+            double ex1 = ea.semiMajor * std::cos(a1), ey1 = ea.semiMinor * std::sin(a1);
             Point2D p0 = {center.x + ex0*cosR - ey0*sinR, center.y + ex0*sinR + ey0*cosR};
             Point2D p1 = {center.x + ex1*cosR - ey1*sinR, center.y + ex1*sinR + ey1*cosR};
-            float d = pointToSegmentDist(cursorWorld, p0, p1);
+            double d = pointToSegmentDist(cursorWorld, p0, p1);
             if (d < bestSegDist) bestSegDist = d;
         }
-        float screenDist = bestSegDist * pixelsPerUnit;
+        double screenDist = bestSegDist * pixelsPerUnit;
         if (screenDist < tolerancePx && screenDist < best.distance) {
             best.type = HitType::EllipseArc;
             best.entityID = ea.id;
-            best.distance = screenDist;
+            best.distance = f(screenDist);
         }
     }
 
     for (const auto& sp : sketch.splines) {
         if (sp.controlPtIDs.size() < 2) continue;
         auto pts = sampleSpline(sp, sketch, 64);
-        float dist = pointToSplineDist(cursorWorld, pts);
-        float screenDist = dist * pixelsPerUnit;
+        double dist = pointToSplineDist(cursorWorld, pts);
+        double screenDist = dist * pixelsPerUnit;
         if (screenDist < tolerancePx && screenDist < best.distance) {
             best.type = HitType::Spline;
             best.entityID = sp.id;
-            best.distance = screenDist;
+            best.distance = f(screenDist);
         }
     }
 

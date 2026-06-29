@@ -317,6 +317,12 @@ bool Sketch::isPointReferenced(EntityID pointID) const {
     return false;
 }
 
+bool Sketch::canRemovePoint(EntityID pointID) const {
+    const PointEntity* pt = findPoint(pointID);
+    if (pt && pt->projected) return false;
+    return !isPointReferenced(pointID);
+}
+
 void Sketch::removePoint(EntityID id) {
     // Remove all lines that reference this point
     std::vector<EntityID> linesToRemove;
@@ -409,15 +415,15 @@ void Sketch::removeLine(EntityID id) {
             [id](const LineEntity& l) { return l.id == id; }),
         lines.end());
 
-    // Remove orphaned points
-    if (!isPointReferenced(startPt)) {
+    // Remove orphaned points (never remove projected reference geometry)
+    if (canRemovePoint(startPt)) {
         removeConstraintsReferencing(startPt);
         points.erase(
             std::remove_if(points.begin(), points.end(),
                 [startPt](const PointEntity& p) { return p.id == startPt; }),
             points.end());
     }
-    if (!isPointReferenced(endPt)) {
+    if (canRemovePoint(endPt)) {
         removeConstraintsReferencing(endPt);
         points.erase(
             std::remove_if(points.begin(), points.end(),
@@ -442,8 +448,8 @@ void Sketch::removeCircle(EntityID id) {
             [id](const CircleEntity& c) { return c.id == id; }),
         circles.end());
 
-    // Remove orphaned center point
-    if (!isPointReferenced(centerPt)) {
+    // Remove orphaned center point (never remove projected reference geometry)
+    if (canRemovePoint(centerPt)) {
         removeConstraintsReferencing(centerPt);
         points.erase(
             std::remove_if(points.begin(), points.end(),
@@ -468,9 +474,9 @@ void Sketch::removeArc(EntityID id) {
             [id](const ArcEntity& a) { return a.id == id; }),
         arcs.end());
 
-    // Remove orphaned points
+    // Remove orphaned points (never remove projected reference geometry)
     auto removeOrphan = [&](EntityID ptID) {
-        if (!isPointReferenced(ptID)) {
+        if (canRemovePoint(ptID)) {
             removeConstraintsReferencing(ptID);
             points.erase(
                 std::remove_if(points.begin(), points.end(),
@@ -497,7 +503,7 @@ void Sketch::removeEllipse(EntityID id) {
             [id](const EllipseEntity& el) { return el.id == id; }),
         ellipses.end());
 
-    if (!isPointReferenced(centerPt)) {
+    if (canRemovePoint(centerPt)) {
         removeConstraintsReferencing(centerPt);
         points.erase(
             std::remove_if(points.begin(), points.end(),
@@ -523,7 +529,7 @@ void Sketch::removeEllipseArc(EntityID id) {
         ellipseArcs.end());
 
     auto removeOrphan = [&](EntityID ptID) {
-        if (!isPointReferenced(ptID)) {
+        if (canRemovePoint(ptID)) {
             removeConstraintsReferencing(ptID);
             points.erase(
                 std::remove_if(points.begin(), points.end(),
@@ -551,7 +557,7 @@ void Sketch::removeSpline(EntityID id) {
         splines.end());
 
     for (EntityID ptID : ctrlPts) {
-        if (!isPointReferenced(ptID)) {
+        if (canRemovePoint(ptID)) {
             removeConstraintsReferencing(ptID);
             points.erase(
                 std::remove_if(points.begin(), points.end(),

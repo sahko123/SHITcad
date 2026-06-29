@@ -77,8 +77,8 @@ struct SubHalfEdge {
 
 static int findOrAddVertex(std::vector<SubVertex>& verts, Point2D pos, EntityID origID) {
     for (int i = 0; i < (int)verts.size(); i++) {
-        float dx = verts[i].pos.x - pos.x;
-        float dy = verts[i].pos.y - pos.y;
+        double dx = verts[i].pos.x - pos.x;
+        double dy = verts[i].pos.y - pos.y;
         if (dx * dx + dy * dy < kMergeEps * kMergeEps) {
             if (origID != NullID && verts[i].origPointID == NullID)
                 verts[i].origPointID = origID;
@@ -225,14 +225,14 @@ static void buildSubdivision(const Sketch& sketch,
     // ---- Circle-circle intersections ----
     for (int ci = 0; ci < numCircles; ci++) {
         Point2D c1 = sketch.getPointPos(sketch.circles[ci].centerPt);
-        float r1 = sketch.circles[ci].radius;
+        double r1 = sketch.circles[ci].radius;
 
         for (int cj = ci + 1; cj < numCircles; cj++) {
 
             Point2D c2 = sketch.getPointPos(sketch.circles[cj].centerPt);
-            float r2 = sketch.circles[cj].radius;
+            double r2 = sketch.circles[cj].radius;
 
-            auto hits = circleCircleIntersection(c1, r1, c2, r2);
+            auto hits = circleCircleIntersection(c1, f(r1), c2, f(r2));
             for (const auto& h : hits) {
                 int vtxIdx = findOrAddVertex(subVerts, h.point, NullID);
                 circleIxPts[ci].push_back({h.angle1, vtxIdx});
@@ -256,13 +256,13 @@ static void buildSubdivision(const Sketch& sketch,
 
         Point2D center = sketch.getPointPos(arc.centerPt);
         Point2D sp = sketch.getPointPos(arc.startPt);
-        float radius = distance(center, sp);
+        double radius = distance(center, sp);
 
         for (int li = 0; li < numLines; li++) {
 
             Point2D a = sketch.getPointPos(sketch.lines[li].startPt);
             Point2D b = sketch.getPointPos(sketch.lines[li].endPt);
-            auto hits = circleLineIntersection(center, radius, a, b);
+            auto hits = circleLineIntersection(center, f(radius), a, b);
             for (const auto& h : hits) {
                 if (!angleInArcRange(h.angle, arc.startAngle, arc.endAngle)) continue;
                 bool atLineEnd = (h.tLine < kMergeEps || h.tLine > 1.0f - kMergeEps);
@@ -276,8 +276,8 @@ static void buildSubdivision(const Sketch& sketch,
         for (int ci = 0; ci < numCircles; ci++) {
 
             Point2D c2 = sketch.getPointPos(sketch.circles[ci].centerPt);
-            float r2 = sketch.circles[ci].radius;
-            auto hits = circleCircleIntersection(center, radius, c2, r2);
+            double r2 = sketch.circles[ci].radius;
+            auto hits = circleCircleIntersection(center, f(radius), c2, f(r2));
             for (const auto& h : hits) {
                 if (!angleInArcRange(h.angle1, arc.startAngle, arc.endAngle)) continue;
                 int vtxIdx = findOrAddVertex(subVerts, h.point, NullID);
@@ -292,8 +292,8 @@ static void buildSubdivision(const Sketch& sketch,
             const auto& arc2 = sketch.arcs[aj];
             Point2D c2 = sketch.getPointPos(arc2.centerPt);
             Point2D sp2 = sketch.getPointPos(arc2.startPt);
-            float r2 = distance(c2, sp2);
-            auto hits = circleCircleIntersection(center, radius, c2, r2);
+            double r2 = distance(c2, sp2);
+            auto hits = circleCircleIntersection(center, f(radius), c2, f(r2));
             for (const auto& h : hits) {
                 if (!angleInArcRange(h.angle1, arc.startAngle, arc.endAngle)) continue;
                 if (!angleInArcRange(h.angle2, arc2.startAngle, arc2.endAngle)) continue;
@@ -330,9 +330,9 @@ static void buildSubdivision(const Sketch& sketch,
                                   std::vector<std::pair<float,int>>& curveIx,
                                   int ci) {
         Point2D center = sketch.getPointPos(sketch.circles[ci].centerPt);
-        float radius = sketch.circles[ci].radius;
+        double radius = sketch.circles[ci].radius;
         for (int si = 0; si + 1 < (int)samples.size(); si++) {
-            auto hits = circleLineIntersection(center, radius, samples[si], samples[si+1]);
+            auto hits = circleLineIntersection(center, f(radius), samples[si], samples[si+1]);
             for (const auto& h : hits) {
                 int vtxIdx = findOrAddVertex(subVerts, h.point, NullID);
                 curveIx.push_back({si + h.tLine, vtxIdx});
@@ -349,9 +349,9 @@ static void buildSubdivision(const Sketch& sketch,
         const auto& arc = sketch.arcs[ai];
         Point2D center = sketch.getPointPos(arc.centerPt);
         Point2D sp = sketch.getPointPos(arc.startPt);
-        float radius = distance(center, sp);
+        double radius = distance(center, sp);
         for (int si = 0; si + 1 < (int)samples.size(); si++) {
-            auto hits = circleLineIntersection(center, radius, samples[si], samples[si+1]);
+            auto hits = circleLineIntersection(center, f(radius), samples[si], samples[si+1]);
             for (const auto& h : hits) {
                 if (!angleInArcRange(h.angle, arc.startAngle, arc.endAngle)) continue;
                 int vtxIdx = findOrAddVertex(subVerts, h.point, NullID);
@@ -523,8 +523,8 @@ static void buildSubdivision(const Sketch& sketch,
             chainVerts.push_back(endVtx);
 
         for (int j = 0; j + 1 < (int)chainVerts.size(); j++) {
-            float dx = subVerts[chainVerts[j]].pos.x - subVerts[chainVerts[j+1]].pos.x;
-            float dy = subVerts[chainVerts[j]].pos.y - subVerts[chainVerts[j+1]].pos.y;
+            double dx = subVerts[chainVerts[j]].pos.x - subVerts[chainVerts[j+1]].pos.x;
+            double dy = subVerts[chainVerts[j]].pos.y - subVerts[chainVerts[j+1]].pos.y;
             if (dx * dx + dy * dy < kMergeEps * kMergeEps) continue;
 
             SubEdge e;
@@ -576,7 +576,7 @@ static void buildSubdivision(const Sketch& sketch,
             e.origLineID = NullID;
             e.origCircleID = circle.id;
             e.arcCenter = center;
-            e.arcRadius = circle.radius;
+            e.arcRadius = static_cast<float>(circle.radius);
             e.arcFromAngle = fromAngle;
             e.arcToAngle = toAngle;
             subEdges.push_back(e);
@@ -683,7 +683,7 @@ static void buildSubdivision(const Sketch& sketch,
         Point2D center = sketch.getPointPos(arc.centerPt);
         Point2D sp = sketch.getPointPos(arc.startPt);
         Point2D ep = sketch.getPointPos(arc.endPt);
-        float radius = distance(center, sp);
+        double radius = distance(center, sp);
 
         int startVtx = findOrAddVertex(subVerts, sp, arc.startPt);
         int endVtx = findOrAddVertex(subVerts, ep, arc.endPt);
@@ -699,7 +699,7 @@ static void buildSubdivision(const Sketch& sketch,
             e.origCircleID = NullID;
             e.origArcID = arc.id;
             e.arcCenter = center;
-            e.arcRadius = radius;
+            e.arcRadius = static_cast<float>(radius);
             e.arcFromAngle = arc.startAngle;
             e.arcToAngle = arc.endAngle;
             subEdges.push_back(e);
@@ -718,8 +718,8 @@ static void buildSubdivision(const Sketch& sketch,
 
             for (int j = 0; j + 1 < (int)chain.size(); j++) {
                 if (chain[j].second == chain[j+1].second) continue;
-                float dx = subVerts[chain[j].second].pos.x - subVerts[chain[j+1].second].pos.x;
-                float dy = subVerts[chain[j].second].pos.y - subVerts[chain[j+1].second].pos.y;
+                double dx = subVerts[chain[j].second].pos.x - subVerts[chain[j+1].second].pos.x;
+                double dy = subVerts[chain[j].second].pos.y - subVerts[chain[j+1].second].pos.y;
                 if (dx*dx + dy*dy < kMergeEps * kMergeEps) continue;
 
                 SubEdge e;
@@ -729,7 +729,7 @@ static void buildSubdivision(const Sketch& sketch,
                 e.origCircleID = NullID;
                 e.origArcID = arc.id;
                 e.arcCenter = center;
-                e.arcRadius = radius;
+                e.arcRadius = static_cast<float>(radius);
                 e.arcFromAngle = chain[j].first;
                 e.arcToAngle = chain[j+1].first;
                 subEdges.push_back(e);
@@ -868,7 +868,7 @@ std::vector<ClosedProfile> detectClosedProfilesCustom(const Sketch& sketch) {
             if (s.type == SegmentType::Arc) { hasArcs = true; break; }
         }
 
-        float signedArea;
+        double signedArea;
         if (!hasArcs) {
             signedArea = polygonSignedArea(profile.resolvedPoints);
         } else {
@@ -912,7 +912,7 @@ std::vector<ClosedProfile> detectClosedProfilesCustom(const Sketch& sketch) {
         if (a.resolvedPoints.empty() || b.resolvedPoints.empty()) return false;
         for (const auto& pa : a.resolvedPoints) {
             for (const auto& pb : b.resolvedPoints) {
-                float dx = pa.x - pb.x, dy = pa.y - pb.y;
+                double dx = pa.x - pb.x, dy = pa.y - pb.y;
                 if (dx * dx + dy * dy < kMergeEps * kMergeEps) return true;
             }
         }
@@ -1207,7 +1207,7 @@ static BoundarySegment buildSegmentFromEdge(const TopoDS_Edge& edge,
             float lx, ly;
             plane.worldToLocal((float)center3D.X(), (float)center3D.Y(), (float)center3D.Z(), lx, ly);
             seg.arcCenter = {lx, ly};
-            seg.arcRadius = circ.Radius();
+            seg.arcRadius = static_cast<float>(circ.Radius());
             seg.arcStartAngle = paramFirst;
             seg.arcEndAngle = paramLast;
             seg.origCircleID = origin.entityID;
@@ -1226,7 +1226,6 @@ static BoundarySegment buildSegmentFromEdge(const TopoDS_Edge& edge,
 
             // Recover rotation: project major axis direction back to local 2D
             gp_Dir majorDir = elips.XAxis().Direction();
-            float mx, my;
             // Major axis direction is a direction vector, project its tip
             float tipX = (float)(center3D.X() + majorDir.X());
             float tipY = (float)(center3D.Y() + majorDir.Y());

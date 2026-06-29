@@ -34,6 +34,7 @@ void App::enterLoftMode() {
 }
 
 void App::handleLoftInput(float vpW, float vpH) {
+    (void)vpW; (void)vpH;
     ImGuiIO& io = ImGui::GetIO();
 
     if (!io.WantCaptureKeyboard) {

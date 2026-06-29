@@ -9,7 +9,9 @@ enum class SnapType : uint8_t {
     Point,
     Midpoint,
     Intersection,
+    Quadrant,        // N/S/E/W extreme points of a circle or arc
     NearestOnCurve,  // nearest point on circle/arc edge
+    Tangent,         // geometric tangent point from line anchor to circle/arc
 };
 
 struct SnapResult {

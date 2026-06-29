@@ -398,7 +398,7 @@ void App::updateExtrudePreview() {
 
     // Compute handle base: centroid of selected profiles in world space
     {
-        float cx = 0, cy = 0;
+        double cx = 0, cy = 0;
         int count = 0;
         for (int idx : extrudeTool_.selectedProfileIndices) {
             if (idx < 0 || idx >= (int)extrudeTool_.renderCache.size()) continue;
@@ -410,7 +410,7 @@ void App::updateExtrudePreview() {
         }
         if (count > 0) {
             cx /= count; cy /= count;
-            plane.localToWorld(cx, cy,
+            plane.localToWorld(f(cx), f(cy),
                 extrudeTool_.handleBaseWorld[0],
                 extrudeTool_.handleBaseWorld[1],
                 extrudeTool_.handleBaseWorld[2]);
