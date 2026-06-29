@@ -303,6 +303,7 @@ void App::handleSketchInput(float vpW, float vpH) {
             dimTool_.reset();
             tool_.type = ToolType::Dimension;
             selection_.clear();
+            history_.pushState(sketch); // record removal so undo doesn't re-add it
             return;
         }
         // Delete key removes the dimension being edited
@@ -1394,6 +1395,12 @@ void App::handleSketchInput(float vpW, float vpH) {
     if (ImGui::IsMouseClicked(ImGuiMouseButton_Right)) {
         if (tool_.hasFirstPoint || arcTool_.clickCount > 0) {
             switchTool(tool_.type);
+        } else if (selection_.dragMode == SelectionDragMode::PointDrag) {
+            // Cancel point drag: undo the move if it already started
+            if (selection_.dragStarted) history_.undo(sketch);
+            selection_.dragMode = SelectionDragMode::None;
+            selection_.dragPointID = NullID;
+            selection_.dragStarted = false;
         } else if (selection_.dragMode != SelectionDragMode::None) {
             selection_.dragMode = SelectionDragMode::None;
             selection_.lassoPoints.clear();
