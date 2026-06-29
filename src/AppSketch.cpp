@@ -107,11 +107,14 @@ void App::applyGeometricConstraint(Sketch& sketch, ConstraintType type) {
     auto res = solver_.solve(sketch);
     lastSketchDof_ = res.dof;
     if (!res.ok) {
-        // Solver couldn't satisfy — mark as driven
+        // Solver couldn't satisfy — mark as driven and notify user
         sketch.points = ptsBak;
         sketch.circles = circBak;
         Constraint* cc = sketch.findConstraint(cid);
         if (cc) cc->driven = true;
+        snprintf(sketchMsg_, sizeof(sketchMsg_),
+                 "Over-constrained: constraint added as reference only");
+        sketchMsgTimer_ = 3.0f;
     }
 
     history_.pushState(sketch);
@@ -293,6 +296,15 @@ void App::handleSketchInput(float vpW, float vpH) {
 
     if (tool_.type == ToolType::Dimension &&
         (dimTool_.phase == DimToolState::Editing || dimTool_.phase == DimToolState::EditingAndPlacing)) {
+        // Escape during EditingAndPlacing cancels label placement, removing the constraint
+        if (dimTool_.phase == DimToolState::EditingAndPlacing &&
+            ImGui::IsKeyPressed(ImGuiKey_Escape) && !io.WantCaptureKeyboard) {
+            sketch.removeConstraint(dimTool_.constraintID);
+            dimTool_.reset();
+            tool_.type = ToolType::Dimension;
+            selection_.clear();
+            return;
+        }
         // Delete key removes the dimension being edited
         if (dimTool_.phase == DimToolState::Editing &&
             ImGui::IsKeyPressed(ImGuiKey_Delete) && !io.WantCaptureKeyboard) {
@@ -1025,6 +1037,8 @@ void App::handleSketchInput(float vpW, float vpH) {
                     history_.pushState(sketch);
                     tool_.reset();
                 } else {
+                    snprintf(sketchMsg_, sizeof(sketchMsg_), "Enter a positive diameter");
+                    sketchMsgTimer_ = 2.0f;
                     tool_.inlineInputActive = false;
                     tool_.inlineInputBuf[0] = '\0';
                 }
@@ -1045,10 +1059,33 @@ void App::handleSketchInput(float vpW, float vpH) {
         }
 
         if (ImGui::IsKeyPressed(ImGuiKey_Escape)) {
-            tool_.inlineInputActive = false;
-            tool_.inlineInputBuf[0] = '\0';
+            if (tool_.type == ToolType::Fillet && tool_.hasFirstPoint) {
+                // Cancel the whole fillet vertex selection, stay in fillet tool
+                switchTool(ToolType::Fillet);
+            } else {
+                tool_.inlineInputActive = false;
+                tool_.inlineInputBuf[0] = '\0';
+            }
         }
 
+        ImGui::End();
+    }
+
+    // Sketch status message overlay (warnings, constraint feedback, etc.)
+    if (sketchMsgTimer_ > 0.0f) {
+        sketchMsgTimer_ -= io.DeltaTime;
+        ImVec2 displaySize = io.DisplaySize;
+        ImGui::SetNextWindowPos(ImVec2(displaySize.x * 0.5f, displaySize.y - 60.0f),
+                                ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+        ImGui::SetNextWindowBgAlpha(0.78f);
+        ImGui::Begin("##SketchMsg", nullptr,
+            ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
+            ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoScrollbar |
+            ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoFocusOnAppearing |
+            ImGuiWindowFlags_NoInputs);
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.85f, 0.3f, 1.0f));
+        ImGui::Text("%s", sketchMsg_);
+        ImGui::PopStyleColor();
         ImGui::End();
     }
 
@@ -1112,6 +1149,14 @@ void App::handleSketchInput(float vpW, float vpH) {
 
     // (Dimension label drag is handled above, before the dim tool early return)
 
+    // Double-click: end continuous line chain (Fusion 360 parity)
+    if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
+        if (tool_.type == ToolType::Line && tool_.hasFirstPoint) {
+            switchTool(ToolType::None);
+            goto skipLeftClick;
+        }
+    }
+
     // Left click
     if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
         if (tool_.type != ToolType::None) {
@@ -1123,6 +1168,7 @@ void App::handleSketchInput(float vpW, float vpH) {
             handleSelection(sketch, io.KeyCtrl);
         }
     }
+    skipLeftClick:;
 
     // Start drag (dim drag is handled above; here handle point drag, box/lasso)
     if (tool_.type == ToolType::None &&
@@ -1378,31 +1424,65 @@ void App::handleToolAction(Sketch& sketch, Point2D localPos) {
         case ToolType::Line:
             actionCompleted = handleLineTool(sketch, tool_, localPos, snapPtID, snapCurveID);
             break;
-        case ToolType::Circle:
+        case ToolType::Circle: {
+            // Count circles before/after: handleCircleTool always returns true on
+            // second click even when the radius is too small and nothing was created.
+            size_t circlesBefore = sketch.circles.size();
             actionCompleted = handleCircleTool(sketch, tool_, localPos, snapPtID);
+            if (actionCompleted && sketch.circles.size() == circlesBefore) {
+                snprintf(sketchMsg_, sizeof(sketchMsg_), "Radius too small");
+                sketchMsgTimer_ = 2.0f;
+                actionCompleted = false; // suppress spurious history push
+            }
             break;
-        case ToolType::Rectangle:
+        }
+        case ToolType::Rectangle: {
+            bool hadFirst = tool_.hasFirstPoint;
             actionCompleted = handleRectangleTool(sketch, tool_, localPos, snapPtID);
+            if (hadFirst && !actionCompleted && !tool_.hasFirstPoint) {
+                snprintf(sketchMsg_, sizeof(sketchMsg_), "Rectangle too small — click further away");
+                sketchMsgTimer_ = 2.0f;
+            }
             break;
-        case ToolType::Arc3Point:
+        }
+        case ToolType::Arc3Point: {
+            int prevCount = arcTool_.clickCount;
             actionCompleted = handleArc3PointTool(sketch, arcTool_, localPos, snapPtID);
+            if (prevCount == 2 && !actionCompleted && arcTool_.clickCount == 0) {
+                snprintf(sketchMsg_, sizeof(sketchMsg_), "Points are collinear — arc not placed");
+                sketchMsgTimer_ = 2.5f;
+            }
             break;
-        case ToolType::ArcCenter:
+        }
+        case ToolType::ArcCenter: {
+            int prevCount = arcTool_.clickCount;
             actionCompleted = handleArcCenterTool(sketch, arcTool_, localPos, snapPtID);
+            if (prevCount == 2 && !actionCompleted && arcTool_.clickCount == 0) {
+                snprintf(sketchMsg_, sizeof(sketchMsg_), "Start and center are coincident — arc not placed");
+                sketchMsgTimer_ = 2.5f;
+            }
             break;
+        }
         case ToolType::CenterRect:
             actionCompleted = handleCenterRectTool(sketch, tool_, localPos, snapPtID);
             break;
         case ToolType::Fillet:
             if (!tool_.hasFirstPoint) {
-                // Must snap to an existing vertex point
-                if (snapPtID == NullID) break;
+                if (snapPtID == NullID) {
+                    snprintf(sketchMsg_, sizeof(sketchMsg_), "Click on a vertex to fillet");
+                    sketchMsgTimer_ = 2.0f;
+                    break;
+                }
                 if (handleFilletVertexClick(sketch, filletTool_, snapPtID)) {
                     tool_.firstPointID = snapPtID;
                     tool_.firstPoint = sketch.getPointPos(snapPtID);
                     tool_.hasFirstPoint = true;
                     tool_.inlineInputActive = true;
                     tool_.inlineInputFocus = true;
+                } else {
+                    snprintf(sketchMsg_, sizeof(sketchMsg_),
+                             "Vertex must connect exactly 2 lines or arcs");
+                    sketchMsgTimer_ = 2.5f;
                 }
             }
             break;
@@ -1529,6 +1609,8 @@ void App::switchTool(ToolType newTool) {
     filletTool_.reset();
     dimTool_.reset();
     selection_.clear();
+    sketchMsg_[0] = '\0';
+    sketchMsgTimer_ = 0.0f;
 }
 
 void App::handleSelection(Sketch& sketch, bool ctrlHeld) {

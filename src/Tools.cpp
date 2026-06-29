@@ -124,36 +124,38 @@ bool applyFillet(Sketch& sketch, FilletToolState& filletTool, EntityID vertexID,
     double T2x = V.x + trimDist * d2.x;
     double T2y = V.y + trimDist * d2.y;
 
+    // Pre-validate all entity pointers before any mutations so we never half-apply.
+    LineEntity* eLine1 = filletTool.entity1IsArc ? nullptr : sketch.findLine(filletTool.entity1ID);
+    ArcEntity*  eArc1  = filletTool.entity1IsArc ? sketch.findArc(filletTool.entity1ID)  : nullptr;
+    LineEntity* eLine2 = filletTool.entity2IsArc ? nullptr : sketch.findLine(filletTool.entity2ID);
+    ArcEntity*  eArc2  = filletTool.entity2IsArc ? sketch.findArc(filletTool.entity2ID)  : nullptr;
+    if (!filletTool.entity1IsArc && !eLine1) return false;
+    if ( filletTool.entity1IsArc && !eArc1)  return false;
+    if (!filletTool.entity2IsArc && !eLine2) return false;
+    if ( filletTool.entity2IsArc && !eArc2)  return false;
+
     // Create trim and center points
     EntityID centerID = sketch.addPoint(CX, CY);
     EntityID t1ID = sketch.addPoint(T1x, T1y);
     EntityID t2ID = sketch.addPoint(T2x, T2y);
 
-    // Redirect entity endpoints from V to trim points
+    // Redirect entity endpoints from V to trim points (using pre-validated pointers)
     if (!filletTool.entity1IsArc) {
-        LineEntity* line = sketch.findLine(filletTool.entity1ID);
-        if (!line) return false;
-        if (line->startPt == vertexID) line->startPt = t1ID;
-        else                           line->endPt   = t1ID;
+        if (eLine1->startPt == vertexID) eLine1->startPt = t1ID;
+        else                             eLine1->endPt   = t1ID;
     } else {
-        ArcEntity* arc = sketch.findArc(filletTool.entity1ID);
-        if (!arc) return false;
-        if (arc->startPt == vertexID) arc->startPt = t1ID;
-        else                          arc->endPt   = t1ID;
-        sketch.recomputeArcAngles(*arc);
+        if (eArc1->startPt == vertexID) eArc1->startPt = t1ID;
+        else                            eArc1->endPt   = t1ID;
+        sketch.recomputeArcAngles(*eArc1);
     }
 
     if (!filletTool.entity2IsArc) {
-        LineEntity* line = sketch.findLine(filletTool.entity2ID);
-        if (!line) return false;
-        if (line->startPt == vertexID) line->startPt = t2ID;
-        else                           line->endPt   = t2ID;
+        if (eLine2->startPt == vertexID) eLine2->startPt = t2ID;
+        else                             eLine2->endPt   = t2ID;
     } else {
-        ArcEntity* arc = sketch.findArc(filletTool.entity2ID);
-        if (!arc) return false;
-        if (arc->startPt == vertexID) arc->startPt = t2ID;
-        else                          arc->endPt   = t2ID;
-        sketch.recomputeArcAngles(*arc);
+        if (eArc2->startPt == vertexID) eArc2->startPt = t2ID;
+        else                            eArc2->endPt   = t2ID;
+        sketch.recomputeArcAngles(*eArc2);
     }
 
     // Shrink Distance constraints on the two trimmed lines.
@@ -168,6 +170,25 @@ bool applyFillet(Sketch& sketch, FilletToolState& filletTool, EntityID vertexID,
     };
     if (!filletTool.entity1IsArc) adjustLineLengthConstraints(filletTool.entity1ID);
     if (!filletTool.entity2IsArc) adjustLineLengthConstraints(filletTool.entity2ID);
+
+    // Remove EqualLength constraints that involve a trimmed line paired with any
+    // line outside this fillet.  Both fillet lines shrink by the same trimDist so
+    // an EqualLength between the two fillet lines themselves remains valid.
+    {
+        EntityID e1 = filletTool.entity1IsArc ? NullID : filletTool.entity1ID;
+        EntityID e2 = filletTool.entity2IsArc ? NullID : filletTool.entity2ID;
+        auto isFillet = [&](EntityID id) { return id != NullID && (id == e1 || id == e2); };
+        sketch.constraints.erase(
+            std::remove_if(sketch.constraints.begin(), sketch.constraints.end(),
+                [&](const Constraint& c) {
+                    if (c.type != ConstraintType::EqualLength) return false;
+                    bool aIsFillet = isFillet(c.entityA);
+                    bool bIsFillet = isFillet(c.entityB);
+                    // Keep only if both sides are fillet lines (still equal after same trim)
+                    return aIsFillet != bIsFillet;
+                }),
+            sketch.constraints.end());
+    }
 
     // Remove original vertex (it's now unreferenced by the entities we redirected)
     if (!sketch.isPointReferenced(vertexID)) {
@@ -226,10 +247,10 @@ bool handleLineTool(Sketch& sketch, ToolState& tool, Point2D worldPos, EntityID 
         endCurveID = snapCurveID;
     }
 
-    // Prevent zero-length lines (same point clicked twice)
+    // Prevent zero-length lines (same point clicked twice, or solver moved first point)
     if (endPtID == tool.firstPointID) return false;
     Point2D endPos = sketch.getPointPos(endPtID);
-    if (distance(tool.firstPoint, endPos) < 0.001f) {
+    if (distance(sketch.getPointPos(tool.firstPointID), endPos) < 0.001f) {
         if (snapPointID == NullID) sketch.removePoint(endPtID);
         return false;
     }
@@ -267,6 +288,10 @@ bool handleCircleTool(Sketch& sketch, ToolState& tool, Point2D worldPos, EntityI
     double radius = distance(tool.firstPoint, radiusPos);
     if (radius > 0.001f) {
         sketch.addCircle(tool.firstPointID, radius);
+    } else {
+        // Near-zero radius — reject; clean up a freshly created center point
+        if (!sketch.isPointReferenced(tool.firstPointID))
+            sketch.removePoint(tool.firstPointID);
     }
 
     tool.reset();
@@ -289,6 +314,15 @@ bool handleRectangleTool(Sketch& sketch, ToolState& tool, Point2D worldPos, Enti
     // Create rectangle from two corners
     double x1 = tool.firstPoint.x, y1 = tool.firstPoint.y;
     double x2 = worldPos.x, y2 = worldPos.y;
+
+    // Reject degenerate rectangles (zero-width or zero-height)
+    if (std::fabs(x2 - x1) < 0.001 || std::fabs(y2 - y1) < 0.001) {
+        if (!sketch.isPointReferenced(tool.firstPointID))
+            sketch.removePoint(tool.firstPointID);
+        tool.hasFirstPoint = false;
+        tool.firstPointID = NullID;
+        return false;
+    }
 
     // Four corner points: A(x1,y1) B(x2,y1) C(x2,y2) D(x1,y2)
     // pA always exists (created or reused on first click)
@@ -352,7 +386,9 @@ bool handleArc3PointTool(Sketch& sketch, ArcToolState& arcTool, Point2D worldPos
     double cx = p3.x, cy = p3.y;
     double D = 2.0 * (ax * (by - cy) + bx * (cy - ay) + cx * (ay - by));
     if (std::fabs(D) < 1e-6) {
-        // Collinear — cancel
+        // Collinear — cancel; clean up freshly created start point if unreferenced
+        if (!sketch.isPointReferenced(arcTool.point1ID))
+            sketch.removePoint(arcTool.point1ID);
         arcTool.reset();
         return false;
     }
@@ -450,20 +486,27 @@ bool handleArcCenterTool(Sketch& sketch, ArcToolState& arcTool, Point2D worldPos
     // Click 3: end point — project onto circle at locked radius
     double radius = distance(arcTool.point1, arcTool.point2);
     if (radius < 0.001) {
+        // Degenerate: clean up freshly created points before resetting
+        if (!sketch.isPointReferenced(arcTool.point2ID))
+            sketch.removePoint(arcTool.point2ID);
+        if (!sketch.isPointReferenced(arcTool.point1ID))
+            sketch.removePoint(arcTool.point1ID);
         arcTool.reset();
         return false;
     }
 
-    double angle = std::atan2(worldPos.y - arcTool.point1.y, worldPos.x - arcTool.point1.x);
-    double ex = arcTool.point1.x + radius * std::cos(angle);
-    double ey = arcTool.point1.y + radius * std::sin(angle);
-
-    EntityID endID;
+    // Compute end angle: use direction from center toward snap/cursor,
+    // then project onto the arc circle so the endpoint is always on-circle.
+    double endAngle;
     if (snapPointID != NullID) {
-        endID = snapPointID;
+        Point2D sp = sketch.getPointPos(snapPointID);
+        endAngle = std::atan2(sp.y - arcTool.point1.y, sp.x - arcTool.point1.x);
     } else {
-        endID = sketch.addPoint(ex, ey);
+        endAngle = std::atan2(worldPos.y - arcTool.point1.y, worldPos.x - arcTool.point1.x);
     }
+    double ex = arcTool.point1.x + radius * std::cos(endAngle);
+    double ey = arcTool.point1.y + radius * std::sin(endAngle);
+    EntityID endID = sketch.addPoint(ex, ey);
 
     sketch.addArc(arcTool.point1ID, arcTool.point2ID, endID);
 

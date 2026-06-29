@@ -145,6 +145,10 @@ private:
     // Frame profiler
     FrameProfiler profiler_;
 
+    // Transient sketch status message (shown as overlay for sketchMsgTimer_ seconds)
+    char sketchMsg_[128] = {};
+    float sketchMsgTimer_ = 0.0f;
+
     // Dimension label bounding boxes (rebuilt each frame during renderDimensions)
     struct DimLabelRect {
         EntityID constraintID = NullID;
