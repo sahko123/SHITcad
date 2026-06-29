@@ -495,18 +495,17 @@ bool handleArcCenterTool(Sketch& sketch, ArcToolState& arcTool, Point2D worldPos
         return false;
     }
 
-    // Compute end angle: use direction from center toward snap/cursor,
-    // then project onto the arc circle so the endpoint is always on-circle.
-    double endAngle;
+    // End point: snap to existing point if provided (connecting to existing geometry),
+    // otherwise project cursor direction onto the arc circle.
+    EntityID endID;
     if (snapPointID != NullID) {
-        Point2D sp = sketch.getPointPos(snapPointID);
-        endAngle = std::atan2(sp.y - arcTool.point1.y, sp.x - arcTool.point1.x);
+        endID = snapPointID; // reuse existing point so profiles close properly
     } else {
-        endAngle = std::atan2(worldPos.y - arcTool.point1.y, worldPos.x - arcTool.point1.x);
+        double endAngle = std::atan2(worldPos.y - arcTool.point1.y, worldPos.x - arcTool.point1.x);
+        double ex = arcTool.point1.x + radius * std::cos(endAngle);
+        double ey = arcTool.point1.y + radius * std::sin(endAngle);
+        endID = sketch.addPoint(ex, ey);
     }
-    double ex = arcTool.point1.x + radius * std::cos(endAngle);
-    double ey = arcTool.point1.y + radius * std::sin(endAngle);
-    EntityID endID = sketch.addPoint(ex, ey);
 
     sketch.addArc(arcTool.point1ID, arcTool.point2ID, endID);
 
@@ -533,6 +532,13 @@ bool handleCenterRectTool(Sketch& sketch, ToolState& tool, Point2D worldPos, Ent
     // Create rectangle symmetric around center
     double cx = tool.firstPoint.x, cy = tool.firstPoint.y;
     double dx = worldPos.x - cx, dy = worldPos.y - cy;
+
+    // Reject degenerate (zero-width or zero-height)
+    if (std::fabs(dx) < 0.001 || std::fabs(dy) < 0.001) {
+        tool.hasFirstPoint = false;
+        tool.firstPointID = NullID;
+        return false;
+    }
 
     EntityID pA = sketch.addPoint(cx - dx, cy - dy);
     EntityID pB = sketch.addPoint(cx + dx, cy - dy);
