@@ -156,6 +156,19 @@ bool applyFillet(Sketch& sketch, FilletToolState& filletTool, EntityID vertexID,
         sketch.recomputeArcAngles(*arc);
     }
 
+    // Shrink Distance constraints on the two trimmed lines.
+    // Each line is shorter by trimDist; a non-driven Distance constraint still
+    // encodes the old length and would push the far endpoint outward if left as-is.
+    auto adjustLineLengthConstraints = [&](EntityID lineID) {
+        for (auto& c : sketch.constraints) {
+            if (c.type == ConstraintType::Distance && c.entityA == lineID && !c.driven) {
+                c.value = std::max(0.001, c.value - trimDist);
+            }
+        }
+    };
+    if (!filletTool.entity1IsArc) adjustLineLengthConstraints(filletTool.entity1ID);
+    if (!filletTool.entity2IsArc) adjustLineLengthConstraints(filletTool.entity2ID);
+
     // Remove original vertex (it's now unreferenced by the entities we redirected)
     if (!sketch.isPointReferenced(vertexID)) {
         sketch.removePoint(vertexID); // cascades to remove any constraints at V
