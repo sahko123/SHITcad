@@ -420,22 +420,31 @@ void App::handleDimToolClick(Sketch& sketch) {
         } else if (hit.type == HitType::Circle && dimTool_.selType == HitType::Point && dimTool_.entityA != NullID) {
             CircleEntity* circle = sketch.findCircle(hit.entityID);
             if (!circle) return;
-            if (circle->centerPt == dimTool_.entityA) {
-                if (hasDuplicate(ConstraintType::Diameter, hit.entityID, NullID)) {
-                    snprintf(dimTool_.warningMsg, sizeof(dimTool_.warningMsg),
-                             "This circle already has a dimension constraint");
-                    dimTool_.warningTimer = 3.0f;
-                    dimTool_.entityA = NullID;
-                    dimTool_.selType = HitType::None;
-                    selection_.clear();
-                    return;
-                }
-                dimTool_.selType = HitType::Circle;
-                dimTool_.entityA = hit.entityID;
-                dimTool_.entityB = NullID;
-                dimTool_.measuredMm = f(circle->radius);
-                snprintf(dimTool_.inputBuf, sizeof(dimTool_.inputBuf), "%.4gmm", dimTool_.measuredMm);
+            if (circle->centerPt != dimTool_.entityA) {
+                snprintf(dimTool_.warningMsg, sizeof(dimTool_.warningMsg),
+                         "Select the circle's center point first to dimension its radius");
+                dimTool_.warningTimer = 3.0f;
+                dimTool_.entityA = NullID;
+                dimTool_.selType = HitType::None;
+                selection_.clear();
+                return;
+            }
+            if (hasDuplicate(ConstraintType::Diameter, hit.entityID, NullID)) {
+                snprintf(dimTool_.warningMsg, sizeof(dimTool_.warningMsg),
+                         "This circle already has a dimension constraint");
+                dimTool_.warningTimer = 3.0f;
+                dimTool_.entityA = NullID;
+                dimTool_.selType = HitType::None;
+                selection_.clear();
+                return;
+            }
+            dimTool_.selType = HitType::Circle;
+            dimTool_.entityA = hit.entityID;
+            dimTool_.entityB = NullID;
+            dimTool_.measuredMm = f(circle->radius);
+            snprintf(dimTool_.inputBuf, sizeof(dimTool_.inputBuf), "%.4gmm", dimTool_.measuredMm);
 
+            {
                 auto ptsBak = sketch.points; auto circBak = sketch.circles;
                 EntityID cid = sketch.addConstraint(ConstraintType::Radius, hit.entityID, NullID, dimTool_.measuredMm, false);
                 auto res = solver_.solve(sketch);
@@ -651,8 +660,13 @@ void App::drawDimensionPanel(Sketch& sketch) {
         bool apply = ImGui::Button(applyLabel, {95, 0});
         ImGui::SameLine();
         if (ImGui::Button("Cancel [Esc]", {95, 0})) {
-            if (dimTool_.phase == DimToolState::EditingAndPlacing && dimTool_.constraintID != NullID)
+            if (dimTool_.phase == DimToolState::EditingAndPlacing && dimTool_.constraintID != NullID) {
                 sketch.removeConstraint(dimTool_.constraintID);
+            } else if (dimTool_.editingExisting && dimTool_.constraintID != NullID) {
+                // Restore original value that live-sync may have changed
+                Constraint* cc = sketch.findConstraint(dimTool_.constraintID);
+                if (cc) cc->value = dimTool_.measuredMm;
+            }
             dimTool_.reset();
             selection_.clear();
         }
@@ -759,8 +773,12 @@ void App::drawDimensionPanel(Sketch& sketch) {
         }
 
         if (ImGui::IsKeyPressed(ImGuiKey_Escape)) {
-            if (dimTool_.phase == DimToolState::EditingAndPlacing && dimTool_.constraintID != NullID)
+            if (dimTool_.phase == DimToolState::EditingAndPlacing && dimTool_.constraintID != NullID) {
                 sketch.removeConstraint(dimTool_.constraintID);
+            } else if (dimTool_.editingExisting && dimTool_.constraintID != NullID) {
+                Constraint* cc = sketch.findConstraint(dimTool_.constraintID);
+                if (cc) cc->value = dimTool_.measuredMm;
+            }
             dimTool_.reset();
             selection_.clear();
         }

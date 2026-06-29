@@ -82,7 +82,13 @@ void App::applyGeometricConstraint(Sketch& sketch, ConstraintType type) {
         default: return;
     }
 
-    if (eA == NullID || eB == NullID) return;
+    if (eA == NullID || eB == NullID) {
+        if (type == ConstraintType::Tangent && eA == NullID) {
+            snprintf(sketchMsg_, sizeof(sketchMsg_), "Tangent requires a line and an arc or circle");
+            sketchMsgTimer_ = 3.0f;
+        }
+        return;
+    }
     if (type == ConstraintType::Symmetric && eC == NullID) return;
 
     // Check for duplicate constraint
@@ -311,7 +317,6 @@ void App::handleSketchInput(float vpW, float vpH) {
             ImGui::IsKeyPressed(ImGuiKey_Delete) && !io.WantCaptureKeyboard) {
             sketch.removeConstraint(dimTool_.constraintID);
             dimTool_.reset();
-            tool_.type = ToolType::None;
             selection_.clear();
             history_.pushState(sketch);
         }
