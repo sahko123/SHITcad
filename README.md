@@ -28,6 +28,9 @@ Built with C++17, OpenGL 3.3, Dear ImGui, and OpenCASCADE.
 - **Visual Studio 2019 or 2022** with the C++ desktop workload (MSVC, C++17)
 - **CMake 3.20+**
 - **[vcpkg](https://github.com/microsoft/vcpkg)** — supplies OpenCASCADE
+- **Python 3** with **Jinja2** (`pip install jinja2`) — glad generates the
+  OpenGL loader at build time with a Python script. The configure step checks
+  for this and tells you if it's missing.
 - A GPU/driver supporting **OpenGL 3.3 core**
 
 GLFW 3.4, glad, Dear ImGui 1.91.9 and nlohmann/json 3.11.3 are fetched
@@ -40,6 +43,12 @@ automatically by CMake at configure time — no manual setup needed.
 ```bash
 git clone https://github.com/microsoft/vcpkg.git
 cd vcpkg && ./bootstrap-vcpkg.bat
+```
+
+Also make sure Jinja2 is available to the Python that CMake will find:
+
+```bash
+pip install jinja2
 ```
 
 ### 2. Configure and build
@@ -84,6 +93,10 @@ constraints or 3D features.
 The toolchain file wasn't passed, or the path to it is wrong. Re-run the
 configure step with the correct `-DCMAKE_TOOLCHAIN_FILE=` path, deleting the
 `build/` directory first.
+
+**`The glad OpenGL loader generator requires the Python module 'jinja2'`**
+Run `pip install jinja2` for the Python interpreter named in the error message,
+then configure again.
 
 **The window opens black or the app exits immediately**
 The GPU or driver doesn't expose OpenGL 3.3 core. Check

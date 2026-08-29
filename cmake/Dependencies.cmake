@@ -32,6 +32,27 @@ FetchContent_Declare(
 
 FetchContent_MakeAvailable(glfw glad)
 
+# glad generates its loader at build time with a Python script that needs
+# Jinja2. Check for it now so a missing module fails here with a clear message
+# instead of as an opaque custom-build error partway through the build.
+find_package(Python COMPONENTS Interpreter REQUIRED)
+execute_process(
+    COMMAND ${Python_EXECUTABLE} -c "import jinja2"
+    RESULT_VARIABLE _jinja2_missing
+    OUTPUT_QUIET ERROR_QUIET
+)
+if(_jinja2_missing)
+    message(FATAL_ERROR
+        "The glad OpenGL loader generator requires the Python module 'jinja2', "
+        "which was not found in ${Python_EXECUTABLE}.
+"
+        "Install it with:
+"
+        "    ${Python_EXECUTABLE} -m pip install jinja2
+"
+        "then re-run the configure step.")
+endif()
+
 # glad: generate the loader library
 glad_add_library(glad_gl REPRODUCIBLE LOADER API gl:core=3.3)
 
