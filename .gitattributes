@@ -1,0 +1,8 @@
+* text=auto
+
+*.cpp text
+*.h   text
+*.txt text
+*.md  text
+*.cmake text
+*.json text

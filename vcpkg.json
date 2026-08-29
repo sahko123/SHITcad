@@ -1,0 +1,9 @@
+{
+  "name": "shitcad",
+  "version": "0.1.0",
+  "description": "Parametric CAD modeler with 2D constrained sketching and 3D feature history.",
+  "dependencies": [
+    "opencascade"
+  ],
+  "builtin-baseline": "5b698638c97b4610044a254347d571f823e56557"
+}

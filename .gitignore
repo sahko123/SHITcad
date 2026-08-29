@@ -1,7 +1,21 @@
+# Build output
 build/
+build*/
 out/
+vcpkg_installed/
+
+# IDE / editor
 .vs/
 .vscode/
 CMakeSettings.json
 *.user
 *.suo
+
+# Runtime output
+*.log
+
+# Local Claude Code settings (machine-specific)
+.claude/settings.local.json
+
+# CodeCruncher index (local, regenerable via `cc index`)
+.cc/
