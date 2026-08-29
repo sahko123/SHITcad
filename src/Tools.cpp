@@ -217,6 +217,9 @@ bool applyFillet(Sketch& sketch, FilletToolState& filletTool, EntityID vertexID,
     // Tangent constraints: entityA=line, entityB=arc (solver expects this order)
     sketch.addConstraint(ConstraintType::Tangent, filletTool.entity1ID, filletArcID, 0.0, true);
     sketch.addConstraint(ConstraintType::Tangent, filletTool.entity2ID, filletArcID, 0.0, true);
+    // Radius constraint keeps fillet radius fixed when adjacent lines are resized.
+    // The solver moves the arc center (not endpoints) to maintain it.
+    sketch.addConstraint(ConstraintType::Radius, filletArcID, NullID, radius, true);
 
     return true;
 }

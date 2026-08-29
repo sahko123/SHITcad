@@ -363,7 +363,10 @@ void App::handleDimToolClick(Sketch& sketch) {
     auto hasDuplicate = [&](ConstraintType newType, EntityID eA, EntityID eB) -> bool {
         for (const auto& c : sketch.constraints) {
             bool typeMatch = (c.type == newType);
-            if (newType == ConstraintType::Diameter)
+            // Radius and Diameter dimension the same freedom, so either blocks the other.
+            // This used to be checked in one direction only, which let a Radius be added to a
+            // circle that already had a Diameter (and then the two fought over the value).
+            if (newType == ConstraintType::Diameter || newType == ConstraintType::Radius)
                 typeMatch = (c.type == ConstraintType::Diameter || c.type == ConstraintType::Radius);
             if (!typeMatch) continue;
             if (newType == ConstraintType::PointDistance || newType == ConstraintType::Angle || newType == ConstraintType::PointLineDistance) {
@@ -404,11 +407,11 @@ void App::handleDimToolClick(Sketch& sketch) {
             dimTool_.entityB = hit.entityID;
             snprintf(dimTool_.inputBuf, sizeof(dimTool_.inputBuf), "%.4gmm", dimTool_.measuredMm);
 
-            auto ptsBak = sketch.points; auto circBak = sketch.circles;
+            auto geoBak = sketch.captureGeometry();
             EntityID cid = sketch.addConstraint(ConstraintType::PointLineDistance, dimTool_.entityA, hit.entityID, dimTool_.measuredMm, false);
             auto res = solver_.solve(sketch);
             lastSketchDof_ = res.dof;
-            if (!res.ok) { sketch.points = ptsBak; sketch.circles = circBak; dimTool_.driven = true; }
+            if (!res.ok) { sketch.restoreGeometry(geoBak); dimTool_.driven = true; }
             Constraint* cc = sketch.findConstraint(cid);
             if (cc) { cc->driven = dimTool_.driven; cc->negativeSide = negativeSide; }
             dimTool_.constraintID = cid;
@@ -445,11 +448,11 @@ void App::handleDimToolClick(Sketch& sketch) {
             snprintf(dimTool_.inputBuf, sizeof(dimTool_.inputBuf), "%.4gmm", dimTool_.measuredMm);
 
             {
-                auto ptsBak = sketch.points; auto circBak = sketch.circles;
+                auto geoBak = sketch.captureGeometry();
                 EntityID cid = sketch.addConstraint(ConstraintType::Radius, hit.entityID, NullID, dimTool_.measuredMm, false);
                 auto res = solver_.solve(sketch);
                 lastSketchDof_ = res.dof;
-                if (!res.ok) { sketch.points = ptsBak; sketch.circles = circBak; dimTool_.driven = true; }
+                if (!res.ok) { sketch.restoreGeometry(geoBak); dimTool_.driven = true; }
                 Constraint* cc = sketch.findConstraint(cid);
                 if (cc) cc->driven = dimTool_.driven;
                 dimTool_.constraintID = cid;
@@ -476,11 +479,11 @@ void App::handleDimToolClick(Sketch& sketch) {
             snprintf(dimTool_.inputBuf, sizeof(dimTool_.inputBuf), "%.4gmm", dimTool_.measuredMm);
 
             // Create constraint immediately
-            auto ptsBak = sketch.points; auto circBak = sketch.circles;
+            auto geoBak = sketch.captureGeometry();
             EntityID cid = sketch.addConstraint(ConstraintType::Distance, hit.entityID, NullID, dimTool_.measuredMm, false);
             auto res = solver_.solve(sketch);
             lastSketchDof_ = res.dof;
-            if (!res.ok) { sketch.points = ptsBak; sketch.circles = circBak; dimTool_.driven = true; }
+            if (!res.ok) { sketch.restoreGeometry(geoBak); dimTool_.driven = true; }
             Constraint* cc = sketch.findConstraint(cid);
             if (cc) cc->driven = dimTool_.driven;
             dimTool_.constraintID = cid;
@@ -503,11 +506,11 @@ void App::handleDimToolClick(Sketch& sketch) {
             dimTool_.measuredMm = f(circle->radius * 2.0);
             snprintf(dimTool_.inputBuf, sizeof(dimTool_.inputBuf), "%.4gmm", dimTool_.measuredMm);
 
-            auto ptsBak = sketch.points; auto circBak = sketch.circles;
+            auto geoBak = sketch.captureGeometry();
             EntityID cid = sketch.addConstraint(ConstraintType::Diameter, hit.entityID, NullID, dimTool_.measuredMm, false);
             auto res = solver_.solve(sketch);
             lastSketchDof_ = res.dof;
-            if (!res.ok) { sketch.points = ptsBak; sketch.circles = circBak; dimTool_.driven = true; }
+            if (!res.ok) { sketch.restoreGeometry(geoBak); dimTool_.driven = true; }
             Constraint* cc = sketch.findConstraint(cid);
             if (cc) cc->driven = dimTool_.driven;
             dimTool_.constraintID = cid;
@@ -537,11 +540,11 @@ void App::handleDimToolClick(Sketch& sketch) {
                 dimTool_.measuredMm = f(distance(a, b));
                 snprintf(dimTool_.inputBuf, sizeof(dimTool_.inputBuf), "%.4gmm", dimTool_.measuredMm);
 
-                auto ptsBak = sketch.points; auto circBak = sketch.circles;
+                auto geoBak = sketch.captureGeometry();
                 EntityID cid = sketch.addConstraint(ConstraintType::PointDistance, dimTool_.entityA, dimTool_.entityB, dimTool_.measuredMm, false);
                 auto res = solver_.solve(sketch);
                 lastSketchDof_ = res.dof;
-                if (!res.ok) { sketch.points = ptsBak; sketch.circles = circBak; dimTool_.driven = true; }
+                if (!res.ok) { sketch.restoreGeometry(geoBak); dimTool_.driven = true; }
                 Constraint* cc = sketch.findConstraint(cid);
                 if (cc) cc->driven = dimTool_.driven;
                 dimTool_.constraintID = cid;
@@ -739,8 +742,7 @@ void App::drawDimensionPanel(Sketch& sketch) {
                 }
 
                 if (valueOk && !cc->driven) {
-                    auto ptsBak = sketch.points;
-                    auto circBak = sketch.circles;
+                    auto geoBak = sketch.captureGeometry();
                     PointEntity* pinA = nullptr, *pinB = nullptr;
                     bool wasA = false, wasB = false;
                     if (cc->type == ConstraintType::PointLineDistance) {
@@ -757,8 +759,7 @@ void App::drawDimensionPanel(Sketch& sketch) {
                     if (pinA) pinA->projected = wasA;
                     if (pinB) pinB->projected = wasB;
                     if (!res.ok) {
-                        sketch.points = ptsBak;
-                        sketch.circles = circBak;
+                        sketch.restoreGeometry(geoBak);
                         cc->driven = true;
                         dimTool_.driven = true;
                     }

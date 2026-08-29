@@ -1,6 +1,7 @@
 #include "SketchData.h"
 #include "Constants.h"
 #include <algorithm>
+#include <cmath>
 #include <limits>
 
 namespace shitcad {
@@ -572,8 +573,54 @@ void Sketch::recomputeArcAngles(ArcEntity& arc) const {
     Point2D c = getPointPos(arc.centerPt);
     Point2D s = getPointPos(arc.startPt);
     Point2D e = getPointPos(arc.endPt);
-    arc.startAngle = std::atan2(s.y - c.y, s.x - c.x);
-    arc.endAngle = std::atan2(e.y - c.y, e.x - c.x);
+
+    double newStart = std::atan2(s.y - c.y, s.x - c.x);
+    double rawSweep = std::atan2(e.y - c.y, e.x - c.x) - newStart;
+    while (rawSweep <= 0.0)     rawSweep += kTwoPiD;
+    while (rawSweep > kTwoPiD)  rawSweep -= kTwoPiD;
+
+    // A brand-new arc (addArc) has no previous sweep to stay continuous with.
+    bool fresh = (arc.startAngle == 0.0 && arc.endAngle == 0.0);
+    double sweep = rawSweep;
+    if (!fresh) {
+        double prevSweep = arc.endAngle - arc.startAngle;
+        while (prevSweep <= 0.0)    prevSweep += kTwoPiD;
+        while (prevSweep > kTwoPiD) prevSweep -= kTwoPiD;
+
+        // Arcs are stored CCW with sweep in (0, 2pi], so the sweep is fully determined by the
+        // three points — which means a single solve step that carries the end point across the
+        // start ray silently turns a 5-degree arc into a 355-degree one. Pick whichever branch
+        // is nearest the previous sweep and clamp at the degenerate floor instead, so the arc
+        // collapses (recoverably) rather than inverting to its own complement.
+        double alt = rawSweep - kTwoPiD;
+        if (std::fabs(alt - prevSweep) < std::fabs(rawSweep - prevSweep)) sweep = alt;
+        if (sweep < kMinArcSweep) sweep = kMinArcSweep;
+        if (sweep > kTwoPiD)      sweep = kTwoPiD;
+    }
+
+    arc.startAngle = newStart;
+    // Consumers all normalise (endAngle - startAngle) into (0, 2pi], so storing an endAngle
+    // beyond +pi is both safe and what keeps the sweep unambiguous.
+    arc.endAngle = newStart + sweep;
+}
+
+SketchGeometrySnapshot Sketch::captureGeometry() const {
+    SketchGeometrySnapshot snap;
+    snap.points      = points;
+    snap.circles     = circles;
+    snap.arcs        = arcs;
+    snap.ellipses    = ellipses;
+    snap.ellipseArcs = ellipseArcs;
+    return snap;
+}
+
+void Sketch::restoreGeometry(const SketchGeometrySnapshot& snap) {
+    points      = snap.points;
+    circles     = snap.circles;
+    arcs        = snap.arcs;
+    ellipses    = snap.ellipses;
+    ellipseArcs = snap.ellipseArcs;
+    rebuildIndices();
 }
 
 EntityID Sketch::findPointNear(double wx, double wy, double tolerance) const {
@@ -758,6 +805,105 @@ std::vector<Point2D> sampleSpline(const SplineEntity& sp, const Sketch& sketch, 
         pts.push_back(evaluateBSpline(ctrlPts, knots, sp.weights, deg, t));
     }
     return pts;
+}
+
+// ─── Constraint conflict detection ─────────────────────────────────
+
+const char* constraintConflictReason(const Sketch& sketch, ConstraintType type,
+                                     EntityID eA, EntityID eB, EntityID eC) {
+    (void)eC;
+    // Driven constraints are reference-only, so they can never contradict anything.
+    auto unary = [&](ConstraintType t, EntityID e) -> bool {
+        if (e == NullID) return false;
+        for (const auto& c : sketch.constraints)
+            if (!c.driven && c.type == t && c.entityA == e) return true;
+        return false;
+    };
+    auto pair = [&](ConstraintType t, EntityID a, EntityID b) -> bool {
+        if (a == NullID || b == NullID) return false;
+        for (const auto& c : sketch.constraints) {
+            if (c.driven || c.type != t) continue;
+            if ((c.entityA == a && c.entityB == b) || (c.entityA == b && c.entityB == a))
+                return true;
+        }
+        return false;
+    };
+
+    switch (type) {
+        case ConstraintType::Horizontal:
+            if (unary(ConstraintType::Vertical, eA))
+                return "that line is already vertical";
+            break;
+        case ConstraintType::Vertical:
+            if (unary(ConstraintType::Horizontal, eA))
+                return "that line is already horizontal";
+            break;
+
+        case ConstraintType::Parallel:
+            if (pair(ConstraintType::Perpendicular, eA, eB))
+                return "those lines are already perpendicular";
+            if (pair(ConstraintType::Angle, eA, eB))
+                return "those lines already have an angle dimension";
+            if ((unary(ConstraintType::Horizontal, eA) && unary(ConstraintType::Vertical, eB)) ||
+                (unary(ConstraintType::Vertical, eA) && unary(ConstraintType::Horizontal, eB)))
+                return "one line is horizontal and the other vertical";
+            break;
+
+        case ConstraintType::Perpendicular:
+            if (pair(ConstraintType::Parallel, eA, eB))
+                return "those lines are already parallel";
+            if (pair(ConstraintType::Collinear, eA, eB))
+                return "those lines are already collinear";
+            if (pair(ConstraintType::Angle, eA, eB))
+                return "those lines already have an angle dimension";
+            if ((unary(ConstraintType::Horizontal, eA) && unary(ConstraintType::Horizontal, eB)) ||
+                (unary(ConstraintType::Vertical, eA)   && unary(ConstraintType::Vertical, eB)))
+                return "both lines already share the same direction";
+            break;
+
+        case ConstraintType::Collinear:
+            if (pair(ConstraintType::Perpendicular, eA, eB))
+                return "those lines are already perpendicular";
+            if (pair(ConstraintType::Angle, eA, eB))
+                return "those lines already have an angle dimension";
+            break;
+
+        case ConstraintType::Angle:
+            if (pair(ConstraintType::Parallel, eA, eB))
+                return "those lines are already parallel";
+            if (pair(ConstraintType::Perpendicular, eA, eB))
+                return "those lines are already perpendicular";
+            if (pair(ConstraintType::Collinear, eA, eB))
+                return "those lines are already collinear";
+            if (pair(ConstraintType::Angle, eA, eB))
+                return "those lines already have an angle dimension";
+            break;
+
+        case ConstraintType::Distance:
+            if (unary(ConstraintType::Distance, eA))
+                return "that line already has a length dimension";
+            break;
+
+        case ConstraintType::Radius:
+        case ConstraintType::Diameter:
+            if (unary(ConstraintType::Radius, eA) || unary(ConstraintType::Diameter, eA))
+                return "that curve already has a radius or diameter dimension";
+            break;
+
+        case ConstraintType::EqualLength:
+            if (pair(ConstraintType::EqualLength, eA, eB))
+                return "those lines are already set equal";
+            break;
+
+        case ConstraintType::Concentric:
+            if (pair(ConstraintType::Concentric, eA, eB))
+                return "those curves are already concentric";
+            break;
+
+        default:
+            break;
+    }
+    return nullptr;
 }
 
 } // namespace shitcad

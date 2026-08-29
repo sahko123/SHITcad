@@ -126,6 +126,18 @@ struct Constraint {
     bool negativeSide = false;  // for PointLineDistance: true = point on negative (CW) side of line
 };
 
+// Snapshot of every field the solver may mutate, used to roll back a constraint the solver
+// could not satisfy. Points and circle radii alone are not enough: arcs and elliptical arcs
+// cache startAngle/endAngle, which the renderer, hit-test and profile detector all read, so
+// restoring only the points leaves those cached angles describing the rejected geometry.
+struct SketchGeometrySnapshot {
+    std::vector<PointEntity>      points;
+    std::vector<CircleEntity>     circles;
+    std::vector<ArcEntity>        arcs;
+    std::vector<EllipseEntity>    ellipses;
+    std::vector<EllipseArcEntity> ellipseArcs;
+};
+
 struct Sketch {
     std::vector<PointEntity> points;
     std::vector<LineEntity> lines;
@@ -197,6 +209,10 @@ struct Sketch {
     // Recompute arc start/end angles from current point positions
     void recomputeArcAngles(ArcEntity& arc) const;
 
+    // Capture/restore everything the solver may mutate (see SketchGeometrySnapshot).
+    SketchGeometrySnapshot captureGeometry() const;
+    void restoreGeometry(const SketchGeometrySnapshot& snap);
+
     void clear();
     void clearProjected();
 
@@ -214,6 +230,15 @@ private:
     std::unordered_map<EntityID, size_t> splineIndex_;
     std::unordered_map<EntityID, size_t> constraintIndex_;
 };
+
+// Returns a human-readable reason if adding `type` between `eA`/`eB` would directly
+// contradict a constraint the sketch already has (H vs V on one line, Parallel vs
+// Perpendicular on one pair, a second Distance on the same line, ...). Returns nullptr when
+// there is no direct conflict. This is a cheap structural check, not a rank analysis: it
+// catches the contradictions a user hits by accident, and the solver's own failure path
+// still backstops everything else.
+const char* constraintConflictReason(const Sketch& sketch, ConstraintType type,
+                                     EntityID eA, EntityID eB, EntityID eC = NullID);
 
 // ─── Curve sampling utilities ──────────────────────────────────────
 

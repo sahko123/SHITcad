@@ -100,9 +100,18 @@ void App::applyGeometricConstraint(Sketch& sketch, ConstraintType type) {
         if (match) return; // already exists
     }
 
+    // Reject a constraint that directly contradicts one the sketch already has, instead of
+    // letting the solver thrash over it and then silently demote the new constraint to
+    // reference-only with a generic "over-constrained" message.
+    if (const char* why = constraintConflictReason(sketch, type, eA, eB, eC)) {
+        snprintf(sketchMsg_, sizeof(sketchMsg_), "Can't add that constraint: %s", why);
+        sketchMsgTimer_ = 3.0f;
+        selection_.clear();
+        return;
+    }
+
     // Backup for solver rollback
-    auto ptsBak = sketch.points;
-    auto circBak = sketch.circles;
+    auto geoBak = sketch.captureGeometry();
 
     EntityID cid = sketch.addConstraint(type, eA, eB, 0.0f, false);
     if (type == ConstraintType::Symmetric) {
@@ -114,12 +123,19 @@ void App::applyGeometricConstraint(Sketch& sketch, ConstraintType type) {
     lastSketchDof_ = res.dof;
     if (!res.ok) {
         // Solver couldn't satisfy — mark as driven and notify user
-        sketch.points = ptsBak;
-        sketch.circles = circBak;
+        sketch.restoreGeometry(geoBak);
         Constraint* cc = sketch.findConstraint(cid);
         if (cc) cc->driven = true;
         snprintf(sketchMsg_, sizeof(sketchMsg_),
                  "Over-constrained: constraint added as reference only");
+        sketchMsgTimer_ = 3.0f;
+    } else if (!res.converged) {
+        // The constraints are all satisfied within tolerance, so the constraint is kept -- but
+        // the solver ran out of iterations rather than settling, which means the sketch is still
+        // drifting and is worth telling the user about instead of discarding silently.
+        snprintf(sketchMsg_, sizeof(sketchMsg_),
+                 "Constraint added, but the sketch did not fully settle (%d iterations)",
+                 res.iterations);
         sketchMsgTimer_ = 3.0f;
     }
 
@@ -687,10 +703,10 @@ void App::handleSketchInput(float vpW, float vpH) {
                                 sketch.removeConstraint(dimTool_.constraintID);
                                 double radius = circle->radius;
                                 EntityID cid = sketch.addConstraint(ConstraintType::Radius, dimTool_.entityA, NullID, radius, false);
-                                auto ptsBak = sketch.points; auto circBak = sketch.circles;
+                                auto geoBak = sketch.captureGeometry();
                                 auto res = solver_.solve(sketch);
                                 lastSketchDof_ = res.dof;
-                                if (!res.ok) { sketch.points = ptsBak; sketch.circles = circBak; dimTool_.driven = true; }
+                                if (!res.ok) { sketch.restoreGeometry(geoBak); dimTool_.driven = true; }
                                 Constraint* rc = sketch.findConstraint(cid);
                                 if (rc) rc->driven = dimTool_.driven;
                                 dimTool_.constraintID = cid;
@@ -711,8 +727,7 @@ void App::handleSketchInput(float vpW, float vpH) {
                 // the point side moves to satisfy the constraint.
                 Constraint* fc = sketch.findConstraint(dimTool_.constraintID);
                 if (fc && !fc->driven) {
-                    auto ptsBak = sketch.points;
-                    auto circBak = sketch.circles;
+                    auto geoBak = sketch.captureGeometry();
                     PointEntity* pinA = nullptr, *pinB = nullptr;
                     bool wasA = false, wasB = false;
                     if (fc->type == ConstraintType::PointLineDistance) {
@@ -729,8 +744,7 @@ void App::handleSketchInput(float vpW, float vpH) {
                     if (pinA) pinA->projected = wasA;
                     if (pinB) pinB->projected = wasB;
                     if (!res.ok) {
-                        sketch.points = ptsBak;
-                        sketch.circles = circBak;
+                        sketch.restoreGeometry(geoBak);
                         fc->driven = true;
                     }
                 }
