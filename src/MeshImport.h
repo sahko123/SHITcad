@@ -19,6 +19,34 @@ struct MeshFileInfo {
     float rawMax[3] = {0, 0, 0};
 };
 
+// Placement of an imported mesh: p' = R * p + t, applied after the file's
+// coordinates are scaled to mm. The file itself is never modified.
+//
+// Rotation is stored as a matrix, not Euler angles, so repeated quarter turns
+// about different axes compose exactly and in the order they were applied.
+struct MeshTransform {
+    double r[9] = {1, 0, 0, 0, 1, 0, 0, 0, 1}; // row-major
+    double t[3] = {0, 0, 0};                   // mm
+
+    bool isIdentity() const;
+    void apply(const double p[3], double out[3]) const;
+};
+
+// Rotation about a world axis (0 = X, 1 = Y, 2 = Z), right-handed. Multiples
+// of 90 degrees are exact (no 6e-17 residue) so "right way up" stays exact.
+void axisRotation(int axis, double degrees, double out[9]);
+
+// Rotate a placed mesh by Q about a world-space pivot (typically its centre),
+// so it turns in place instead of swinging around the origin.
+void rotateAbout(MeshTransform& xf, const double q[9], const double pivot[3]);
+
+// Axis-aligned bounds in mm after unit scaling and placement.
+void placedBounds(const MeshFileInfo& info, float unitToMm, const MeshTransform& xf,
+                  double outMin[3], double outMax[3]);
+
+// Apply placement to vertices already in mm. Normals are rotated, not translated.
+void applyMeshTransform(std::vector<MeshVertex>& verts, const MeshTransform& xf);
+
 // Read an STL and return its triangles scaled to mm.
 //
 // Replay calls this on every model edit, so files are cached by path, size and

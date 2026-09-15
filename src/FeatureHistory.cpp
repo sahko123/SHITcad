@@ -191,6 +191,12 @@ FeatureID FeatureHistory::addMeshImportFeature(const MeshImportFeatureData& para
     return features_.back().id;
 }
 
+void FeatureHistory::updateMeshImportData(FeatureID id, const MeshImportFeatureData& data) {
+    Feature* f = findFeature(id);
+    if (!f || f->type != FeatureType::MeshImport) return;
+    std::get<MeshImportFeatureData>(f->data) = data;
+}
+
 FeatureID FeatureHistory::addLoftFeature(const LoftFeatureData& params) {
     Feature f;
     f.id = nextID_++;

@@ -139,6 +139,9 @@ void App::globalUndo() {
         case UndoActionType::ModifyBoolean:
             featureHistory_.updateBooleanData(cmd.featureID, cmd.oldBoolean);
             break;
+        case UndoActionType::ModifyMeshImport:
+            featureHistory_.updateMeshImportData(cmd.featureID, cmd.oldMeshImport);
+            break;
     }
     replayAllFeatures();
     markDirty();
@@ -183,6 +186,9 @@ void App::globalRedo() {
             break;
         case UndoActionType::ModifyBoolean:
             featureHistory_.updateBooleanData(cmd.featureID, cmd.newBoolean);
+            break;
+        case UndoActionType::ModifyMeshImport:
+            featureHistory_.updateMeshImportData(cmd.featureID, cmd.newMeshImport);
             break;
     }
     replayAllFeatures();
@@ -351,11 +357,187 @@ void App::drawMeshImportDialog() {
         markDirty();
         replayAllFeatures();
         keepOpen = false;
+        // Straight into placement: an export is rarely the right way up.
+        editMeshImportFeature(fid);
     }
     if (ImGui::Button("Cancel", {-1, 0})) keepOpen = false;
 
     ImGui::End();
     if (!keepOpen) d.reset();
+}
+
+static bool sameMeshImportData(const MeshImportFeatureData& a, const MeshImportFeatureData& b) {
+    if (a.sourcePath != b.sourcePath || a.unit != b.unit) return false;
+    for (int i = 0; i < 9; i++) if (a.transform.r[i] != b.transform.r[i]) return false;
+    for (int i = 0; i < 3; i++) if (a.transform.t[i] != b.transform.t[i]) return false;
+    return true;
+}
+
+void App::editMeshImportFeature(FeatureID id) {
+    if (meshPlace_.active()) finishMeshPlace(true);
+    const Feature* f = featureHistory_.findFeature(id);
+    if (!f || f->type != FeatureType::MeshImport) return;
+    meshPlace_.reset();
+    meshPlace_.featureID = id;
+    meshPlace_.original = std::get<MeshImportFeatureData>(f->data);
+    for (int i = 0; i < 3; i++) meshPlace_.posBuf[i] = meshPlace_.original.transform.t[i];
+}
+
+void App::setMeshImportData(const MeshImportFeatureData& data) {
+    featureHistory_.updateMeshImportData(meshPlace_.featureID, data);
+    for (int i = 0; i < 3; i++) meshPlace_.posBuf[i] = data.transform.t[i];
+    replayAllFeatures();
+}
+
+void App::finishMeshPlace(bool keep) {
+    if (!meshPlace_.active()) return;
+    const Feature* f = featureHistory_.findFeature(meshPlace_.featureID);
+    if (f && f->type == FeatureType::MeshImport) {
+        const auto& current = std::get<MeshImportFeatureData>(f->data);
+        if (!sameMeshImportData(current, meshPlace_.original)) {
+            if (keep) {
+                UndoCommand cmd;
+                cmd.type = UndoActionType::ModifyMeshImport;
+                cmd.featureID = meshPlace_.featureID;
+                cmd.oldMeshImport = meshPlace_.original;
+                cmd.newMeshImport = current;
+                globalUndo_.push(std::move(cmd));
+                markDirty();
+            } else {
+                featureHistory_.updateMeshImportData(meshPlace_.featureID, meshPlace_.original);
+                replayAllFeatures();
+            }
+        }
+    }
+    meshPlace_.reset();
+}
+
+void App::drawMeshPlacePanel() {
+    if (!meshPlace_.active()) return;
+    const Feature* f = featureHistory_.findFeature(meshPlace_.featureID);
+    if (!f || f->type != FeatureType::MeshImport) { // deleted or undone underneath us
+        meshPlace_.reset();
+        return;
+    }
+    MeshImportFeatureData data = std::get<MeshImportFeatureData>(f->data);
+
+    ImGuiViewport* vp = ImGui::GetMainViewport();
+    ImGui::SetNextWindowPos({vp->WorkPos.x + vp->WorkSize.x - 290, vp->WorkPos.y + 60}, ImGuiCond_Appearing);
+    ImGui::SetNextWindowSize({280, 0}, ImGuiCond_Always);
+    char title[160];
+    snprintf(title, sizeof(title), "Place: %s###meshplace", f->name.c_str());
+    bool open = true;
+    ImGui::Begin(title, &open, ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_AlwaysAutoResize);
+
+    MeshFileInfo info;
+    std::string err;
+    const UnitInfo* unit = findLengthUnit(data.unit);
+    if (!probeMeshFile(data.sourcePath, info, err) || !unit) {
+        ImGui::TextColored({1.0f, 0.4f, 0.4f, 1.0f}, "%s", unit ? err.c_str() : "Unknown unit");
+        if (ImGui::Button("Close", {-1, 0})) open = false;
+        ImGui::End();
+        if (!open) finishMeshPlace(false);
+        return;
+    }
+
+    // ---- unit (fixable here if the import dialog got it wrong)
+    int unitIndex = (int)(unit - kUnits);
+    ImGui::Text("File unit");
+    ImGui::SameLine(90);
+    ImGui::SetNextItemWidth(-1);
+    if (ImGui::Combo("##placeunit", &unitIndex, [](void*, int i) { return kUnits[i].name; }, nullptr, kUnitCount)) {
+        data.unit = kUnits[unitIndex].name;
+        setMeshImportData(data);
+    }
+
+    double lo[3], hi[3];
+    placedBounds(info, kUnits[unitIndex].toMm, data.transform, lo, hi);
+    const double pivot[3] = {(lo[0] + hi[0]) * 0.5, (lo[1] + hi[1]) * 0.5, (lo[2] + hi[2]) * 0.5};
+    const double big = std::max({hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]});
+    const double s = big >= 1000.0 ? 0.001 : 1.0;
+    const char* su = big >= 1000.0 ? "m" : "mm";
+    ImGui::TextDisabled("Size  X %.4g  Y %.4g  Z %.4g %s", (hi[0] - lo[0]) * s, (hi[1] - lo[1]) * s, (hi[2] - lo[2]) * s, su);
+    ImGui::TextDisabled("Bottom at Z = %.4g %s", lo[2] * s, su);
+
+    // ---- rotation: always about the mesh's own centre
+    ImGui::Separator();
+    ImGui::Text("Rotate 90 deg about its centre");
+    auto quarterTurn = [&](int axis, double deg) {
+        double q[9];
+        axisRotation(axis, deg, q);
+        rotateAbout(data.transform, q, pivot);
+        setMeshImportData(data);
+    };
+    const char* axisNames[3] = {"X", "Y", "Z"};
+    for (int a = 0; a < 3; a++) {
+        ImGui::PushID(a);
+        ImGui::AlignTextToFramePadding();
+        ImGui::Text("%s", axisNames[a]);
+        ImGui::SameLine(30);
+        if (ImGui::Button("-90", {60, 0})) quarterTurn(a, -90.0);
+        ImGui::SameLine();
+        if (ImGui::Button("+90", {60, 0})) quarterTurn(a, 90.0);
+        ImGui::SameLine();
+        if (ImGui::Button("180", {60, 0})) quarterTurn(a, 180.0);
+        ImGui::PopID();
+    }
+    // Most non-CAD exporters (and many CAD STL exports) are Y-up; this app is Z-up.
+    if (ImGui::Button("Y-up file -> Z-up", {-1, 0})) quarterTurn(0, 90.0);
+
+    ImGui::SetNextItemWidth(70);
+    ImGui::InputFloat("deg##angle", &meshPlace_.angleDeg, 0, 0, "%.2f");
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(50);
+    ImGui::Combo("##angleaxis", &meshPlace_.angleAxis, axisNames, 3);
+    ImGui::SameLine();
+    if (ImGui::Button("Rotate", {-1, 0})) quarterTurn(meshPlace_.angleAxis, meshPlace_.angleDeg);
+
+    // ---- position
+    ImGui::Separator();
+    ImGui::Text("Move (mm, applied after rotation)");
+    bool posEdited = false;
+    for (int a = 0; a < 3; a++) {
+        ImGui::SetNextItemWidth(-1);
+        char label[16];
+        snprintf(label, sizeof(label), "##pos%d", a);
+        ImGui::PushStyleColor(ImGuiCol_Text, a == 0 ? ImVec4(1.0f, 0.55f, 0.55f, 1.0f)
+                                         : a == 1 ? ImVec4(0.55f, 1.0f, 0.55f, 1.0f)
+                                                  : ImVec4(0.6f, 0.7f, 1.0f, 1.0f));
+        char fmt[16];
+        snprintf(fmt, sizeof(fmt), "%s %%.3f", axisNames[a]);
+        ImGui::InputDouble(label, &meshPlace_.posBuf[a], 0, 0, fmt);
+        ImGui::PopStyleColor();
+        // Apply once editing finishes, not per keystroke: each apply replays
+        // the whole model.
+        if (ImGui::IsItemDeactivatedAfterEdit()) posEdited = true;
+    }
+    if (posEdited) {
+        for (int a = 0; a < 3; a++) data.transform.t[a] = meshPlace_.posBuf[a];
+        setMeshImportData(data);
+    }
+    if (ImGui::Button("Drop to ground (Z = 0)", {-1, 0})) {
+        data.transform.t[2] -= lo[2];
+        setMeshImportData(data);
+    }
+    if (ImGui::Button("Centre on origin (X, Y)", {-1, 0})) {
+        data.transform.t[0] -= pivot[0];
+        data.transform.t[1] -= pivot[1];
+        setMeshImportData(data);
+    }
+    if (ImGui::Button("Reset placement", {-1, 0})) {
+        data.transform = MeshTransform{};
+        setMeshImportData(data);
+    }
+
+    ImGui::Separator();
+    if (ImGui::Button("Done", {-1, 0})) {
+        ImGui::End();
+        finishMeshPlace(true);
+        return;
+    }
+    if (ImGui::Button("Cancel", {-1, 0})) open = false;
+    ImGui::End();
+    if (!open) finishMeshPlace(false);
 }
 
 void App::updateMeshHover(float vpW, float vpH) {
@@ -629,6 +811,8 @@ void App::drawTimeline(float panelW) {
             } else if (feat.type == FeatureType::Loft && !feat.suppressed && !rolledBack) {
                 editLoftFeature(feat.id);
                 selectedFeatureID_ = NullFeatureID;
+            } else if (feat.type == FeatureType::MeshImport && !feat.suppressed && !rolledBack) {
+                editMeshImportFeature(feat.id);
             }
         }
 
@@ -663,6 +847,10 @@ void App::drawTimeline(float panelW) {
                 ImGui::CloseCurrentPopup();
             }
             ImGui::Separator();
+
+            if (feat.type == FeatureType::MeshImport && !feat.suppressed && !rolledBack) {
+                if (ImGui::MenuItem("Rotate / Move...")) editMeshImportFeature(feat.id);
+            }
 
             if (feat.suppressed) {
                 if (ImGui::MenuItem("Unsuppress")) {

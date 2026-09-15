@@ -17,6 +17,7 @@ enum class UndoActionType : uint8_t {
     ModifyRevolve,
     ModifyLoft,
     ModifyBoolean,
+    ModifyMeshImport,
 };
 
 struct UndoCommand {
@@ -56,6 +57,10 @@ struct UndoCommand {
     // ModifyBoolean
     BooleanFeatureData oldBoolean;
     BooleanFeatureData newBoolean;
+
+    // ModifyMeshImport (unit, placement)
+    MeshImportFeatureData oldMeshImport;
+    MeshImportFeatureData newMeshImport;
 };
 
 class UndoStack {

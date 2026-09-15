@@ -728,6 +728,7 @@ void replayFeatures(FeatureHistory& history,
                 mutableFeat.errorMsg = err;
                 continue;
             }
+            applyMeshTransform(body.vertices, md.transform);
             body.sourceFeature = feat.id;
             Scene3D::uploadMesh(body);
             scene.addMeshBody(std::move(body));

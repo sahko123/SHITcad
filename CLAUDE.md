@@ -91,6 +91,7 @@ Global undo stack with typed commands: `AddFeature`, `DeleteFeature`, `SuppressF
 ### Mesh imports (`MeshImport.h/cpp`)
 - STL import is a `FeatureType::MeshImport` feature that stores the **file path and its unit**, not the triangles. Replay re-reads the file (cached by path + size + mtime), so a re-exported file is picked up automatically and a missing one is an error on that feature.
 - STL has no units, so the import dialog makes the user choose one while showing the resulting size. Coordinates are scaled to mm on load.
+- Placement (`MeshTransform`: row-major rotation matrix + translation in mm, `p' = R p + t`) is applied after unit scaling on every replay. The Place panel (opens after import; timeline double-click or right-click "Rotate / Move...") rotates about the mesh's bounding-box centre via `rotateAbout`, applies edits live, and records one `ModifyMeshImport` undo step on Done. Quarter turns from `axisRotation` are exact. An identity transform is not written to the project file.
 - The body it creates is **mesh-only**: `Body3D::shape` is null, `isMeshOnly()` is true, and `sourceFeature` holds the MeshImport's `FeatureID`. `pickFace` cannot see it; use `pickMesh` (`FacePicker.h`).
 - Projects containing a MeshImport are saved as `version: 2`; projects without one stay `version: 1`.
 

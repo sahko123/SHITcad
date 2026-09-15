@@ -525,6 +525,12 @@ static json meshImportFeatureDataToJson(const MeshImportFeatureData& md) {
     json j;
     j["sourcePath"] = md.sourcePath;
     j["unit"] = md.unit;
+    if (!md.transform.isIdentity()) {
+        j["transform"] = {
+            {"rotation", std::vector<double>(md.transform.r, md.transform.r + 9)},
+            {"translationMm", std::vector<double>(md.transform.t, md.transform.t + 3)},
+        };
+    }
     return j;
 }
 
@@ -534,6 +540,16 @@ static MeshImportFeatureData meshImportFeatureDataFromJson(const json& j) {
     // No default: guessing the unit of a mesh is exactly the mistake this
     // field exists to prevent. A file without it is invalid.
     md.unit = j.at("unit").get<std::string>();
+    // Optional: imports saved before placement existed load as identity.
+    if (j.contains("transform")) {
+        const auto& xj = j.at("transform");
+        auto rot = xj.at("rotation").get<std::vector<double>>();
+        auto tr = xj.at("translationMm").get<std::vector<double>>();
+        if (rot.size() != 9 || tr.size() != 3)
+            throw json::other_error::create(501, "MeshImport transform must have 9 rotation and 3 translation values", &xj);
+        for (int i = 0; i < 9; i++) md.transform.r[i] = rot[i];
+        for (int i = 0; i < 3; i++) md.transform.t[i] = tr[i];
+    }
     return md;
 }
 

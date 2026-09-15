@@ -152,6 +152,19 @@ private:
     };
     MeshImportDialogState meshImportDialog_;
 
+    // Placement panel for an imported mesh (rotate / move it into place).
+    // Edits apply live; Done records one undo step, Cancel restores.
+    struct MeshPlaceState {
+        FeatureID featureID = NullFeatureID;
+        MeshImportFeatureData original;
+        double posBuf[3] = {0, 0, 0};
+        float angleDeg = 45.0f;
+        int angleAxis = 2; // 0 X, 1 Y, 2 Z
+        void reset() { *this = {}; }
+        bool active() const { return featureID != NullFeatureID; }
+    };
+    MeshPlaceState meshPlace_;
+
     // Hover pick on imported meshes (navigate mode), shown as a readout
     MeshPickResult meshHover_;
     float meshHoverMouse_[2] = {-1, -1};
@@ -258,6 +271,10 @@ private:
     void importModelDialog();
     void beginMeshImport(const std::string& path);
     void drawMeshImportDialog();
+    void editMeshImportFeature(FeatureID id);
+    void drawMeshPlacePanel();
+    void setMeshImportData(const MeshImportFeatureData& data); // live edit + replay
+    void finishMeshPlace(bool keep);
     void updateMeshHover(float vpW, float vpH);
     void drawMeshHoverReadout();
     void applyGeometricConstraint(Sketch& sketch, ConstraintType type);

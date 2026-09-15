@@ -216,6 +216,72 @@ static void testPick(const fs::path& box) {
     CHECK(!r.hit, "hidden body was picked");
 }
 
+static void testPlacement(const fs::path& box) {
+    std::printf("placement\n");
+    MeshFileInfo info;
+    std::string err;
+    CHECK(probeMeshFile(box.string(), info, err), "%s", err.c_str());
+
+    // Quarter turns are exact: no 6e-17 residue anywhere in the matrix.
+    double q[9];
+    axisRotation(0, 90.0, q);
+    const double rx90[9] = {1, 0, 0, 0, 0, -1, 0, 1, 0};
+    bool exact = true;
+    for (int i = 0; i < 9; i++) exact = exact && q[i] == rx90[i];
+    CHECK(exact, "Rx(90) not exact: %g %g %g / %g %g %g / %g %g %g", q[0], q[1], q[2], q[3], q[4], q[5], q[6], q[7], q[8]);
+    axisRotation(2, -270.0, q);
+    const double rz90[9] = {0, -1, 0, 1, 0, 0, 0, 0, 1};
+    exact = true;
+    for (int i = 0; i < 9; i++) exact = exact && q[i] == rz90[i];
+    CHECK(exact, "Rz(-270) should equal Rz(90) exactly");
+
+    // Box 600 x 600 x 1300 mm standing on z = 0. Lay it on its side about its
+    // centre: the 1300 dimension moves to Y and the centre does not move.
+    MeshTransform xf;
+    double lo[3], hi[3];
+    placedBounds(info, 1000.0f, xf, lo, hi);
+    const double c0[3] = {(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, (lo[2] + hi[2]) / 2};
+    axisRotation(0, 90.0, q);
+    rotateAbout(xf, q, c0);
+    placedBounds(info, 1000.0f, xf, lo, hi);
+    CHECK(near(hi[1] - lo[1], 1300.0, 1e-3) && near(hi[2] - lo[2], 600.0, 1e-3),
+          "after Rx90 size Y=%g Z=%g", hi[1] - lo[1], hi[2] - lo[2]);
+    CHECK(near((lo[2] + hi[2]) / 2, c0[2], 1e-3) && near((lo[1] + hi[1]) / 2, c0[1], 1e-3),
+          "rotation moved the centre to (%g, %g)", (lo[1] + hi[1]) / 2, (lo[2] + hi[2]) / 2);
+
+    // Four quarter turns about the same axis return to identity exactly.
+    MeshTransform round;
+    for (int i = 0; i < 4; i++) rotateAbout(round, rx90, c0);
+    CHECK(round.isIdentity(), "4 x Rx90 is not identity: t=(%g, %g, %g)", round.t[0], round.t[1], round.t[2]);
+
+    // Order matters and is preserved: X then Z differs from Z then X.
+    MeshTransform xz, zx;
+    const double origin[3] = {0, 0, 0};
+    rotateAbout(xz, rx90, origin); rotateAbout(xz, rz90, origin);
+    rotateAbout(zx, rz90, origin); rotateAbout(zx, rx90, origin);
+    bool differ = false;
+    for (int i = 0; i < 9; i++) differ = differ || xz.r[i] != zx.r[i];
+    CHECK(differ, "rotation order was lost");
+
+    // Drop to ground puts the lowest point at z = 0.
+    xf.t[2] -= lo[2];
+    placedBounds(info, 1000.0f, xf, lo, hi);
+    CHECK(near(lo[2], 0.0, 1e-6), "bottom after drop = %g", lo[2]);
+
+    // Vertices and normals: the top face (+z normal) now faces -y.
+    std::vector<MeshVertex> v;
+    CHECK(loadMeshFile(box.string(), "m", v, info, err), "%s", err.c_str());
+    applyMeshTransform(v, xf);
+    bool sawMinusY = false;
+    float vmin = 1e30f;
+    for (const auto& p : v) {
+        if (near(p.ny, -1.0, 1e-6) && near(p.nz, 0.0, 1e-6)) sawMinusY = true;
+        vmin = std::min(vmin, p.pz);
+    }
+    CHECK(sawMinusY, "top-face normal was not rotated to -y");
+    CHECK(near(vmin, 0.0, 1e-3), "vertex min z = %g", vmin);
+}
+
 static void testSaveLoad(const fs::path& dir, const fs::path& box) {
     std::printf("save / load\n");
     auto planes = referencePlanes();
@@ -253,6 +319,48 @@ static void testSaveLoad(const fs::path& dir, const fs::path& box) {
         CHECK(lmd.sourcePath == md.sourcePath, "path=%s", lmd.sourcePath.c_str());
         CHECK(lmd.unit == "m", "unit=%s", lmd.unit.c_str());
         CHECK(f->name == "vessel_wall", "name=%s", f->name.c_str());
+    }
+
+    // Imports saved before placement existed have no "transform": identity.
+    CHECK(f && std::get<MeshImportFeatureData>(f->data).transform.isIdentity(), "untransformed import not identity");
+    {
+        std::ifstream in(p2);
+        auto doc = nlohmann::json::parse(in);
+        CHECK(!doc["featureHistory"]["features"][0]["data"].contains("transform"),
+              "identity transform should not be written");
+    }
+
+    // Placement round-trips bit-exactly.
+    FeatureHistory hx;
+    MeshImportFeatureData mdx = md;
+    const double rx90[9] = {1, 0, 0, 0, 0, -1, 0, 1, 0};
+    for (int i = 0; i < 9; i++) mdx.transform.r[i] = rx90[i];
+    mdx.transform.t[0] = 12.5; mdx.transform.t[1] = -300.0; mdx.transform.t[2] = 0.1;
+    FeatureID fx = hx.addMeshImportFeature(mdx, "placed");
+    const fs::path px = dir / "placed.shitcad";
+    CHECK(saveProject(px.string(), hx, planes), "%s", lastLoadError().c_str());
+    FeatureHistory lx;
+    std::vector<SketchPlane> lxPlanes;
+    CHECK(loadProject(px.string(), lx, lxPlanes), "%s", lastLoadError().c_str());
+    const Feature* fxl = lx.findFeature(fx);
+    if (fxl) {
+        const auto& t = std::get<MeshImportFeatureData>(fxl->data).transform;
+        bool same = true;
+        for (int i = 0; i < 9; i++) same = same && t.r[i] == rx90[i];
+        same = same && t.t[0] == 12.5 && t.t[1] == -300.0 && t.t[2] == 0.1;
+        CHECK(same, "placement changed across save/load");
+    }
+
+    // A malformed transform is rejected, not half-applied.
+    {
+        std::ifstream in(px);
+        auto doc = nlohmann::json::parse(in);
+        doc["featureHistory"]["features"][0]["data"]["transform"]["rotation"] = {1, 0, 0};
+        const fs::path pb = dir / "badxf.shitcad";
+        std::ofstream(pb) << doc.dump(2);
+        FeatureHistory bad;
+        std::vector<SketchPlane> badPlanes;
+        CHECK(!loadProject(pb.string(), bad, badPlanes), "3-element rotation was accepted");
     }
 
     // A unit-less import entry is rejected rather than defaulted.
@@ -303,6 +411,28 @@ static void testReplay(const fs::path& dir, const fs::path& box) {
     if (scene.bodyCount() >= 1) {
         CHECK(scene.getBody(0).sourceFeature == meshID, "mesh body not tagged with its feature");
         CHECK(scene.getBody(0).vertexCount == 36, "vertexCount=%d", scene.getBody(0).vertexCount);
+    }
+
+    // Placement is applied on replay: stand the box on its side and lift it.
+    {
+        FeatureHistory hp;
+        MeshImportFeatureData mp = md;
+        axisRotation(1, 90.0, mp.transform.r); // about origin: x' = z, z' = -x
+        mp.transform.t[2] = 1000.0;
+        hp.addMeshImportFeature(mp, "placed");
+        Scene3D sp;
+        auto planesP = referencePlanes();
+        replayFeatures(hp, planesP, sp);
+        CHECK(sp.bodyCount() == 1, "bodies=%zu", sp.bodyCount());
+        if (sp.bodyCount() == 1) {
+            float lo[3] = {1e30f, 1e30f, 1e30f}, hi[3] = {-1e30f, -1e30f, -1e30f};
+            for (const auto& v : sp.getBody(0).vertices) {
+                const float p[3] = {v.px, v.py, v.pz};
+                for (int k = 0; k < 3; k++) { lo[k] = std::min(lo[k], p[k]); hi[k] = std::max(hi[k], p[k]); }
+            }
+            CHECK(near(lo[0], 0.0, 1e-2) && near(hi[0], 1300.0, 1e-2), "replayed x range [%g, %g]", lo[0], hi[0]);
+            CHECK(near(lo[2], 700.0, 1e-2) && near(hi[2], 1300.0, 1e-2), "replayed z range [%g, %g]", lo[2], hi[2]);
+        }
     }
 
     // Replaying again (what every edit does) must not duplicate or drop it.
@@ -375,6 +505,7 @@ int main() {
     testLoadAndUnits(box);
     testCacheInvalidation(dir);
     testPick(box);
+    testPlacement(box);
     testSaveLoad(dir, box);
 
     if (!glfwInit()) {

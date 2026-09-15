@@ -3,6 +3,7 @@
 #include "SketchPlane.h"
 #include "ProfileDetector.h"
 #include "ExtrudeTool.h"
+#include "MeshImport.h"
 #include <vector>
 #include <string>
 #include <variant>
@@ -98,6 +99,7 @@ struct BooleanFeatureData {
 struct MeshImportFeatureData {
     std::string sourcePath;   // absolute path to the STL
     std::string unit = "mm";  // unit of the file's coordinates (a kUnits name)
+    MeshTransform transform;  // placement in the model, applied after unit scaling
 };
 
 struct Feature {
@@ -125,6 +127,7 @@ public:
     void updateRevolveData(FeatureID id, const RevolveFeatureData& data);
     void updateLoftData(FeatureID id, const LoftFeatureData& data);
     void updateBooleanData(FeatureID id, const BooleanFeatureData& data);
+    void updateMeshImportData(FeatureID id, const MeshImportFeatureData& data);
     FeatureID findSketchFeatureForPlane(int planeIndex) const;
 
     std::vector<FeatureID> getDependents(FeatureID id) const;

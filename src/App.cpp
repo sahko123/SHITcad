@@ -531,6 +531,7 @@ void App::renderFrame() {
     }
 
     drawMeshImportDialog();
+    drawMeshPlacePanel();
     drawMeshHoverReadout();
 
     // Timeline
