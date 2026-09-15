@@ -30,7 +30,9 @@ std::string openNativeStlOpenDialog();
 std::string openNativeImportDialog(); // combined import dialog (STEP + IGES + STL)
 
 bool exportSTL(const std::string& filepath, const Scene3D& scene);
-bool importSTL(const std::string& filepath, Scene3D& scene);
+// STL import is a MeshImport feature (see FeatureHistory.h / App::beginMeshImport),
+// not a direct scene insertion: a body added straight to the scene is wiped by
+// the next replay and never saved.
 bool exportSTEP(const std::string& filepath, const Scene3D& scene);
 bool importSTEP(const std::string& filepath, Scene3D& scene);
 bool exportIGES(const std::string& filepath, const Scene3D& scene);

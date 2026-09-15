@@ -20,6 +20,7 @@ enum class FeatureType : uint8_t {
     Revolve,
     Loft,
     Boolean,
+    MeshImport,
 };
 
 // Signature for matching profiles across sketch edits
@@ -90,12 +91,22 @@ struct BooleanFeatureData {
     int toolBodyIndex = -1;
 };
 
+// A triangle mesh referenced from disk (STL) rather than copied into the
+// project. Replay re-reads the file, so an updated export (e.g. from Onshape)
+// is picked up without re-importing, and the file is never re-triangulated.
+// The body it produces is mesh-only: Body3D::shape is null.
+struct MeshImportFeatureData {
+    std::string sourcePath;   // absolute path to the STL
+    std::string unit = "mm";  // unit of the file's coordinates (a kUnits name)
+};
+
 struct Feature {
     FeatureID id = NullFeatureID;
     FeatureType type = FeatureType::Sketch;
     std::string name;
     bool suppressed = false;
-    std::variant<SketchFeatureData, ExtrudeFeatureData, RevolveFeatureData, LoftFeatureData, BooleanFeatureData> data;
+    std::variant<SketchFeatureData, ExtrudeFeatureData, RevolveFeatureData, LoftFeatureData,
+                 BooleanFeatureData, MeshImportFeatureData> data;
     bool hasError = false;
     std::string errorMsg;
 };
@@ -107,6 +118,7 @@ public:
     FeatureID addRevolveFeature(const RevolveFeatureData& params);
     FeatureID addLoftFeature(const LoftFeatureData& params);
     FeatureID addBooleanFeature(const BooleanFeatureData& params);
+    FeatureID addMeshImportFeature(const MeshImportFeatureData& params, const std::string& name);
 
     void updateSketchSnapshot(FeatureID id, const Sketch& snapshot);
     void updateExtrudeData(FeatureID id, const ExtrudeFeatureData& data);

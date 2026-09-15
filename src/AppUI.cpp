@@ -5,6 +5,7 @@
 #include "FacePicker.h"
 #include "ExtrudeTool.h"
 #include "FeatureReplay.h"
+#include "UnitUtils.h"
 #include <BRep_Builder.hxx>
 #include <TopoDS_Compound.hxx>
 #include <BRepAlgoAPI_Cut.hxx>
@@ -257,9 +258,174 @@ void App::exportStlDialog() {
 void App::importStlDialog() {
     std::string path = openNativeStlOpenDialog();
     if (path.empty()) return;
-    if (!importSTL(path, scene_)) {
-        fprintf(stderr, "STL import failed: %s\n", lastLoadError().c_str());
+    beginMeshImport(path);
+}
+
+void App::beginMeshImport(const std::string& path) {
+    auto& d = meshImportDialog_;
+    d.reset();
+    d.path = path;
+
+    // Default the feature name to the file stem: it becomes the surface name
+    // when the model is handed to a simulation.
+    auto slash = path.find_last_of("/\\");
+    std::string base = (slash == std::string::npos) ? path : path.substr(slash + 1);
+    auto dot = base.rfind('.');
+    std::string stem = (dot == std::string::npos) ? base : base.substr(0, dot);
+    snprintf(d.nameBuf, sizeof(d.nameBuf), "%s", stem.c_str());
+
+    if (!probeMeshFile(path, d.info, d.error)) {
+        fprintf(stderr, "Mesh import failed: %s\n", d.error.c_str());
     }
+    d.open = true;
+}
+
+void App::drawMeshImportDialog() {
+    auto& d = meshImportDialog_;
+    if (!d.open) return;
+
+    ImGui::SetNextWindowSize({380, 0}, ImGuiCond_Always);
+    ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Appearing, {0.5f, 0.5f});
+    bool keepOpen = true;
+    ImGui::Begin("Import Mesh", &keepOpen,
+        ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_AlwaysAutoResize);
+
+    ImGui::TextWrapped("%s", d.path.c_str());
+    ImGui::Separator();
+
+    if (!d.error.empty()) {
+        ImGui::TextColored({1.0f, 0.4f, 0.4f, 1.0f}, "%s", d.error.c_str());
+        if (ImGui::Button("Close", {-1, 0})) keepOpen = false;
+        ImGui::End();
+        if (!keepOpen) d.reset();
+        return;
+    }
+
+    ImGui::Text("%zu triangles", d.info.triangleCount);
+
+    ImGui::Text("Name:");
+    ImGui::SetNextItemWidth(-1);
+    ImGui::InputText("##meshname", d.nameBuf, sizeof(d.nameBuf));
+
+    // STL stores bare numbers. The unit is whatever the exporting program was
+    // set to (Onshape asks at export time), so it has to be stated here.
+    ImGui::Text("Unit of the numbers in this file:");
+    ImGui::SetNextItemWidth(-1);
+    ImGui::Combo("##meshunit", &d.unitIndex,
+        [](void*, int i) { return kUnits[i].name; }, nullptr, kUnitCount);
+
+    const float toMm = kUnits[d.unitIndex].toMm;
+    float ext[3];
+    float maxExt = 0.0f;
+    for (int k = 0; k < 3; k++) {
+        ext[k] = (d.info.rawMax[k] - d.info.rawMin[k]) * toMm;
+        maxExt = std::max(maxExt, ext[k]);
+    }
+    if (maxExt >= 1000.0f)
+        ImGui::Text("Size: %.4g x %.4g x %.4g m", ext[0] / 1000.0f, ext[1] / 1000.0f, ext[2] / 1000.0f);
+    else
+        ImGui::Text("Size: %.4g x %.4g x %.4g mm", ext[0], ext[1], ext[2]);
+
+    // Same bounds cip-sim refuses to trace outside of: unit mix-ups are factors
+    // of 1000 or 25.4, so a size check catches them where nothing else can.
+    if (maxExt < 20.0f || maxExt > 100000.0f) {
+        ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + 360.0f);
+        ImGui::TextColored({1.0f, 0.85f, 0.2f, 1.0f},
+            "That is %.4g mm across. If the real part is not that size, the unit "
+            "above is wrong.", maxExt);
+        ImGui::PopTextWrapPos();
+    }
+
+    ImGui::Separator();
+    if (ImGui::Button("Import", {-1, 0})) {
+        MeshImportFeatureData md;
+        md.sourcePath = d.path;
+        md.unit = kUnits[d.unitIndex].name;
+        std::string name = d.nameBuf[0] ? d.nameBuf : "Mesh";
+
+        FeatureID fid = featureHistory_.addMeshImportFeature(md, name);
+        UndoCommand cmd;
+        cmd.type = UndoActionType::AddFeature;
+        cmd.addedFeature = *featureHistory_.findFeature(fid);
+        globalUndo_.push(std::move(cmd));
+        markDirty();
+        replayAllFeatures();
+        keepOpen = false;
+    }
+    if (ImGui::Button("Cancel", {-1, 0})) keepOpen = false;
+
+    ImGui::End();
+    if (!keepOpen) d.reset();
+}
+
+void App::updateMeshHover(float vpW, float vpH) {
+    ImGuiIO& io = ImGui::GetIO();
+
+    bool anyMesh = false;
+    for (int i = 0; i < (int)scene_.bodyCount(); i++) {
+        const auto& b = scene_.getBody(i);
+        if (b.visible && b.isMeshOnly()) { anyMesh = true; break; }
+    }
+    if (!anyMesh || io.WantCaptureMouse || io.MousePos.y < 30.0f) {
+        meshHover_ = {};
+        return;
+    }
+
+    // Brute-force pick, so only redo it when the view or cursor could have
+    // changed: large exports are hundreds of thousands of triangles.
+    bool moved = io.MousePos.x != meshHoverMouse_[0] || io.MousePos.y != meshHoverMouse_[1];
+    bool viewChanging = io.MouseWheel != 0.0f || io.MouseDown[0] || io.MouseDown[1] || io.MouseDown[2];
+    if (!moved && !viewChanging && meshHover_.bodyIndex < (int)scene_.bodyCount()) return;
+    meshHoverMouse_[0] = io.MousePos.x;
+    meshHoverMouse_[1] = io.MousePos.y;
+
+    int w, h;
+    glfwGetFramebufferSize(window_, &w, &h);
+    float view[16], proj[16];
+    getViewProj(w, h, view, proj);
+    float rayOrig[3], rayDir[3];
+    screenToRay(io.MousePos.x, io.MousePos.y, 0, 0, vpW, vpH, view, proj, rayOrig, rayDir);
+    meshHover_ = pickMesh(scene_, rayOrig, rayDir);
+}
+
+void App::drawMeshHoverReadout() {
+    if (!meshHover_.hit || meshHover_.bodyIndex >= (int)scene_.bodyCount()) return;
+
+    ImGuiIO& io = ImGui::GetIO();
+    const Body3D& body = scene_.getBody(meshHover_.bodyIndex);
+    const Feature* feat = featureHistory_.findFeature(body.sourceFeature);
+
+    int w, h;
+    glfwGetFramebufferSize(window_, &w, &h);
+    float view[16], proj[16];
+    getViewProj(w, h, view, proj);
+
+    // Normal as a short line from the hit point, so the file's winding - which
+    // decides which way a nozzle placed here would point by default - is visible.
+    ImDrawList* dl = ImGui::GetForegroundDrawList();
+    const float* p = meshHover_.hitWorld;
+    const float len = std::max(meshHover_.t * 0.08f, 1.0f);
+    const float tip[3] = {p[0] + meshHover_.normal[0] * len,
+                          p[1] + meshHover_.normal[1] * len,
+                          p[2] + meshHover_.normal[2] * len};
+    float sx0, sy0, sx1, sy1;
+    if (worldToScreen(p, view, proj, io.DisplaySize.x, io.DisplaySize.y, sx0, sy0) &&
+        worldToScreen(tip, view, proj, io.DisplaySize.x, io.DisplaySize.y, sx1, sy1)) {
+        ImU32 col = meshHover_.frontFacing ? IM_COL32(80, 220, 120, 255) : IM_COL32(230, 120, 60, 255);
+        dl->AddLine({sx0, sy0}, {sx1, sy1}, col, 2.0f);
+        dl->AddCircleFilled({sx0, sy0}, 3.0f, col);
+    }
+
+    char text[256];
+    snprintf(text, sizeof(text), "%s\n(%.2f, %.2f, %.2f) mm\nnormal (%.3f, %.3f, %.3f)  %s",
+             feat ? feat->name.c_str() : "mesh",
+             p[0], p[1], p[2],
+             meshHover_.normal[0], meshHover_.normal[1], meshHover_.normal[2],
+             meshHover_.frontFacing ? "front" : "back");
+    ImVec2 pos(io.MousePos.x + 16.0f, io.MousePos.y + 16.0f);
+    ImVec2 ts = ImGui::CalcTextSize(text);
+    dl->AddRectFilled({pos.x - 4, pos.y - 2}, {pos.x + ts.x + 4, pos.y + ts.y + 2}, IM_COL32(0, 0, 0, 170), 4.0f);
+    dl->AddText(pos, IM_COL32(220, 220, 220, 255), text);
 }
 
 void App::exportStepDialog() {
@@ -332,7 +498,8 @@ void App::importModelDialog() {
     } else if (ext == ".igs" || ext == ".iges") {
         ok = importIGES(path, scene_);
     } else if (ext == ".stl") {
-        ok = importSTL(path, scene_);
+        beginMeshImport(path); // unit is confirmed in the dialog
+        return;
     } else {
         fprintf(stderr, "Unsupported import format: %s\n", ext.c_str());
         return;
@@ -423,6 +590,8 @@ void App::drawTimeline(float panelW) {
                 col = ImVec4(0.9f, 0.3f, 0.3f, 1.0f);
             else
                 col = ImVec4(0.2f, 0.7f, 0.9f, 1.0f);
+        } else if (feat.type == FeatureType::MeshImport) {
+            col = ImVec4(0.45f, 0.55f, 0.55f, 1.0f);
         }
 
         ImGui::PushStyleColor(ImGuiCol_Button, col);
@@ -790,8 +959,13 @@ void App::drawObjectTree() {
             ImGui::Checkbox("##vis", &scene_.getBodyMut(i).visible);
             ImGui::SameLine();
 
-            char label[32];
-            snprintf(label, sizeof(label), "Body %d", i + 1);
+            char label[160];
+            const Body3D& body = scene_.getBody(i);
+            const Feature* src = body.isMeshOnly() ? featureHistory_.findFeature(body.sourceFeature) : nullptr;
+            if (src)
+                snprintf(label, sizeof(label), "%s (mesh)", src->name.c_str());
+            else
+                snprintf(label, sizeof(label), "Body %d", i + 1);
             ImGui::TextUnformatted(label);
             ImGui::PopID();
         }

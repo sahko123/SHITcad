@@ -17,6 +17,8 @@
 #include "UndoStack.h"
 #include "Serialization.h"
 #include "FrameProfiler.h"
+#include "FacePicker.h"
+#include "MeshImport.h"
 
 struct GLFWwindow;
 
@@ -137,6 +139,23 @@ private:
     float cylPlaneHitWorld_[3] = {};
     int cylPlaneBodyIndex_ = -1;
 
+    // Mesh import dialog: STL has no units, so the user confirms one while
+    // seeing the size it implies before the feature is created.
+    struct MeshImportDialogState {
+        bool open = false;
+        std::string path;
+        char nameBuf[128] = {};
+        int unitIndex = 1; // index into kUnits; 1 = mm
+        MeshFileInfo info;
+        std::string error;
+        void reset() { *this = {}; }
+    };
+    MeshImportDialogState meshImportDialog_;
+
+    // Hover pick on imported meshes (navigate mode), shown as a readout
+    MeshPickResult meshHover_;
+    float meshHoverMouse_[2] = {-1, -1};
+
     // Preferences
     Preferences prefs_;
     bool prefsOpen_ = false;
@@ -237,6 +256,10 @@ private:
     void exportObjDialog();
     void exportDxfDialog();
     void importModelDialog();
+    void beginMeshImport(const std::string& path);
+    void drawMeshImportDialog();
+    void updateMeshHover(float vpW, float vpH);
+    void drawMeshHoverReadout();
     void applyGeometricConstraint(Sketch& sketch, ConstraintType type);
     void updateWindowTitle();
     void markDirty();

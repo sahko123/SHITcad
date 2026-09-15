@@ -460,6 +460,10 @@ void App::renderFrame() {
     } else {
         handleSketchInput(vpW, vpH);
     }
+    if (mode_ == InteractionMode::Navigate && tool_.type == ToolType::None)
+        updateMeshHover(vpW, vpH);
+    else
+        meshHover_ = {};
     profiler_.end();
 
     // Extrude panel
@@ -519,6 +523,9 @@ void App::renderFrame() {
 
         ImGui::End();
     }
+
+    drawMeshImportDialog();
+    drawMeshHoverReadout();
 
     // Timeline
     float timelineH = 0.0f;

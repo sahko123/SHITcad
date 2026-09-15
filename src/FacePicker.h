@@ -15,6 +15,22 @@ struct FacePickResult {
 
 FacePickResult pickFace(const Scene3D& scene, const float rayOrigin[3], const float rayDir[3]);
 
+// Picking on mesh-only bodies (imported STL), which pickFace cannot see because
+// they have no TopoDS faces.
+struct MeshPickResult {
+    bool hit = false;
+    int bodyIndex = -1;
+    int triangleIndex = -1;       // index into the body's triangles (vertices / 3)
+    float hitWorld[3] = {0, 0, 0}; // mm
+    float normal[3] = {0, 0, 1};  // geometric face normal, oriented by the file's winding
+    bool frontFacing = false;     // true if the ray hit the side the normal points to
+    float t = 1e30f;
+};
+
+// Nearest triangle hit over all visible mesh-only bodies. Brute force: fine for
+// clicks and hover on exports of a few hundred thousand triangles.
+MeshPickResult pickMesh(const Scene3D& scene, const float rayOrigin[3], const float rayDir[3]);
+
 // Extract a sketch plane from a face. For non-planar faces, pass the hit point
 // to compute a tangent plane at that location.
 bool extractPlaneFromFace(const TopoDS_Face& face, SketchPlane& out,

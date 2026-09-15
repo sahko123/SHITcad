@@ -3,6 +3,7 @@
 #include "ExtrudeTool.h"
 #include "ProfileDetector.h"
 #include "FacePicker.h"
+#include "MeshImport.h"
 #include <BRepAlgoAPI_Cut.hxx>
 #include <BRepAlgoAPI_Fuse.hxx>
 #include <BRepCheck_Analyzer.hxx>
@@ -455,6 +456,7 @@ void replayFeatures(FeatureHistory& history,
                 bool anyCut = false;
                 for (int i = (int)scene.bodyCount() - 1; i >= 0; i--) {
                     const auto& body = scene.getBody(i);
+                    if (body.isMeshOnly()) continue; // no B-rep to cut
                     BRepAlgoAPI_Cut cutter(body.shape, toolShape);
                     if (!cutter.IsDone() || cutter.HasErrors()) {
                         logBooleanError(feat.name.c_str(), "Extrude Cut", body.shape, toolShape, i, -1, cutter);
@@ -488,6 +490,7 @@ void replayFeatures(FeatureHistory& history,
 
                 for (int i = newIdx - 1; i >= 0; i--) {
                     const auto& existing = scene.getBody(i);
+                    if (existing.isMeshOnly()) continue; // never fuse into a reference mesh
                     BRepAlgoAPI_Fuse fuser(existing.shape, scene.getBody(newIdx).shape);
                     if (!fuser.IsDone() || fuser.HasErrors()) continue;
 
@@ -555,6 +558,7 @@ void replayFeatures(FeatureHistory& history,
                 bool anyCut = false;
                 for (int i = (int)scene.bodyCount() - 1; i >= 0; i--) {
                     const auto& body = scene.getBody(i);
+                    if (body.isMeshOnly()) continue; // no B-rep to cut
                     BRepAlgoAPI_Cut cutter(body.shape, toolShape);
                     if (!cutter.IsDone() || cutter.HasErrors()) {
                         logBooleanError(feat.name.c_str(), "Revolve Cut", body.shape, toolShape, i, -1, cutter);
@@ -587,6 +591,7 @@ void replayFeatures(FeatureHistory& history,
 
                 for (int i = newIdx - 1; i >= 0; i--) {
                     const auto& existing = scene.getBody(i);
+                    if (existing.isMeshOnly()) continue; // never fuse into a reference mesh
                     BRepAlgoAPI_Fuse fuser(existing.shape, scene.getBody(newIdx).shape);
                     if (!fuser.IsDone() || fuser.HasErrors()) continue;
 
@@ -680,6 +685,7 @@ void replayFeatures(FeatureHistory& history,
             if (ld.operation == ExtrudeOperation::Cut) {
                 for (int i = (int)scene.bodyCount() - 1; i >= 0; i--) {
                     const auto& body = scene.getBody(i);
+                    if (body.isMeshOnly()) continue; // no B-rep to cut
                     BRepAlgoAPI_Cut cutter(body.shape, toolShape);
                     if (!cutter.IsDone() || cutter.HasErrors()) continue;
                     auto solids = enumerateSolids(cutter.Shape());
@@ -698,6 +704,7 @@ void replayFeatures(FeatureHistory& history,
                 int newIdx = (int)scene.bodyCount() - 1;
                 for (int i = newIdx - 1; i >= 0; i--) {
                     const auto& existing = scene.getBody(i);
+                    if (existing.isMeshOnly()) continue; // never fuse into a reference mesh
                     BRepAlgoAPI_Fuse fuser(existing.shape, scene.getBody(newIdx).shape);
                     if (!fuser.IsDone() || fuser.HasErrors()) continue;
                     auto solids = enumerateSolids(fuser.Shape());
@@ -708,6 +715,22 @@ void replayFeatures(FeatureHistory& history,
                     }
                 }
             }
+        } else if (feat.type == FeatureType::MeshImport) {
+            const auto& md = std::get<MeshImportFeatureData>(feat.data);
+
+            Body3D body;
+            MeshFileInfo info;
+            std::string err;
+            if (!loadMeshFile(md.sourcePath, md.unit, body.vertices, info, err)) {
+                // Referenced, not embedded: a moved or deleted file is an error on
+                // this feature, not a silently missing body.
+                mutableFeat.hasError = true;
+                mutableFeat.errorMsg = err;
+                continue;
+            }
+            body.sourceFeature = feat.id;
+            Scene3D::uploadMesh(body);
+            scene.addMeshBody(std::move(body));
         } else if (feat.type == FeatureType::Boolean) {
             const auto& bd = std::get<BooleanFeatureData>(feat.data);
 
@@ -722,6 +745,14 @@ void replayFeatures(FeatureHistory& history,
                 snprintf(msg, sizeof(msg), "Invalid body indices (target=%d, tool=%d, bodies=%d)",
                          targetIdx, toolIdx, (int)scene.bodyCount());
                 mutableFeat.errorMsg = msg;
+                continue;
+            }
+
+            if (scene.getBody(targetIdx).isMeshOnly() || scene.getBody(toolIdx).isMeshOnly()) {
+                // Can happen when an import is inserted earlier in history and
+                // shifts the body indices this feature recorded.
+                mutableFeat.hasError = true;
+                mutableFeat.errorMsg = "Boolean body is an imported mesh (no solid geometry)";
                 continue;
             }
 

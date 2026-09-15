@@ -87,6 +87,7 @@ static const char* featureTypeToStr(FeatureType t) {
         case FeatureType::Revolve: return "Revolve";
         case FeatureType::Loft:    return "Loft";
         case FeatureType::Boolean: return "Boolean";
+        case FeatureType::MeshImport: return "MeshImport";
     }
     return "Sketch";
 }
@@ -96,6 +97,7 @@ static FeatureType featureTypeFromStr(const std::string& s) {
     if (s == "Revolve") return FeatureType::Revolve;
     if (s == "Loft")    return FeatureType::Loft;
     if (s == "Boolean") return FeatureType::Boolean;
+    if (s == "MeshImport") return FeatureType::MeshImport;
     return FeatureType::Sketch;
 }
 
@@ -519,6 +521,22 @@ static BooleanFeatureData booleanFeatureDataFromJson(const json& j) {
     return bd;
 }
 
+static json meshImportFeatureDataToJson(const MeshImportFeatureData& md) {
+    json j;
+    j["sourcePath"] = md.sourcePath;
+    j["unit"] = md.unit;
+    return j;
+}
+
+static MeshImportFeatureData meshImportFeatureDataFromJson(const json& j) {
+    MeshImportFeatureData md;
+    md.sourcePath = j.at("sourcePath").get<std::string>();
+    // No default: guessing the unit of a mesh is exactly the mistake this
+    // field exists to prevent. A file without it is invalid.
+    md.unit = j.at("unit").get<std::string>();
+    return md;
+}
+
 // ─── Feature ────────────────────────────────────────────────────────
 
 static json featureToJson(const Feature& f) {
@@ -538,6 +556,8 @@ static json featureToJson(const Feature& f) {
         j["data"] = loftFeatureDataToJson(std::get<LoftFeatureData>(f.data));
     } else if (f.type == FeatureType::Boolean) {
         j["data"] = booleanFeatureDataToJson(std::get<BooleanFeatureData>(f.data));
+    } else if (f.type == FeatureType::MeshImport) {
+        j["data"] = meshImportFeatureDataToJson(std::get<MeshImportFeatureData>(f.data));
     }
     return j;
 }
@@ -559,6 +579,8 @@ static Feature featureFromJson(const json& j) {
         f.data = loftFeatureDataFromJson(j.at("data"));
     } else if (f.type == FeatureType::Boolean) {
         f.data = booleanFeatureDataFromJson(j.at("data"));
+    } else if (f.type == FeatureType::MeshImport) {
+        f.data = meshImportFeatureDataFromJson(j.at("data"));
     }
     return f;
 }
@@ -642,8 +664,17 @@ static void featureHistoryFromJson(const json& j, FeatureHistory& h) {
 bool saveProject(const std::string& filepath,
                  const FeatureHistory& history,
                  const std::vector<SketchPlane>& planes) {
+    // Version 2 = may contain MeshImport features. Only written when it does,
+    // so projects without imports still open in older builds; a build that
+    // predates imports then refuses a v2 file with a clear message instead of
+    // failing to parse an unknown feature type.
+    bool hasMeshImport = false;
+    for (const auto& f : history.features()) {
+        if (f.type == FeatureType::MeshImport) { hasMeshImport = true; break; }
+    }
+
     json doc;
-    doc["version"] = 1;
+    doc["version"] = hasMeshImport ? 2 : 1;
     doc["app"] = "SHITcad";
     doc["featureHistory"] = featureHistoryToJson(history);
 
@@ -684,7 +715,7 @@ bool loadProject(const std::string& filepath,
 
     try {
         int version = doc.at("version").get<int>();
-        if (version > 1) {
+        if (version > 2) {
             s_lastError = "File was created with a newer version of SHITcad (version " +
                           std::to_string(version) + ")";
             return false;
@@ -779,48 +810,6 @@ bool exportSTL(const std::string& filepath, const Scene3D& scene) {
         s_lastError = "StlAPI_Writer failed to write file";
         return false;
     }
-    return true;
-}
-
-bool importSTL(const std::string& filepath, Scene3D& scene) {
-    Handle(Poly_Triangulation) mesh = RWStl::ReadFile(filepath.c_str());
-    if (mesh.IsNull() || mesh->NbTriangles() == 0) {
-        s_lastError = "Failed to read STL file or file is empty";
-        return false;
-    }
-
-    // Build MeshVertex data directly from the triangulation
-    std::vector<MeshVertex> vertices;
-    vertices.reserve(mesh->NbTriangles() * 3);
-
-    for (int i = 1; i <= mesh->NbTriangles(); i++) {
-        int n1, n2, n3;
-        mesh->Triangle(i).Get(n1, n2, n3);
-
-        gp_Pnt p1 = mesh->Node(n1);
-        gp_Pnt p2 = mesh->Node(n2);
-        gp_Pnt p3 = mesh->Node(n3);
-
-        // Compute face normal
-        float ax = (float)(p2.X() - p1.X()), ay = (float)(p2.Y() - p1.Y()), az = (float)(p2.Z() - p1.Z());
-        float bx = (float)(p3.X() - p1.X()), by = (float)(p3.Y() - p1.Y()), bz = (float)(p3.Z() - p1.Z());
-        float nx = ay * bz - az * by;
-        float ny = az * bx - ax * bz;
-        float nz = ax * by - ay * bx;
-        float len = std::sqrt(nx * nx + ny * ny + nz * nz);
-        if (len > 1e-10f) { nx /= len; ny /= len; nz /= len; }
-
-        vertices.push_back({(float)p1.X(), (float)p1.Y(), (float)p1.Z(), nx, ny, nz});
-        vertices.push_back({(float)p2.X(), (float)p2.Y(), (float)p2.Z(), nx, ny, nz});
-        vertices.push_back({(float)p3.X(), (float)p3.Y(), (float)p3.Z(), nx, ny, nz});
-    }
-
-    // Add as a mesh-only body (no TopoDS_Shape — STL has no topology)
-    Body3D body;
-    body.vertices = std::move(vertices);
-    body.vertexCount = (int)body.vertices.size();
-    Scene3D::uploadMesh(body);
-    scene.addMeshBody(std::move(body));
     return true;
 }
 

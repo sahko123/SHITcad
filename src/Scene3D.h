@@ -2,6 +2,7 @@
 #include "ShaderProgram.h"
 #include <glad/gl.h>
 #include <TopoDS_Shape.hxx>
+#include <cstdint>
 #include <vector>
 
 namespace shitcad {
@@ -16,13 +17,16 @@ struct EdgeVertex {
 };
 
 struct Body3D {
-    TopoDS_Shape shape;
+    TopoDS_Shape shape; // null for mesh-only bodies (imported STL) - check before OCCT ops
     std::vector<MeshVertex> vertices;
     GLuint vao = 0;
     GLuint vbo = 0;
     int vertexCount = 0;
     float colorR = 0.6f, colorG = 0.65f, colorB = 0.7f;
     bool visible = true;
+    uint32_t sourceFeature = 0; // FeatureID of the MeshImport that made a mesh-only body, else 0
+
+    bool isMeshOnly() const { return shape.IsNull(); }
 
     // Wireframe edges
     GLuint edgeVAO = 0;
@@ -42,7 +46,7 @@ struct Body3D {
         : shape(std::move(other.shape)), vertices(std::move(other.vertices)),
           vao(other.vao), vbo(other.vbo), vertexCount(other.vertexCount),
           colorR(other.colorR), colorG(other.colorG), colorB(other.colorB),
-          visible(other.visible),
+          visible(other.visible), sourceFeature(other.sourceFeature),
           edgeVAO(other.edgeVAO), edgeVBO(other.edgeVBO), edgeVertexCount(other.edgeVertexCount) {
         other.vao = 0; other.vbo = 0;
         other.edgeVAO = 0; other.edgeVBO = 0;
@@ -63,6 +67,7 @@ struct Body3D {
             vao = other.vao; vbo = other.vbo; vertexCount = other.vertexCount;
             colorR = other.colorR; colorG = other.colorG; colorB = other.colorB;
             visible = other.visible;
+            sourceFeature = other.sourceFeature;
             edgeVAO = other.edgeVAO; edgeVBO = other.edgeVBO; edgeVertexCount = other.edgeVertexCount;
             // Zero source
             other.vao = 0; other.vbo = 0;

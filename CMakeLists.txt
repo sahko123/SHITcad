@@ -31,6 +31,7 @@ add_executable(SHITcad
     src/SketchPlane.cpp
     src/SketchRenderer.cpp
     src/FacePicker.cpp
+    src/MeshImport.cpp
     src/ExtrudeTool.cpp
     src/Preferences.cpp
     src/Intersect.cpp
@@ -46,4 +47,16 @@ target_link_libraries(SHITcad PRIVATE imgui opengl32 occt_libs nlohmann_json::nl
 
 if(MSVC)
     target_compile_options(SHITcad PRIVATE /W4)
+endif()
+
+# Opt-in tests: cmake -B build -DSHITCAD_BUILD_TESTS=ON
+option(SHITCAD_BUILD_TESTS "Build test executables" OFF)
+if(SHITCAD_BUILD_TESTS)
+    # Everything except the App UI layer and main().
+    get_target_property(_shitcad_sources SHITcad SOURCES)
+    list(FILTER _shitcad_sources EXCLUDE REGEX "src/(main|App[A-Za-z]*)\\.cpp$")
+
+    add_executable(MeshImportTest tests/MeshImportTest.cpp ${_shitcad_sources})
+    target_include_directories(MeshImportTest PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    target_link_libraries(MeshImportTest PRIVATE imgui opengl32 occt_libs nlohmann_json::nlohmann_json dbghelp)
 endif()

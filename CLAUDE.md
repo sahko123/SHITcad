@@ -10,6 +10,9 @@ cmake -B build -S . -DCMAKE_TOOLCHAIN_FILE=[vcpkg-root]/scripts/buildsystems/vcp
 cmake --build build --config Release
 ```
 
+Tests are opt-in (`-DSHITCAD_BUILD_TESTS=ON`), then run `build/Release/MeshImportTest.exe`.
+Run the build from PowerShell or cmd: Git Bash rewrites MSBuild's `/m` switch into a path.
+
 Dependencies are auto-fetched via FetchContent (GLFW 3.4, GLAD, ImGui 1.91.9, nlohmann/json 3.11.3). OpenCASCADE comes from vcpkg.
 
 ## Architecture
@@ -85,10 +88,16 @@ Global undo stack with typed commands: `AddFeature`, `DeleteFeature`, `SuppressF
 ### Profile detection (`ProfileDetector.h/cpp`)
 `detectClosedProfiles()` walks sketch geometry adjacency to find closed regions. Returns `ClosedProfile` with outer boundary + holes. Handles line/arc/circle/ellipse/spline boundaries. Tessellation via `tessellateProfile()`.
 
+### Mesh imports (`MeshImport.h/cpp`)
+- STL import is a `FeatureType::MeshImport` feature that stores the **file path and its unit**, not the triangles. Replay re-reads the file (cached by path + size + mtime), so a re-exported file is picked up automatically and a missing one is an error on that feature.
+- STL has no units, so the import dialog makes the user choose one while showing the resulting size. Coordinates are scaled to mm on load.
+- The body it creates is **mesh-only**: `Body3D::shape` is null, `isMeshOnly()` is true, and `sourceFeature` holds the MeshImport's `FeatureID`. `pickFace` cannot see it; use `pickMesh` (`FacePicker.h`).
+- Projects containing a MeshImport are saved as `version: 2`; projects without one stay `version: 1`.
+
 ### File I/O (`Serialization.h/cpp`)
 - Project format: JSON (nlohmann/json), stores full feature history + plane definitions
 - Export: STL, STEP, IGES, OBJ, DXF (via OCCT)
-- Import: STL, STEP, IGES
+- Import: STL (as a MeshImport feature, above), STEP, IGES
 - All file dialogs use Windows native dialogs
 
 ## Conventions
@@ -157,3 +166,5 @@ Global undo stack with typed commands: `AddFeature`, `DeleteFeature`, `SuppressF
 - `Constraint::value` is always in mm regardless of what unit the user typed
 - The `App` class `.cpp` files all share the same `App::` method scope - a method declared in `App.h` can be defined in any of the `App*.cpp` files
 - When adding new serialization fields, maintain backward compatibility with existing project files (check for key existence before reading)
+- Any loop that runs OCCT operations over scene bodies must skip `body.isMeshOnly()` bodies - they have no B-rep. OCCT rejects a null shape rather than crashing, but the failure is logged to the diagnostics file on every replay.
+- Anything added straight to `Scene3D` without a feature is wiped by the next `replayFeatures()` and never saved. STEP and IGES import still do this.

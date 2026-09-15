@@ -178,6 +178,19 @@ void FeatureHistory::updateBooleanData(FeatureID id, const BooleanFeatureData& d
     std::get<BooleanFeatureData>(f->data) = data;
 }
 
+FeatureID FeatureHistory::addMeshImportFeature(const MeshImportFeatureData& params,
+                                               const std::string& name) {
+    Feature f;
+    f.id = nextID_++;
+    f.type = FeatureType::MeshImport;
+    // Named after the file rather than a counter: the name is what identifies
+    // the surface when the model is handed to a simulation.
+    f.name = name;
+    f.data = params;
+    features_.push_back(std::move(f));
+    return features_.back().id;
+}
+
 FeatureID FeatureHistory::addLoftFeature(const LoftFeatureData& params) {
     Feature f;
     f.id = nextID_++;

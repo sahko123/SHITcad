@@ -56,6 +56,70 @@ FacePickResult pickFace(const Scene3D& scene, const float rayOrigin[3], const fl
     return best;
 }
 
+MeshPickResult pickMesh(const Scene3D& scene, const float rayOrigin[3], const float rayDir[3]) {
+    MeshPickResult best;
+
+    // Double precision: vessel-scale coordinates in mm (~1e3) with float
+    // cross products lose the small-triangle determinants.
+    const double o[3] = {rayOrigin[0], rayOrigin[1], rayOrigin[2]};
+    const double d[3] = {rayDir[0], rayDir[1], rayDir[2]};
+
+    for (int bi = 0; bi < (int)scene.bodyCount(); bi++) {
+        const Body3D& body = scene.getBody(bi);
+        if (!body.visible || !body.isMeshOnly()) continue;
+
+        const auto& v = body.vertices;
+        for (size_t i = 0; i + 2 < v.size(); i += 3) {
+            // Moller-Trumbore, two-sided: a nozzle is placed on whichever side
+            // of the wall the user is looking at.
+            const double p0[3] = {v[i].px, v[i].py, v[i].pz};
+            const double e1[3] = {v[i + 1].px - p0[0], v[i + 1].py - p0[1], v[i + 1].pz - p0[2]};
+            const double e2[3] = {v[i + 2].px - p0[0], v[i + 2].py - p0[1], v[i + 2].pz - p0[2]};
+
+            const double pv[3] = {d[1] * e2[2] - d[2] * e2[1],
+                                  d[2] * e2[0] - d[0] * e2[2],
+                                  d[0] * e2[1] - d[1] * e2[0]};
+            const double det = e1[0] * pv[0] + e1[1] * pv[1] + e1[2] * pv[2];
+            if (std::fabs(det) < 1e-12) continue;
+            const double inv = 1.0 / det;
+
+            const double tv[3] = {o[0] - p0[0], o[1] - p0[1], o[2] - p0[2]};
+            const double u = (tv[0] * pv[0] + tv[1] * pv[1] + tv[2] * pv[2]) * inv;
+            if (u < 0.0 || u > 1.0) continue;
+
+            const double qv[3] = {tv[1] * e1[2] - tv[2] * e1[1],
+                                  tv[2] * e1[0] - tv[0] * e1[2],
+                                  tv[0] * e1[1] - tv[1] * e1[0]};
+            const double w = (d[0] * qv[0] + d[1] * qv[1] + d[2] * qv[2]) * inv;
+            if (w < 0.0 || u + w > 1.0) continue;
+
+            const double t = (e2[0] * qv[0] + e2[1] * qv[1] + e2[2] * qv[2]) * inv;
+            if (t <= 1e-6 || t >= best.t) continue;
+
+            double nx = e1[1] * e2[2] - e1[2] * e2[1];
+            double ny = e1[2] * e2[0] - e1[0] * e2[2];
+            double nz = e1[0] * e2[1] - e1[1] * e2[0];
+            const double len = std::sqrt(nx * nx + ny * ny + nz * nz);
+            if (len <= 0.0) continue;
+            nx /= len; ny /= len; nz /= len;
+
+            best.hit = true;
+            best.bodyIndex = bi;
+            best.triangleIndex = (int)(i / 3);
+            best.t = (float)t;
+            best.hitWorld[0] = (float)(o[0] + d[0] * t);
+            best.hitWorld[1] = (float)(o[1] + d[1] * t);
+            best.hitWorld[2] = (float)(o[2] + d[2] * t);
+            best.normal[0] = (float)nx;
+            best.normal[1] = (float)ny;
+            best.normal[2] = (float)nz;
+            best.frontFacing = (nx * d[0] + ny * d[1] + nz * d[2]) < 0.0;
+        }
+    }
+
+    return best;
+}
+
 bool extractPlaneFromFace(const TopoDS_Face& face, SketchPlane& out,
                           const float* hitWorld) {
     BRepAdaptor_Surface adaptor(face);
