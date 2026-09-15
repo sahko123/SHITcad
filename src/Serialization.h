@@ -32,6 +32,7 @@ std::string openNativeIgesOpenDialog();
 std::string openNativeObjSaveDialog();
 std::string openNativeDxfSaveDialog();
 std::string openNativeJsonSaveDialog();
+std::string openNativeFolderDialog(const char* title);
 std::string openNativeStlOpenDialog();
 std::string openNativeImportDialog(); // combined import dialog (STEP + IGES + STL)
 

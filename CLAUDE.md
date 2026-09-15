@@ -103,7 +103,11 @@ Global undo stack with typed commands: `AddFeature`, `DeleteFeature`, `SuppressF
 - Nozzles store position/axis in their **host mesh's frame** (`hostFeature`), so moving or rotating an import carries its nozzles. Always go through `nozzleWorld` / `setNozzleWorld`.
 - A placed nozzle sprays along **-normal** of the picked triangle (into the cavity for an outward-wound fluid-cavity STL), offset inward by the standoff.
 - `buildTier1Spec` writes a cip-sim spec (`cip-sim/spec/README.md`): mm, `"up": [0,1,0]`, one surface per active MeshImport with its unit and placement as `transform`. The frame is declared, not converted.
-- `SimulationTest.exe <dir>` also writes a spec + expected bounds bundle that cip-sim's `tests/test_shitcad_export.py` verifies from Python.
+- `SimulationTest.exe <dir>` also writes a spec + expected bounds bundle that cip-sim's `tests/test_shitcad_export.py` verifies from Python. `SimulationTest.exe <dir> <cip-sim dir> [python]` adds the process-runner tests and an end-to-end Tier 1 run.
+- **Running** (`AppSimulationRun.cpp`): Run writes the spec to `<project>_sim/tier1_<time>/` (or `%TEMP%\SHITcad_sim`) and starts `python -u -m cipsim.cli tier1` via `ProcessRunner` (`SimProcess.h`) in the cip-sim folder. No threads: `pollSimulationRun()` runs every frame and reads JSON-lines events. Runs are in a kill-on-close job; the ParaView launcher is not, so the viewer outlives the app.
+- **Engine location** (cip-sim folder, Python) is per machine: `%APPDATA%\SHITcad\simulation.json`, edited in the Run section.
+- **Results** (`SimResults.h`): cip-sim's `tier1.json` + `tier1.bin` (flat float32, metres) load into a `ResultMesh` in mm, drawn with `kResultVertSrc/kResultFragSrc` (per-vertex colour, optional cut plane). Imported meshes are skipped by `Scene3D::render(..., skipMeshOnly)` while results show, since results are drawn on the same triangles. The panel marks results stale when the spec that would run now differs from the one that produced them.
+- `windows.h` defines `near`/`far` as empty macros: include it after `App.h` and `#undef` them.
 
 ### File I/O (`Serialization.h/cpp`)
 - Project format: JSON (nlohmann/json), stores full feature history + plane definitions

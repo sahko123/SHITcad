@@ -192,7 +192,7 @@ void Scene3D::clear() {
 }
 
 void Scene3D::render(ShaderProgram& shader, const float* view, const float* proj,
-                     const float* eyePos) {
+                     const float* eyePos, bool skipMeshOnly) {
     shader.use();
     shader.setMat4("uView", view);
     shader.setMat4("uProj", proj);
@@ -202,6 +202,7 @@ void Scene3D::render(ShaderProgram& shader, const float* view, const float* proj
 
     for (const auto& body : bodies_) {
         if (!body.visible) continue;
+        if (skipMeshOnly && body.isMeshOnly()) continue;
         if (body.vao == 0 || body.vertexCount == 0) continue;
         shader.setVec3("uColor", body.colorR, body.colorG, body.colorB);
         glBindVertexArray(body.vao);

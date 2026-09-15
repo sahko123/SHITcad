@@ -33,7 +33,10 @@ add_executable(SHITcad
     src/FacePicker.cpp
     src/MeshImport.cpp
     src/Simulation.cpp
+    src/SimProcess.cpp
+    src/SimResults.cpp
     src/AppSimulation.cpp
+    src/AppSimulationRun.cpp
     src/ExtrudeTool.cpp
     src/Preferences.cpp
     src/Intersect.cpp

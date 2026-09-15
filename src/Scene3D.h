@@ -94,8 +94,10 @@ public:
     void removeLastBody();
     void clear();
 
+    // skipMeshOnly: leave out imported meshes, e.g. while simulation results
+    // (drawn on the same triangles) are shown in their place.
     void render(ShaderProgram& shader, const float* view, const float* proj,
-                const float* eyePos);
+                const float* eyePos, bool skipMeshOnly = false);
 
     bool empty() const { return bodies_.empty(); }
     size_t bodyCount() const { return bodies_.size(); }

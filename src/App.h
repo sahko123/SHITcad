@@ -19,6 +19,8 @@
 #include "FrameProfiler.h"
 #include "FacePicker.h"
 #include "MeshImport.h"
+#include "SimProcess.h"
+#include "SimResults.h"
 
 struct GLFWwindow;
 
@@ -198,6 +200,51 @@ private:
     GLuint simLineVAO_ = 0;
     GLuint simLineVBO_ = 0;
 
+    // Where the simulation engine lives. Per machine, not per project, so it
+    // is kept in %APPDATA%\SHITcad\simulation.json rather than the project.
+    struct SimEngineSettings {
+        std::string cipSimPath;        // cip-sim repository root
+        std::string python = "python";
+        bool loaded = false;
+    };
+    SimEngineSettings simEngine_;
+
+    // A run in progress or just finished. The runner is polled every frame,
+    // whichever workspace is showing, so switching tabs does not stall a run.
+    enum class SimPhase : uint8_t { Idle, Running, Done, Failed, Cancelled };
+    SimPhase simPhase_ = SimPhase::Idle;
+    ProcessRunner simRunner_;
+    std::string simRunDir_;
+    std::string simRunSpec_;            // spec text the run was started with
+    std::vector<std::string> simRunLog_;
+    std::string simRunError_;
+    double simRunStart_ = 0.0;
+    double simRunEnd_ = 0.0;
+    RunSummary simSummary_;
+
+    ProcessRunner paraviewLauncher_;
+    std::string paraviewMessage_;
+
+    // Results drawn on the geometry.
+    struct SimResultView {
+        bool loaded = false;
+        bool show = true;
+        ResultMesh mesh;
+        int field = 0;
+        bool clip = false;
+        int clipAxis = 0;
+        float clipPos = 0.0f;
+        bool clipFlip = false;
+        GLuint vao = 0, vboGeom = 0, vboColour = 0;
+        int vertexCount = 0;
+        bool colourDirty = true;
+        std::string specJson;           // spec that produced these results
+        RunSummary summary;
+        std::string runDir;
+    };
+    SimResultView simView_;
+    ShaderProgram resultShader_;
+
     // Preferences
     Preferences prefs_;
     bool prefsOpen_ = false;
@@ -314,6 +361,18 @@ private:
     void commitSimulationEdit();
     void exportSimulationSpecDialog();
     float simulationSceneExtent();
+    void loadEngineSettings();
+    void saveEngineSettings();
+    std::string engineProblem() const; // empty if the engine looks usable
+    void startTier1Run();
+    void pollSimulationRun();
+    bool loadSimulationResults(const RunSummary& summary, const std::string& specJson,
+                               const std::string& runDir, std::string& error);
+    void releaseSimulationResults();
+    void renderSimulationResults(const float* view, const float* proj, const float* eyePos);
+    void drawSimulationRunSection();
+    void drawSimulationResultsSection();
+    void openResultsInParaView();
     void drawMeshHoverReadout();
     void applyGeometricConstraint(Sketch& sketch, ConstraintType type);
     void updateWindowTitle();

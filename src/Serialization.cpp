@@ -1,6 +1,7 @@
 #define NOMINMAX
 #include <windows.h>
 #include <commdlg.h>
+#include <shlobj.h>
 
 #include "Serialization.h"
 #include <nlohmann/json.hpp>
@@ -1153,6 +1154,19 @@ std::string openNativeObjSaveDialog() {
     ofn.Flags = OFN_OVERWRITEPROMPT | OFN_NOCHANGEDIR;
     if (GetSaveFileNameA(&ofn)) return filename;
     return {};
+}
+
+std::string openNativeFolderDialog(const char* title) {
+    char path[MAX_PATH] = {};
+    BROWSEINFOA bi = {};
+    bi.lpszTitle = title;
+    bi.ulFlags = BIF_RETURNONLYFSDIRS | BIF_NEWDIALOGSTYLE;
+    LPITEMIDLIST pidl = SHBrowseForFolderA(&bi);
+    if (!pidl) return {};
+    std::string out;
+    if (SHGetPathFromIDListA(pidl, path)) out = path;
+    CoTaskMemFree(pidl);
+    return out;
 }
 
 std::string openNativeJsonSaveDialog() {

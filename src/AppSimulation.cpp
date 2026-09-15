@@ -404,6 +404,9 @@ void App::drawSimulationPanel() {
         ImGui::TextDisabled("Coverage is exact at any ray count; rays only sharpen the flux map.");
     }
 
+    drawSimulationRunSection();
+    drawSimulationResultsSection();
+
     ImGui::Separator();
     if (ImGui::Button("Export spec...", {-1, 0})) exportSimulationSpecDialog();
     if (!simUi_.message.empty()) {

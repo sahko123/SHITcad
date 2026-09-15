@@ -11,8 +11,14 @@
 #include "MeshImport.h"
 #include "Scene3D.h"
 #include "Serialization.h"
+#include "ShaderProgram.h"
+#include "SimProcess.h"
+#include "SimResults.h"
 #include "Simulation.h"
 #include "SketchPlane.h"
+
+#include <chrono>
+#include <thread>
 
 #include <glad/gl.h>
 #include <GLFW/glfw3.h>
@@ -414,6 +420,143 @@ static void writeCrossCheck(const fs::path& outDir) {
     std::printf("  wrote %s\n", (outDir / "spec.json").string().c_str());
 }
 
+// ---- running the engine -------------------------------------------------------
+
+static bool runToCompletion(ProcessRunner& r, std::vector<std::string>& lines, double timeoutS) {
+    auto t0 = std::chrono::steady_clock::now();
+    while (!r.finished()) {
+        r.poll(lines);
+        if (std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count() > timeoutS) return false;
+        std::this_thread::sleep_for(std::chrono::milliseconds(15)); // a frame, roughly
+    }
+    return true;
+}
+
+static void testProcessRunner(const std::string& python) {
+    std::printf("process runner\n");
+    CHECK(ProcessRunner::quoteArg("plain") == "plain", "plain");
+    CHECK(ProcessRunner::quoteArg("a b") == "\"a b\"", "space");
+    CHECK(ProcessRunner::quoteArg("C:\\dir with space\\") == "\"C:\\dir with space\\\\\"", "trailing backslash: %s",
+          ProcessRunner::quoteArg("C:\\dir with space\\").c_str());
+    CHECK(ProcessRunner::quoteArg("say \"hi\"") == "\"say \\\"hi\\\"\"", "quote: %s", ProcessRunner::quoteArg("say \"hi\"").c_str());
+
+    // Lines arrive while running, a flood of stderr does not deadlock, the exit
+    // code comes back, and awkward arguments survive quoting.
+    const std::string awkward = "C:\\path with space\\ and \"quotes\"\\";
+    const std::string script =
+        "import sys, json, time\n"
+        "for i in range(3):\n"
+        "    print(json.dumps({'event': 'progress', 'i': i}), flush=True); time.sleep(0.05)\n"
+        "sys.stderr.write('x' * (1 << 20)); sys.stderr.flush()\n"
+        "print(json.dumps({'event': 'result', 'arg': sys.argv[1]}))\n"
+        "sys.exit(3)\n";
+    ProcessRunner r;
+    std::string err;
+    CHECK(r.start({python, "-c", script, awkward}, "", true, err), "start: %s", err.c_str());
+    std::vector<std::string> lines;
+    CHECK(runToCompletion(r, lines, 60), "did not finish (deadlocked on stderr?)");
+    CHECK(lines.size() == 4, "lines=%zu", lines.size());
+    CHECK(r.exitCode() == 3, "exit=%d", r.exitCode());
+    CHECK(r.stderrTail().size() <= 16 * 1024 && r.stderrTail().size() > 1000, "stderr tail=%zu", r.stderrTail().size());
+    if (lines.size() == 4) {
+        CHECK(eventKind(lines[0]) == "progress", "first event %s", lines[0].c_str());
+        CHECK(json::parse(lines[3])["arg"] == awkward, "argument mangled: %s", lines[3].c_str());
+    }
+
+    ProcessRunner sleeper;
+    CHECK(sleeper.start({python, "-c", "import time; time.sleep(60)"}, "", true, err), "%s", err.c_str());
+    std::vector<std::string> none;
+    sleeper.poll(none);
+    CHECK(sleeper.running(), "sleeper not running");
+    auto t0 = std::chrono::steady_clock::now();
+    sleeper.cancel();
+    CHECK(sleeper.finished() && std::chrono::steady_clock::now() - t0 < std::chrono::seconds(5), "cancel did not stop it");
+
+    ProcessRunner missing;
+    err.clear();
+    CHECK(!missing.start({"definitely_not_a_program_xyz.exe"}, "", true, err) && err.find("not found") != std::string::npos,
+          "missing exe: %s", err.c_str());
+}
+
+static void testResultLoaderErrors(const fs::path& dir) {
+    std::printf("result loader errors\n");
+    ResultMesh m;
+    std::string err;
+    std::ofstream(dir / "notours.json") << R"({"format": "something-else", "version": 1})";
+    CHECK(!loadResultMesh((dir / "notours.json").string(), m, err) && err.find("Not a cip-sim") != std::string::npos,
+          "%s", err.c_str());
+    std::ofstream(dir / "trunc.bin", std::ios::binary) << "abcd";
+    std::ofstream(dir / "trunc.json") << R"({"format":"cipsim-trimesh","version":1,"units":"m","triangles":1,
+        "positions":{"offset":0,"count":9},"fields":[],"bin":"trunc.bin","bytes":36})";
+    err.clear();
+    CHECK(!loadResultMesh((dir / "trunc.json").string(), m, err) && err.find("truncated") != std::string::npos,
+          "%s", err.c_str());
+}
+
+// Run Tier 1 on the cross-check spec exactly as the Run button does.
+static void testEndToEnd(const fs::path& bundle, const std::string& cipSim, const std::string& python) {
+    std::printf("end to end: SHITcad spec -> cip-sim -> results on the geometry\n");
+    const fs::path out = bundle / "run";
+    fs::remove_all(out);
+    ProcessRunner r;
+    std::string err;
+    CHECK(r.start({python, "-u", "-m", "cipsim.cli", "tier1", "--spec", (bundle / "spec.json").string(),
+                   "--out", out.string(), "--rays", "20000", "--bounces", "1"}, cipSim, true, err),
+          "start: %s", err.c_str());
+    std::vector<std::string> lines;
+    CHECK(runToCompletion(r, lines, 600), "tier1 did not finish");
+    CHECK(r.exitCode() == 0, "exit=%d stderr=%s", r.exitCode(), r.stderrTail().c_str());
+
+    int progress = 0;
+    RunSummary summary;
+    bool got = false;
+    for (const auto& l : lines) {
+        const std::string k = eventKind(l);
+        CHECK(!k.empty(), "non-JSON stdout line: %s", l.c_str());
+        if (k == "progress") progress++;
+        if (k == "result") got = parseResultEvent(l, summary, err);
+    }
+    CHECK(progress > 0, "no progress events");
+    CHECK(got, "no result: %s", err.c_str());
+    if (!got) return;
+    CHECK(summary.surfaces.size() == 2 && summary.overall.directPct > 50.0, "summary direct=%g", summary.overall.directPct);
+
+    ResultMesh mesh;
+    CHECK(loadResultMesh(summary.viewerJson, mesh, err), "%s", err.c_str());
+    CHECK(mesh.triangles == 24, "triangles=%zu (two 12-triangle boxes)", mesh.triangles);
+
+    // The results must sit exactly on the geometry SHITcad drew.
+    std::ifstream ef(bundle / "expected.json");
+    json expected = json::parse(ef);
+    float lo[3] = {1e30f, 1e30f, 1e30f}, hi[3] = {-1e30f, -1e30f, -1e30f};
+    for (const auto& [name, s] : expected["surfaces"].items()) {
+        for (int k = 0; k < 3; k++) {
+            lo[k] = std::min(lo[k], s["min_mm"][k].get<float>());
+            hi[k] = std::max(hi[k], s["max_mm"][k].get<float>());
+        }
+    }
+    for (int k = 0; k < 3; k++) {
+        CHECK(near(mesh.boundsMin[k], lo[k], 0.01) && near(mesh.boundsMax[k], hi[k], 0.01),
+              "axis %d: results [%g, %g] vs geometry [%g, %g]", k, mesh.boundsMin[k], mesh.boundsMax[k], lo[k], hi[k]);
+    }
+
+    int reach = mesh.fieldIndex("reach");
+    CHECK(reach >= 0, "no reach field");
+    if (reach < 0) return;
+    const ResultField& f = mesh.fields[reach];
+    CHECK(f.categorical && f.colours.size() == 3 && f.labels.size() == 3, "reach metadata");
+    std::vector<float> rgb;
+    colourByField(mesh, reach, rgb);
+    bool coloursMatch = true;
+    for (size_t t = 0; t < mesh.triangles; t++) {
+        int k = (int)std::lround(f.values[t]);
+        coloursMatch = coloursMatch && k >= 0 && k <= 2 && rgb[t * 3] == f.colours[k][0] && rgb[t * 3 + 2] == f.colours[k][2];
+    }
+    CHECK(coloursMatch, "triangle colours do not follow the reach categories");
+    int flux = mesh.fieldIndex("total_flux");
+    CHECK(flux >= 0 && !mesh.fields[flux].categorical && mesh.fields[flux].p95 > 0, "flux field");
+}
+
 int main(int argc, char** argv) {
     testRoles();
     testNozzleFollowsHost();
@@ -438,9 +581,25 @@ int main(int argc, char** argv) {
             glfwMakeContextCurrent(win);
             gladLoadGL(glfwGetProcAddress);
             writeCrossCheck(crossDir);
+            {
+                std::printf("result shader compiles\n");
+                ShaderProgram sp;
+                CHECK(sp.compile(kResultVertSrc, kResultFragSrc) && sp.id() != 0, "result shader failed to compile");
+            }
             glfwDestroyWindow(win);
         }
         glfwTerminate();
+    }
+
+    // Engine tests need Python (and, for end to end, the cip-sim repo):
+    //   SimulationTest.exe <bundle_dir> <cip-sim dir> [python]
+    const std::string python = argc > 3 ? argv[3] : "python";
+    testResultLoaderErrors(fs::temp_directory_path() / "shitcad_simulation_test");
+    if (argc > 2) {
+        testProcessRunner(python);
+        testEndToEnd(crossDir, argv[2], python);
+    } else {
+        std::printf("(engine tests skipped: pass <bundle_dir> <cip-sim dir> [python])\n");
     }
 
     std::printf("\n%d checks, %d failed\n", g_checks, g_failures);

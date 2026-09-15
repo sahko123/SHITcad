@@ -229,7 +229,11 @@ void App::render3DScene(int w, int h) {
         glPolygonOffset(1.0f, 1.0f);
     }
     profiler_.begin("Bodies");
-    scene_.render(viewport3D_.meshShader(), view, proj, eye);
+    // Results are drawn on the imported meshes' own triangles, so the meshes
+    // step aside while results are showing.
+    const bool resultsShown = workspace_ == Workspace::Simulation && simView_.loaded && simView_.show;
+    scene_.render(viewport3D_.meshShader(), view, proj, eye, resultsShown);
+    renderSimulationResults(view, proj, eye);
     profiler_.end();
     if (prefs_.showWireframe) {
         glDisable(GL_POLYGON_OFFSET_FILL);
@@ -537,6 +541,7 @@ void App::renderFrame() {
     }
 
     drawMeshImportDialog();
+    pollSimulationRun(); // every frame, whichever workspace is showing
     drawSimulationPanel();
     drawMeshPlacePanel();
     drawMeshHoverReadout();
@@ -977,6 +982,8 @@ void App::shutdown() {
     viewport3D_.shutdown();
     if (simLineVAO_) { glDeleteVertexArrays(1, &simLineVAO_); simLineVAO_ = 0; }
     if (simLineVBO_) { glDeleteBuffers(1, &simLineVBO_); simLineVBO_ = 0; }
+    if (simRunner_.running()) simRunner_.cancel();
+    releaseSimulationResults();
 
     ImGui_ImplOpenGL3_Shutdown();
     ImGui_ImplGlfw_Shutdown();
