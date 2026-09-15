@@ -142,7 +142,11 @@ void App::globalUndo() {
         case UndoActionType::ModifyMeshImport:
             featureHistory_.updateMeshImportData(cmd.featureID, cmd.oldMeshImport);
             break;
+        case UndoActionType::ModifySimulation:
+            simulation_ = cmd.oldSimulation;
+            break;
     }
+    simUndoBase_ = simulation_;
     replayAllFeatures();
     markDirty();
 }
@@ -190,7 +194,11 @@ void App::globalRedo() {
         case UndoActionType::ModifyMeshImport:
             featureHistory_.updateMeshImportData(cmd.featureID, cmd.newMeshImport);
             break;
+        case UndoActionType::ModifySimulation:
+            simulation_ = cmd.newSimulation;
+            break;
     }
+    simUndoBase_ = simulation_;
     replayAllFeatures();
     markDirty();
 }
@@ -201,7 +209,7 @@ void App::saveProjectDialog() {
         if (path.empty()) return;
         currentFilePath_ = path;
     }
-    if (!saveProject(currentFilePath_, featureHistory_, sketchPlanes_)) {
+    if (!saveProject(currentFilePath_, featureHistory_, sketchPlanes_, &simulation_)) {
         fprintf(stderr, "Save failed: %s\n", lastLoadError().c_str());
     } else {
         unsavedChanges_ = false;
@@ -215,8 +223,9 @@ void App::openProjectDialog() {
 
     FeatureHistory newHistory;
     std::vector<SketchPlane> newPlanes;
+    SimulationSetup newSimulation;
 
-    if (!loadProject(path, newHistory, newPlanes)) {
+    if (!loadProject(path, newHistory, newPlanes, &newSimulation)) {
         fprintf(stderr, "Load failed: %s\n", lastLoadError().c_str());
         return;
     }
@@ -238,6 +247,10 @@ void App::openProjectDialog() {
     // Apply loaded data
     featureHistory_ = std::move(newHistory);
     sketchPlanes_ = std::move(newPlanes);
+    simulation_ = std::move(newSimulation);
+    simUndoBase_ = simulation_;
+    simUi_ = {};
+    meshPlace_.reset();
     currentFilePath_ = path;
 
     // Restore nextPlaneID_ from loaded planes
@@ -457,7 +470,8 @@ void App::drawMeshPlacePanel() {
     const double s = big >= 1000.0 ? 0.001 : 1.0;
     const char* su = big >= 1000.0 ? "m" : "mm";
     ImGui::TextDisabled("Size  X %.4g  Y %.4g  Z %.4g %s", (hi[0] - lo[0]) * s, (hi[1] - lo[1]) * s, (hi[2] - lo[2]) * s, su);
-    ImGui::TextDisabled("Bottom at Z = %.4g %s", lo[2] * s, su);
+    // The viewport is Y-up (ground grid in XZ), so "bottom" is along Y.
+    ImGui::TextDisabled("Bottom at Y = %.4g %s", lo[1] * s, su);
 
     // ---- rotation: always about the mesh's own centre
     ImGui::Separator();
@@ -481,8 +495,9 @@ void App::drawMeshPlacePanel() {
         if (ImGui::Button("180", {60, 0})) quarterTurn(a, 180.0);
         ImGui::PopID();
     }
-    // Most non-CAD exporters (and many CAD STL exports) are Y-up; this app is Z-up.
-    if (ImGui::Button("Y-up file -> Z-up", {-1, 0})) quarterTurn(0, 90.0);
+    // This viewport is Y-up. CAD packages including Onshape export Z-up, which
+    // lands on its side here; Rx(-90) takes +Z to +Y.
+    if (ImGui::Button("Z-up file (Onshape) -> stand upright", {-1, 0})) quarterTurn(0, -90.0);
 
     ImGui::SetNextItemWidth(70);
     ImGui::InputFloat("deg##angle", &meshPlace_.angleDeg, 0, 0, "%.2f");
@@ -515,13 +530,13 @@ void App::drawMeshPlacePanel() {
         for (int a = 0; a < 3; a++) data.transform.t[a] = meshPlace_.posBuf[a];
         setMeshImportData(data);
     }
-    if (ImGui::Button("Drop to ground (Z = 0)", {-1, 0})) {
-        data.transform.t[2] -= lo[2];
+    if (ImGui::Button("Drop to ground (Y = 0)", {-1, 0})) {
+        data.transform.t[1] -= lo[1];
         setMeshImportData(data);
     }
-    if (ImGui::Button("Centre on origin (X, Y)", {-1, 0})) {
+    if (ImGui::Button("Centre on origin (X, Z)", {-1, 0})) {
         data.transform.t[0] -= pivot[0];
-        data.transform.t[1] -= pivot[1];
+        data.transform.t[2] -= pivot[2];
         setMeshImportData(data);
     }
     if (ImGui::Button("Reset placement", {-1, 0})) {
@@ -1410,6 +1425,49 @@ void App::drawToolbar() {
         ImGui::SameLine();
         if (ImGui::Button("Prefs")) prefsOpen_ = !prefsOpen_;
     } else {
+        // Workspace tabs: Model (CAD) | Simulation
+        {
+            bool canSwitch = canSwitchWorkspace();
+            auto tab = [&](const char* label, Workspace w) {
+                bool on = workspace_ == w;
+                ImGui::PushStyleColor(ImGuiCol_Button, on ? ImVec4(0.25f, 0.45f, 0.75f, 1.0f)
+                                                         : ImVec4(0.35f, 0.35f, 0.38f, 1.0f));
+                if (!canSwitch && !on) ImGui::BeginDisabled();
+                if (ImGui::Button(label)) setWorkspace(w);
+                if (!canSwitch && !on) ImGui::EndDisabled();
+                ImGui::PopStyleColor();
+            };
+            tab("Model", Workspace::Model);
+            ImGui::SameLine();
+            tab("Simulation", Workspace::Simulation);
+            ImGui::SameLine();
+            ImGui::TextDisabled("|");
+            ImGui::SameLine();
+        }
+
+        if (workspace_ == Workspace::Simulation) {
+            if (ImGui::Button("Save")) saveProjectDialog();
+            ImGui::SameLine();
+            if (ImGui::Button("Open")) openProjectDialog();
+            ImGui::SameLine();
+            if (ImGui::Button("Import STL")) importStlDialog();
+            ImGui::SameLine();
+            ImGui::TextDisabled("|");
+            ImGui::SameLine();
+            ImGui::TextDisabled("Set up surfaces and nozzles in the Simulation panel");
+            ImGui::SameLine();
+            ImGui::TextDisabled("|");
+            ImGui::SameLine();
+            {
+                bool& ortho = viewport3D_.camera().orthographic;
+                if (ImGui::Button(ortho ? "[O]rtho" : "[O] Persp")) ortho = !ortho;
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Prefs")) prefsOpen_ = !prefsOpen_;
+            ImGui::PopStyleVar(2);
+            return;
+        }
+
         // Navigate mode toolbar
         if (ImGui::Button("Save")) saveProjectDialog();
         ImGui::SameLine();

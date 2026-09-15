@@ -66,7 +66,9 @@ Newton-Raphson, up to 40 iterations, convergence tolerance 1e-6. Call `solver.so
 ### Constraint types
 `Coincident`, `Horizontal`, `Vertical`, `Distance`, `Radius`, `Diameter`, `PointDistance`, `PointOnLine`, `PointLineDistance`, `EqualLength`, `Perpendicular`, `Parallel`, `Tangent`, `Angle`, `Symmetric`, `Concentric`, `Midpoint`
 
-### Units
+### Units and axes
+The 3D viewport is **Y-up**: the ground grid lies in XZ at y = 0 and the orbit camera's up is +Y. (The "XY Plane" reference plane is vertical.) STL from most CAD packages, Onshape included, is Z-up and lands on its side until rotated. Simulation exports declare `"up": [0, 1, 0]` rather than converting.
+
 All internal values are in **millimeters**. `UnitUtils.h` handles parsing/formatting with 11 unit types. `Constraint::value` is always in mm; `Constraint::inputUnit` and `inputValue` preserve the user's original input.
 
 ### Feature history and replay
@@ -94,6 +96,14 @@ Global undo stack with typed commands: `AddFeature`, `DeleteFeature`, `SuppressF
 - Placement (`MeshTransform`: row-major rotation matrix + translation in mm, `p' = R p + t`) is applied after unit scaling on every replay. The Place panel (opens after import; timeline double-click or right-click "Rotate / Move...") rotates about the mesh's bounding-box centre via `rotateAbout`, applies edits live, and records one `ModifyMeshImport` undo step on Done. Quarter turns from `axisRotation` are exact. An identity transform is not written to the project file.
 - The body it creates is **mesh-only**: `Body3D::shape` is null, `isMeshOnly()` is true, and `sourceFeature` holds the MeshImport's `FeatureID`. `pickFace` cannot see it; use `pickMesh` (`FacePicker.h`).
 - Projects containing a MeshImport are saved as `version: 2`; projects without one stay `version: 1`.
+
+### Simulation workspace (`Simulation.h/cpp`, `AppSimulation.cpp`)
+- Toolbar tabs switch `workspace_` between Model and Simulation (only from Navigate with no 3D tool active). Simulation replaces `handleNavigateInput` with `handleSimulationInput` and shows the Simulation panel.
+- `SimulationSetup` (surface roles, nozzles, run settings) is set-up data, not geometry: saved as a `"simulation"` block in the project (forces `version: 2`), undone as a whole via `ModifySimulation`. Widgets edit `simulation_` live; `commitSimulationEdit()` pushes one undo step from `simUndoBase_` - call it on `IsItemDeactivatedAfterEdit()` or after a discrete action.
+- Nozzles store position/axis in their **host mesh's frame** (`hostFeature`), so moving or rotating an import carries its nozzles. Always go through `nozzleWorld` / `setNozzleWorld`.
+- A placed nozzle sprays along **-normal** of the picked triangle (into the cavity for an outward-wound fluid-cavity STL), offset inward by the standoff.
+- `buildTier1Spec` writes a cip-sim spec (`cip-sim/spec/README.md`): mm, `"up": [0,1,0]`, one surface per active MeshImport with its unit and placement as `transform`. The frame is declared, not converted.
+- `SimulationTest.exe <dir>` also writes a spec + expected bounds bundle that cip-sim's `tests/test_shitcad_export.py` verifies from Python.
 
 ### File I/O (`Serialization.h/cpp`)
 - Project format: JSON (nlohmann/json), stores full feature history + plane definitions

@@ -2,18 +2,23 @@
 #include "FeatureHistory.h"
 #include "SketchPlane.h"
 #include "Scene3D.h"
+#include "Simulation.h"
 #include <string>
 #include <vector>
 
 namespace shitcad {
 
+// `simulation` is optional so callers that only care about geometry need not
+// pass one. A file without a simulation block loads as an empty set-up.
 bool saveProject(const std::string& filepath,
                  const FeatureHistory& history,
-                 const std::vector<SketchPlane>& planes);
+                 const std::vector<SketchPlane>& planes,
+                 const SimulationSetup* simulation = nullptr);
 
 bool loadProject(const std::string& filepath,
                  FeatureHistory& history,
-                 std::vector<SketchPlane>& planes);
+                 std::vector<SketchPlane>& planes,
+                 SimulationSetup* simulation = nullptr);
 
 const std::string& lastLoadError();
 
@@ -26,6 +31,7 @@ std::string openNativeIgesSaveDialog();
 std::string openNativeIgesOpenDialog();
 std::string openNativeObjSaveDialog();
 std::string openNativeDxfSaveDialog();
+std::string openNativeJsonSaveDialog();
 std::string openNativeStlOpenDialog();
 std::string openNativeImportDialog(); // combined import dialog (STEP + IGES + STL)
 

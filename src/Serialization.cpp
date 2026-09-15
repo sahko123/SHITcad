@@ -679,20 +679,27 @@ static void featureHistoryFromJson(const json& j, FeatureHistory& h) {
 
 bool saveProject(const std::string& filepath,
                  const FeatureHistory& history,
-                 const std::vector<SketchPlane>& planes) {
-    // Version 2 = may contain MeshImport features. Only written when it does,
-    // so projects without imports still open in older builds; a build that
-    // predates imports then refuses a v2 file with a clear message instead of
-    // failing to parse an unknown feature type.
-    bool hasMeshImport = false;
+                 const std::vector<SketchPlane>& planes,
+                 const SimulationSetup* simulation) {
+    // Version 2 = may contain MeshImport features or a simulation set-up. Only
+    // written when it does, so projects without either still open in older
+    // builds. An older build refuses a v2 file with a clear message, rather
+    // than failing on an unknown feature type or - worse, for the simulation
+    // block it would not read - silently dropping it on the next save.
+    bool needsV2 = simulation && !simulation->empty();
     for (const auto& f : history.features()) {
-        if (f.type == FeatureType::MeshImport) { hasMeshImport = true; break; }
+        if (f.type == FeatureType::MeshImport) { needsV2 = true; break; }
     }
 
     json doc;
-    doc["version"] = hasMeshImport ? 2 : 1;
+    doc["version"] = needsV2 ? 2 : 1;
     doc["app"] = "SHITcad";
     doc["featureHistory"] = featureHistoryToJson(history);
+    if (simulation && !simulation->empty()) {
+        json sj;
+        simulationToJson(*simulation, sj);
+        doc["simulation"] = sj;
+    }
 
     doc["sketchPlanes"] = json::array();
     for (auto& sp : planes) doc["sketchPlanes"].push_back(sketchPlaneToJson(sp));
@@ -714,7 +721,8 @@ bool saveProject(const std::string& filepath,
 
 bool loadProject(const std::string& filepath,
                  FeatureHistory& history,
-                 std::vector<SketchPlane>& planes) {
+                 std::vector<SketchPlane>& planes,
+                 SimulationSetup* simulation) {
     std::ifstream in(filepath);
     if (!in.is_open()) {
         s_lastError = "Could not open file: " + filepath;
@@ -746,9 +754,19 @@ bool loadProject(const std::string& filepath,
             tempPlanes.push_back(sketchPlaneFromJson(sp));
         }
 
+        SimulationSetup tempSim;
+        if (doc.contains("simulation")) {
+            std::string simErr;
+            if (!simulationFromJson(doc.at("simulation"), tempSim, simErr)) {
+                s_lastError = "Invalid simulation set-up: " + simErr;
+                return false;
+            }
+        }
+
         // All succeeded — move into output
         history = std::move(tempHistory);
         planes = std::move(tempPlanes);
+        if (simulation) *simulation = std::move(tempSim);
 
     } catch (const json::exception& e) {
         s_lastError = std::string("Invalid file format: ") + e.what();
@@ -1132,6 +1150,19 @@ std::string openNativeObjSaveDialog() {
     ofn.lpstrFile = filename;
     ofn.nMaxFile = MAX_PATH;
     ofn.lpstrDefExt = "obj";
+    ofn.Flags = OFN_OVERWRITEPROMPT | OFN_NOCHANGEDIR;
+    if (GetSaveFileNameA(&ofn)) return filename;
+    return {};
+}
+
+std::string openNativeJsonSaveDialog() {
+    char filename[MAX_PATH] = {};
+    OPENFILENAMEA ofn = {};
+    ofn.lStructSize = sizeof(ofn);
+    ofn.lpstrFilter = "JSON Files (*.json)\0*.json\0All Files\0*.*\0";
+    ofn.lpstrFile = filename;
+    ofn.nMaxFile = MAX_PATH;
+    ofn.lpstrDefExt = "json";
     ofn.Flags = OFN_OVERWRITEPROMPT | OFN_NOCHANGEDIR;
     if (GetSaveFileNameA(&ofn)) return filename;
     return {};

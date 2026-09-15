@@ -262,6 +262,8 @@ void App::render3DScene(int w, int h) {
         renderBooleanPreview(view, proj, eye);
     }
 
+    renderSimulationOverlay(view, proj);
+
     // Reference planes (translucent) — render all planes marked as reference
     sketchRenderer_.renderReferencePlanes(sketchPlanes_.data(), (int)sketchPlanes_.size(),
                                           activeSketchPlane_, view, proj);
@@ -456,7 +458,10 @@ void App::renderFrame() {
     } else if (isBooleanActive()) {
         handleBooleanInput(vpW, vpH);
     } else if (mode_ == InteractionMode::Navigate || !hasActiveSketch()) {
-        handleNavigateInput(vpW, vpH);
+        if (workspace_ == Workspace::Simulation)
+            handleSimulationInput(vpW, vpH);
+        else
+            handleNavigateInput(vpW, vpH);
     } else {
         handleSketchInput(vpW, vpH);
     }
@@ -466,7 +471,8 @@ void App::renderFrame() {
     bool navigating = mode_ == InteractionMode::Navigate &&
                       tool_.type != ToolType::Extrude && tool_.type != ToolType::Revolve &&
                       tool_.type != ToolType::Loft && !isBooleanActive();
-    if (navigating)
+    // In the Simulation workspace the hover pick only matters while placing.
+    if (navigating && (workspace_ == Workspace::Model || simUi_.placing))
         updateMeshHover(vpW, vpH);
     else
         meshHover_ = {};
@@ -531,6 +537,7 @@ void App::renderFrame() {
     }
 
     drawMeshImportDialog();
+    drawSimulationPanel();
     drawMeshPlacePanel();
     drawMeshHoverReadout();
 
@@ -968,6 +975,8 @@ void App::shutdown() {
     scene_.clear();
     sketchRenderer_.shutdown();
     viewport3D_.shutdown();
+    if (simLineVAO_) { glDeleteVertexArrays(1, &simLineVAO_); simLineVAO_ = 0; }
+    if (simLineVBO_) { glDeleteBuffers(1, &simLineVBO_); simLineVBO_ = 0; }
 
     ImGui_ImplOpenGL3_Shutdown();
     ImGui_ImplGlfw_Shutdown();

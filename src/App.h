@@ -29,6 +29,14 @@ enum class InteractionMode : uint8_t {
     Sketching,
 };
 
+// Top-level workspace, chosen from the toolbar. Model is the CAD app as it
+// always was; Simulation sets up, runs and views a spray simulation on the
+// same geometry. Only switchable from Navigate with no tool active.
+enum class Workspace : uint8_t {
+    Model,
+    Simulation,
+};
+
 class App {
 public:
     bool init();
@@ -169,6 +177,27 @@ private:
     MeshPickResult meshHover_;
     float meshHoverMouse_[2] = {-1, -1};
 
+    // Simulation workspace
+    Workspace workspace_ = Workspace::Model;
+    SimulationSetup simulation_;
+    // Last state recorded on the undo stack. Widgets edit simulation_ live;
+    // commitSimulationEdit() pushes one undo step from this base, so a slider
+    // drag is one step rather than one per frame.
+    SimulationSetup simUndoBase_;
+    struct SimUiState {
+        bool placing = false;          // next click on a surface places a nozzle
+        uint32_t selectedNozzle = 0;
+        float standoffMm = 20.0f;      // how far inside the surface a placed nozzle sits
+        std::string message;           // last export/validation message
+        bool messageIsError = false;
+        std::vector<std::string> warnings;
+        float sceneExtentMm = 1000.0f; // cached for cone display length
+        size_t sceneExtentKey = 0;
+    };
+    SimUiState simUi_;
+    GLuint simLineVAO_ = 0;
+    GLuint simLineVBO_ = 0;
+
     // Preferences
     Preferences prefs_;
     bool prefsOpen_ = false;
@@ -276,6 +305,15 @@ private:
     void setMeshImportData(const MeshImportFeatureData& data); // live edit + replay
     void finishMeshPlace(bool keep);
     void updateMeshHover(float vpW, float vpH);
+    // Simulation workspace (AppSimulation.cpp)
+    bool canSwitchWorkspace() const;
+    void setWorkspace(Workspace w);
+    void drawSimulationPanel();
+    void handleSimulationInput(float vpW, float vpH);
+    void renderSimulationOverlay(const float* view, const float* proj);
+    void commitSimulationEdit();
+    void exportSimulationSpecDialog();
+    float simulationSceneExtent();
     void drawMeshHoverReadout();
     void applyGeometricConstraint(Sketch& sketch, ConstraintType type);
     void updateWindowTitle();

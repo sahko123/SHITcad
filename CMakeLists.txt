@@ -32,6 +32,8 @@ add_executable(SHITcad
     src/SketchRenderer.cpp
     src/FacePicker.cpp
     src/MeshImport.cpp
+    src/Simulation.cpp
+    src/AppSimulation.cpp
     src/ExtrudeTool.cpp
     src/Preferences.cpp
     src/Intersect.cpp
@@ -56,7 +58,9 @@ if(SHITCAD_BUILD_TESTS)
     get_target_property(_shitcad_sources SHITcad SOURCES)
     list(FILTER _shitcad_sources EXCLUDE REGEX "src/(main|App[A-Za-z]*)\\.cpp$")
 
-    add_executable(MeshImportTest tests/MeshImportTest.cpp ${_shitcad_sources})
-    target_include_directories(MeshImportTest PRIVATE ${CMAKE_SOURCE_DIR}/src)
-    target_link_libraries(MeshImportTest PRIVATE imgui opengl32 occt_libs nlohmann_json::nlohmann_json dbghelp)
+    foreach(_test MeshImportTest SimulationTest)
+        add_executable(${_test} tests/${_test}.cpp ${_shitcad_sources})
+        target_include_directories(${_test} PRIVATE ${CMAKE_SOURCE_DIR}/src)
+        target_link_libraries(${_test} PRIVATE imgui opengl32 occt_libs nlohmann_json::nlohmann_json dbghelp)
+    endforeach()
 endif()
