@@ -460,7 +460,13 @@ void App::renderFrame() {
     } else {
         handleSketchInput(vpW, vpH);
     }
-    if (mode_ == InteractionMode::Navigate && tool_.type == ToolType::None)
+    // Same condition that routes input to handleNavigateInput above. Not
+    // `tool_.type == None`: init() leaves the sketch Line tool selected while
+    // in Navigate mode, which would hide the readout for the whole session.
+    bool navigating = mode_ == InteractionMode::Navigate &&
+                      tool_.type != ToolType::Extrude && tool_.type != ToolType::Revolve &&
+                      tool_.type != ToolType::Loft && !isBooleanActive();
+    if (navigating)
         updateMeshHover(vpW, vpH);
     else
         meshHover_ = {};
