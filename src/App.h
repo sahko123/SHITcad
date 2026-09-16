@@ -231,10 +231,6 @@ private:
         bool show = true;
         ResultMesh mesh;
         int field = 0;
-        bool clip = false;
-        int clipAxis = 0;
-        float clipPos = 0.0f;
-        bool clipFlip = false;
         GLuint vao = 0, vboGeom = 0, vboColour = 0;
         int vertexCount = 0;
         bool colourDirty = true;
@@ -244,6 +240,14 @@ private:
     };
     SimResultView simView_;
     ShaderProgram resultShader_;
+
+    // Section (cut) view through the whole scene, in either workspace.
+    SectionPlane section_;
+    bool sectionWindowOpen_ = false;
+    size_t sceneBoundsKey_ = 0;
+    float sceneLo_[3] = {0, 0, 0};
+    float sceneHi_[3] = {0, 0, 0};
+    GLuint capVAO_ = 0, capVBO_ = 0;
 
     // Preferences
     Preferences prefs_;
@@ -373,6 +377,10 @@ private:
     void drawSimulationRunSection();
     void drawSimulationResultsSection();
     void openResultsInParaView();
+    // Section view (AppSection.cpp)
+    void sceneBounds(float lo[3], float hi[3]);
+    void drawSectionControls();
+    void renderSectionCap(const float* view, const float* proj, bool resultsShown);
     void drawMeshHoverReadout();
     void applyGeometricConstraint(Sketch& sketch, ConstraintType type);
     void updateWindowTitle();

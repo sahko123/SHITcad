@@ -109,6 +109,12 @@ Global undo stack with typed commands: `AddFeature`, `DeleteFeature`, `SuppressF
 - **Results** (`SimResults.h`): cip-sim's `tier1.json` + `tier1.bin` (flat float32, metres) load into a `ResultMesh` in mm, drawn with `kResultVertSrc/kResultFragSrc` (per-vertex colour, optional cut plane). Imported meshes are skipped by `Scene3D::render(..., skipMeshOnly)` while results show, since results are drawn on the same triangles. The panel marks results stale when the spec that would run now differs from the one that produced them.
 - `windows.h` defines `near`/`far` as empty macros: include it after `App.h` and `#undef` them.
 
+### Section views (`Section.h`, `AppSection.cpp`)
+- One `SectionPlane` (`section_`) cuts the whole scene: imported meshes, solid bodies, their wireframe edges and simulation results. Spray cones and the ground grid are deliberately left whole.
+- Shaders declare `uClipOn` / `uClipNormal` / `uClipOffset`; **always call `applyClip(shader, plane_or_nullptr)` before drawing**, since uniforms persist on a program between draws and a stale one cuts the wrong thing. Tool previews and the ground grid pass `nullptr`.
+- `renderSectionCap` fills the opening by stencil: draw the clipped closed meshes with depth testing off, front faces incrementing and back faces decrementing, then draw a quad on the plane where the count is non-zero. Needs the stencil buffer cleared each frame.
+- Controls appear in the Simulation panel under "View" and, in the Model workspace, from the toolbar's Section button. The plane is a view setting: not saved in the project.
+
 ### File I/O (`Serialization.h/cpp`)
 - Project format: JSON (nlohmann/json), stores full feature history + plane definitions
 - Export: STL, STEP, IGES, OBJ, DXF (via OCCT)

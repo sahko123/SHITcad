@@ -1,5 +1,6 @@
 #include "Viewport3D.h"
 #include "Preferences.h"
+#include "Section.h"
 #include <imgui.h>
 #include <cstring>
 #include <vector>
@@ -161,10 +162,14 @@ uniform vec3 uEyePos;
 uniform vec3 uLightDir;
 uniform vec3 uColor;
 uniform float uAlpha;
+uniform float uClipOn;
+uniform vec3 uClipNormal;
+uniform float uClipOffset;
 
 out vec4 FragColor;
 
 void main() {
+    if (uClipOn > 0.5 && dot(vWorldPos, uClipNormal) > uClipOffset) discard;
     vec3 N = normalize(vNormal);
     vec3 V = normalize(uEyePos - vWorldPos);
 
@@ -202,9 +207,11 @@ uniform mat4 uView;
 uniform mat4 uProj;
 
 out vec3 vColor;
+out vec3 vWorldPos;
 
 void main() {
     vColor = aColor;
+    vWorldPos = aPos;
     gl_Position = uProj * uView * vec4(aPos, 1.0);
 }
 )";
@@ -212,9 +219,14 @@ void main() {
 static const char* kGridFragSrc = R"(
 #version 330 core
 in vec3 vColor;
+in vec3 vWorldPos;
+uniform float uClipOn;
+uniform vec3 uClipNormal;
+uniform float uClipOffset;
 out vec4 FragColor;
 
 void main() {
+    if (uClipOn > 0.5 && dot(vWorldPos, uClipNormal) > uClipOffset) discard;
     FragColor = vec4(vColor, 1.0);
 }
 )";
@@ -280,6 +292,7 @@ void Viewport3D::drawGrid(const float* view, const float* proj) {
     gridShader_.use();
     gridShader_.setMat4("uView", view);
     gridShader_.setMat4("uProj", proj);
+    applyClip(gridShader_, nullptr); // the ground grid is never sectioned
 
     glBindVertexArray(gridVAO_);
     glDrawArrays(GL_LINES, 0, gridVertCount_);

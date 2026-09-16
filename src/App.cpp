@@ -212,7 +212,7 @@ void App::render3DScene(int w, int h) {
 
     const auto& bg = activeTheme().bgColor;
     glClearColor(bg[0], bg[1], bg[2], 1.0f);
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
 
     float view[16], proj[16];
     getViewProj(w, h, view, proj);
@@ -232,13 +232,14 @@ void App::render3DScene(int w, int h) {
     // Results are drawn on the imported meshes' own triangles, so the meshes
     // step aside while results are showing.
     const bool resultsShown = workspace_ == Workspace::Simulation && simView_.loaded && simView_.show;
-    scene_.render(viewport3D_.meshShader(), view, proj, eye, resultsShown);
+    scene_.render(viewport3D_.meshShader(), view, proj, eye, resultsShown, &section_);
     renderSimulationResults(view, proj, eye);
+    renderSectionCap(view, proj, resultsShown);
     profiler_.end();
     if (prefs_.showWireframe) {
         glDisable(GL_POLYGON_OFFSET_FILL);
         glLineWidth(prefs_.edgeThickness);
-        scene_.renderEdges(viewport3D_.gridShader(), view, proj, prefs_.edgeColor);
+        scene_.renderEdges(viewport3D_.gridShader(), view, proj, prefs_.edgeColor, &section_);
         glLineWidth(1.0f);
     }
 
@@ -540,6 +541,13 @@ void App::renderFrame() {
         ImGui::End();
     }
 
+    if (sectionWindowOpen_ && workspace_ == Workspace::Model) {
+        ImGui::SetNextWindowSize({300, 0}, ImGuiCond_Appearing);
+        ImGui::SetNextWindowPos({vpW - 320, 60}, ImGuiCond_Appearing);
+        ImGui::Begin("Section view", &sectionWindowOpen_, ImGuiWindowFlags_AlwaysAutoResize);
+        drawSectionControls();
+        ImGui::End();
+    }
     drawMeshImportDialog();
     pollSimulationRun(); // every frame, whichever workspace is showing
     drawSimulationPanel();
@@ -982,6 +990,8 @@ void App::shutdown() {
     viewport3D_.shutdown();
     if (simLineVAO_) { glDeleteVertexArrays(1, &simLineVAO_); simLineVAO_ = 0; }
     if (simLineVBO_) { glDeleteBuffers(1, &simLineVBO_); simLineVBO_ = 0; }
+    if (capVAO_) { glDeleteVertexArrays(1, &capVAO_); capVAO_ = 0; }
+    if (capVBO_) { glDeleteBuffers(1, &capVBO_); capVBO_ = 0; }
     if (simRunner_.running()) simRunner_.cancel();
     releaseSimulationResults();
 

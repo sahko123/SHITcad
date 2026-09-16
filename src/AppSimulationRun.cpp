@@ -222,7 +222,10 @@ bool App::loadSimulationResults(const RunSummary& summary, const std::string& sp
     simView_.runDir = runDir;
     int reach = simView_.mesh.fieldIndex("reach");
     simView_.field = reach >= 0 ? reach : 0;
-    simView_.clipPos = (simView_.mesh.boundsMin[simView_.clipAxis] + simView_.mesh.boundsMax[simView_.clipAxis]) * 0.5f;
+    // Park the (scene-wide) section plane in the middle of the new results
+    // while it is off, so switching it on cuts somewhere useful.
+    if (!section_.enabled)
+        section_.position = (simView_.mesh.boundsMin[section_.axis] + simView_.mesh.boundsMax[section_.axis]) * 0.5f;
 
     // Geometry: position + flat normal per vertex, three vertices per triangle.
     const ResultMesh& m = simView_.mesh;
@@ -288,11 +291,7 @@ void App::renderSimulationResults(const float* view, const float* proj, const fl
     resultShader_.setMat4("uProj", proj);
     resultShader_.setVec3("uEyePos", eyePos[0], eyePos[1], eyePos[2]);
     resultShader_.setVec3("uLightDir", 0.3f, 0.8f, 0.5f);
-    float n[3] = {0, 0, 0};
-    n[simView_.clipAxis] = simView_.clipFlip ? -1.0f : 1.0f;
-    resultShader_.setFloat("uClipOn", simView_.clip ? 1.0f : 0.0f);
-    resultShader_.setVec3("uClipNormal", n[0], n[1], n[2]);
-    resultShader_.setFloat("uClipOffset", simView_.clipFlip ? -simView_.clipPos : simView_.clipPos);
+    applyClip(resultShader_, &section_);
 
     glBindVertexArray(simView_.vao);
     glDrawArrays(GL_TRIANGLES, 0, simView_.vertexCount);
@@ -459,21 +458,6 @@ void App::drawSimulationResultsSection() {
             if ((f.name.find("flux") != std::string::npos) && !simView_.summary.fluxTrustworthy)
                 ImGui::TextColored({1, 0.8f, 0.3f, 1}, "Flux map under-sampled: raise rays. Coverage is unaffected.");
         }
-    }
-
-    // Cut plane
-    ImGui::Checkbox("Cut plane", &simView_.clip);
-    if (simView_.clip) {
-        ImGui::SameLine();
-        const int before = simView_.clipAxis;
-        ImGui::RadioButton("X", &simView_.clipAxis, 0); ImGui::SameLine();
-        ImGui::RadioButton("Y", &simView_.clipAxis, 1); ImGui::SameLine();
-        ImGui::RadioButton("Z", &simView_.clipAxis, 2); ImGui::SameLine();
-        ImGui::Checkbox("Flip", &simView_.clipFlip);
-        const float lo = m.boundsMin[simView_.clipAxis], hi = m.boundsMax[simView_.clipAxis];
-        if (before != simView_.clipAxis) simView_.clipPos = (lo + hi) * 0.5f;
-        ImGui::SetNextItemWidth(-1);
-        ImGui::SliderFloat("##clippos", &simView_.clipPos, lo, hi, "%.0f mm");
     }
 
     // Coverage table

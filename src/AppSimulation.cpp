@@ -228,6 +228,7 @@ void App::renderSimulationOverlay(const float* view, const float* proj) {
     shader.use();
     shader.setMat4("uView", view);
     shader.setMat4("uProj", proj);
+    applyClip(shader, nullptr); // spray cones stay whole, so a section still shows them
     glBindVertexArray(simLineVAO_);
     glDrawArrays(GL_LINES, 0, (GLsizei)verts.size());
     glBindVertexArray(0);
@@ -403,6 +404,10 @@ void App::drawSimulationPanel() {
         if (ImGui::IsItemDeactivatedAfterEdit()) commitSimulationEdit();
         ImGui::TextDisabled("Coverage is exact at any ray count; rays only sharpen the flux map.");
     }
+
+    // Section view sits above the run: cutting the model open is useful
+    // while placing nozzles, not only when looking at results.
+    if (ImGui::CollapsingHeader("View")) drawSectionControls();
 
     drawSimulationRunSection();
     drawSimulationResultsSection();

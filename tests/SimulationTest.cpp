@@ -11,7 +11,9 @@
 #include "MeshImport.h"
 #include "Scene3D.h"
 #include "Serialization.h"
+#include "Section.h"
 #include "ShaderProgram.h"
+#include "Viewport3D.h"
 #include "SimProcess.h"
 #include "SimResults.h"
 #include "Simulation.h"
@@ -557,7 +559,39 @@ static void testEndToEnd(const fs::path& bundle, const std::string& cipSim, cons
     CHECK(flux >= 0 && !mesh.fields[flux].categorical && mesh.fields[flux].p95 > 0, "flux field");
 }
 
+
+static void testSectionPlane() {
+    std::printf("section plane\n");
+    SectionPlane sp;
+    const float inside[3] = {0, -10, 0}, outside[3] = {0, 10, 0};
+    CHECK(!sp.cuts(inside) && !sp.cuts(outside), "disabled plane cuts");
+
+    sp.enabled = true;
+    sp.axis = 1;      // Y, the up axis here
+    sp.position = 0.0f;
+    CHECK(!sp.cuts(inside) && sp.cuts(outside), "Y plane keeps the wrong half");
+
+    sp.flip = true;
+    CHECK(sp.cuts(inside) && !sp.cuts(outside), "flip did not swap the halves");
+    float n[3];
+    sp.normal(n);
+    CHECK(n[1] == -1.0f && sp.offset() == 0.0f, "flipped normal (%g, %g, %g) offset %g", n[0], n[1], n[2], sp.offset());
+
+    // Offset plane: a point exactly on it is kept, past it is cut.
+    sp.flip = false;
+    sp.position = 500.0f;
+    const float on[3] = {0, 500, 0}, past[3] = {0, 500.1f, 0};
+    CHECK(!sp.cuts(on) && sp.cuts(past), "offset plane boundary");
+
+    sp.axis = 0;
+    const float x[3] = {600, 0, 0};
+    CHECK(sp.cuts(x), "X axis ignored");
+    sp.axis = 2;
+    CHECK(!sp.cuts(x), "Z plane cut on X");
+}
+
 int main(int argc, char** argv) {
+    testSectionPlane();
     testRoles();
     testNozzleFollowsHost();
     testSpecExportErrors();
@@ -581,6 +615,14 @@ int main(int argc, char** argv) {
             glfwMakeContextCurrent(win);
             gladLoadGL(glfwGetProcAddress);
             writeCrossCheck(crossDir);
+            {
+                // The mesh and line shaders gained clip uniforms; a typo there
+                // would only show as a blank viewport at run time.
+                std::printf("viewport shaders compile\n");
+                Viewport3D vp;
+                CHECK(vp.init(), "viewport shaders failed to compile");
+                vp.shutdown();
+            }
             {
                 std::printf("result shader compiles\n");
                 ShaderProgram sp;

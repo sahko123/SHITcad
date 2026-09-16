@@ -192,13 +192,14 @@ void Scene3D::clear() {
 }
 
 void Scene3D::render(ShaderProgram& shader, const float* view, const float* proj,
-                     const float* eyePos, bool skipMeshOnly) {
+                     const float* eyePos, bool skipMeshOnly, const SectionPlane* section) {
     shader.use();
     shader.setMat4("uView", view);
     shader.setMat4("uProj", proj);
     shader.setVec3("uEyePos", eyePos[0], eyePos[1], eyePos[2]);
     shader.setVec3("uLightDir", 0.3f, 0.8f, 0.5f);
     shader.setFloat("uAlpha", 1.0f);
+    applyClip(shader, section);
 
     for (const auto& body : bodies_) {
         if (!body.visible) continue;
@@ -213,10 +214,11 @@ void Scene3D::render(ShaderProgram& shader, const float* view, const float* proj
 }
 
 void Scene3D::renderEdges(ShaderProgram& shader, const float* view, const float* proj,
-                          const float* edgeColor) {
+                          const float* edgeColor, const SectionPlane* section) {
     shader.use();
     shader.setMat4("uView", view);
     shader.setMat4("uProj", proj);
+    applyClip(shader, section);
 
     // Use the grid shader which takes position (attr 0) + color (attr 1)
     // We set per-vertex color via a default vertex attrib

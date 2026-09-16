@@ -1496,6 +1496,13 @@ void App::drawToolbar() {
         ImGui::SameLine();
         ImGui::TextDisabled("|");
         ImGui::SameLine();
+        {
+            bool on = sectionWindowOpen_ || section_.enabled;
+            if (on) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.25f, 0.45f, 0.75f, 1.0f));
+            if (ImGui::Button("Section")) sectionWindowOpen_ = !sectionWindowOpen_;
+            if (on) ImGui::PopStyleColor();
+        }
+        ImGui::SameLine();
         ImGui::TextDisabled("Click a plane or face to sketch");
         ImGui::SameLine();
         ImGui::TextDisabled("|");

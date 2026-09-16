@@ -1,4 +1,5 @@
 #pragma once
+#include "Section.h"
 #include "ShaderProgram.h"
 #include <glad/gl.h>
 #include <TopoDS_Shape.hxx>
@@ -97,7 +98,8 @@ public:
     // skipMeshOnly: leave out imported meshes, e.g. while simulation results
     // (drawn on the same triangles) are shown in their place.
     void render(ShaderProgram& shader, const float* view, const float* proj,
-                const float* eyePos, bool skipMeshOnly = false);
+                const float* eyePos, bool skipMeshOnly = false,
+                const SectionPlane* section = nullptr);
 
     bool empty() const { return bodies_.empty(); }
     size_t bodyCount() const { return bodies_.size(); }
@@ -110,7 +112,7 @@ public:
     static void uploadEdges(Body3D& body);
 
     void renderEdges(ShaderProgram& shader, const float* view, const float* proj,
-                     const float* edgeColor);
+                     const float* edgeColor, const SectionPlane* section = nullptr);
 
 private:
     std::vector<Body3D> bodies_;

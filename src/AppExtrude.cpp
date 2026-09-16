@@ -449,6 +449,7 @@ void App::renderExtrudePreview(const float* view, const float* proj, const float
     shader.setMat4("uProj", proj);
     shader.setVec3("uEyePos", eyePos[0], eyePos[1], eyePos[2]);
     shader.setVec3("uLightDir", 0.3f, 0.8f, 0.5f);
+    applyClip(shader, nullptr); // tool previews are never sectioned
 
     float alpha = (extrudeTool_.operation == ExtrudeOperation::Cut) ? 0.4f : 0.5f;
     shader.setVec3("uColor", body.colorR, body.colorG, body.colorB);
