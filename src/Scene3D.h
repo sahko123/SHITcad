@@ -26,6 +26,7 @@ struct Body3D {
     float colorR = 0.6f, colorG = 0.65f, colorB = 0.7f;
     bool visible = true;
     uint32_t sourceFeature = 0; // FeatureID of the MeshImport that made a mesh-only body, else 0
+    bool closed = true;        // watertight? OCCT solids are; an imported STL may not be
 
     bool isMeshOnly() const { return shape.IsNull(); }
 
@@ -47,7 +48,7 @@ struct Body3D {
         : shape(std::move(other.shape)), vertices(std::move(other.vertices)),
           vao(other.vao), vbo(other.vbo), vertexCount(other.vertexCount),
           colorR(other.colorR), colorG(other.colorG), colorB(other.colorB),
-          visible(other.visible), sourceFeature(other.sourceFeature),
+          visible(other.visible), sourceFeature(other.sourceFeature), closed(other.closed),
           edgeVAO(other.edgeVAO), edgeVBO(other.edgeVBO), edgeVertexCount(other.edgeVertexCount) {
         other.vao = 0; other.vbo = 0;
         other.edgeVAO = 0; other.edgeVBO = 0;
@@ -69,6 +70,7 @@ struct Body3D {
             colorR = other.colorR; colorG = other.colorG; colorB = other.colorB;
             visible = other.visible;
             sourceFeature = other.sourceFeature;
+            closed = other.closed;
             edgeVAO = other.edgeVAO; edgeVBO = other.edgeVBO; edgeVertexCount = other.edgeVertexCount;
             // Zero source
             other.vao = 0; other.vbo = 0;
@@ -95,10 +97,12 @@ public:
     void removeLastBody();
     void clear();
 
-    // skipMeshOnly: leave out imported meshes, e.g. while simulation results
-    // (drawn on the same triangles) are shown in their place.
+    // `hideFeatures`: mesh bodies whose sourceFeature is listed are skipped,
+    // used while simulation results are drawn on those same triangles. Only the
+    // surfaces the results actually cover are hidden - a mesh imported after the
+    // run stays visible.
     void render(ShaderProgram& shader, const float* view, const float* proj,
-                const float* eyePos, bool skipMeshOnly = false,
+                const float* eyePos, const std::vector<uint32_t>* hideFeatures = nullptr,
                 const SectionPlane* section = nullptr);
 
     bool empty() const { return bodies_.empty(); }

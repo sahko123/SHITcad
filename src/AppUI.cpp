@@ -251,6 +251,10 @@ void App::openProjectDialog() {
     simUndoBase_ = simulation_;
     simUi_ = {};
     meshPlace_.reset();
+    // Results belong to the project that produced them: without this, the
+    // previous project's coverage table and coloured mesh stayed on screen
+    // over the new project's geometry.
+    clearSimulationRun();
     currentFilePath_ = path;
 
     // Restore nextPlaneID_ from loaded planes
@@ -397,6 +401,25 @@ void App::editMeshImportFeature(FeatureID id) {
 }
 
 void App::setMeshImportData(const MeshImportFeatureData& data) {
+    // A nozzle is stored in its host's scaled frame. Changing the file's unit
+    // rescales the mesh, so the nozzles must scale with it or they are left
+    // stranded: a 2 m vessel corrected from cm to in became 5.08 m with its
+    // nozzle still 1.98 m up - 3.1 m below the roof, and inside every guard
+    // cip-sim has, so the run looked entirely normal.
+    const Feature* before = featureHistory_.findFeature(meshPlace_.featureID);
+    if (before && before->type == FeatureType::MeshImport) {
+        const auto& old = std::get<MeshImportFeatureData>(before->data);
+        const UnitInfo* from = findLengthUnit(old.unit);
+        const UnitInfo* to = findLengthUnit(data.unit);
+        if (from && to && from->toMm != to->toMm) {
+            const double k = (double)to->toMm / (double)from->toMm;
+            for (auto& n : simulation_.nozzles) {
+                if (n.hostFeature != meshPlace_.featureID) continue;
+                for (int i = 0; i < 3; i++) n.position[i] *= k;   // direction is unchanged
+            }
+            commitSimulationEdit();
+        }
+    }
     featureHistory_.updateMeshImportData(meshPlace_.featureID, data);
     for (int i = 0; i < 3; i++) meshPlace_.posBuf[i] = data.transform.t[i];
     replayAllFeatures();
@@ -463,8 +486,23 @@ void App::drawMeshPlacePanel() {
         setMeshImportData(data);
     }
 
+    // Exact bounds from the triangles actually drawn, when they are on hand.
+    // placedBounds transforms the raw bounding box, which is exact only for
+    // quarter turns: a 500 mm sphere turned 45 degrees twice reported its
+    // bottom 353 mm too low, so "Drop to ground" left it floating.
     double lo[3], hi[3];
-    placedBounds(info, kUnits[unitIndex].toMm, data.transform, lo, hi);
+    bool exact = false;
+    for (int i = 0; i < (int)scene_.bodyCount() && !exact; i++) {
+        const Body3D& b = scene_.getBody(i);
+        if (b.sourceFeature != meshPlace_.featureID || b.vertices.empty()) continue;
+        for (int k = 0; k < 3; k++) { lo[k] = 1e300; hi[k] = -1e300; }
+        for (const auto& v : b.vertices) {
+            const double p[3] = {v.px, v.py, v.pz};
+            for (int k = 0; k < 3; k++) { lo[k] = std::min(lo[k], p[k]); hi[k] = std::max(hi[k], p[k]); }
+        }
+        exact = true;
+    }
+    if (!exact) placedBounds(info, kUnits[unitIndex].toMm, data.transform, lo, hi);
     const double pivot[3] = {(lo[0] + hi[0]) * 0.5, (lo[1] + hi[1]) * 0.5, (lo[2] + hi[2]) * 0.5};
     const double big = std::max({hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]});
     const double s = big >= 1000.0 ? 0.001 : 1.0;
@@ -582,7 +620,7 @@ void App::updateMeshHover(float vpW, float vpH) {
     getViewProj(w, h, view, proj);
     float rayOrig[3], rayDir[3];
     screenToRay(io.MousePos.x, io.MousePos.y, 0, 0, vpW, vpH, view, proj, rayOrig, rayDir);
-    meshHover_ = pickMesh(scene_, rayOrig, rayDir);
+    meshHover_ = pickMesh(scene_, rayOrig, rayDir, &section_);
 }
 
 void App::drawMeshHoverReadout() {

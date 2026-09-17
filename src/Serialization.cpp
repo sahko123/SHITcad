@@ -711,7 +711,7 @@ bool saveProject(const std::string& filepath,
         return false;
     }
 
-    out << doc.dump(2);
+    out << doc.dump(2, ' ', false, json::error_handler_t::replace);
     if (out.fail()) {
         s_lastError = "Write error";
         return false;
@@ -787,7 +787,7 @@ std::string openNativeOpenDialog() {
     ofn.lpstrFile = filename;
     ofn.nMaxFile = MAX_PATH;
     ofn.Flags = OFN_FILEMUSTEXIST | OFN_NOCHANGEDIR;
-    if (GetOpenFileNameA(&ofn)) return filename;
+    if (GetOpenFileNameA(&ofn)) return ansiToUtf8(filename);
     return {};
 }
 
@@ -800,7 +800,7 @@ std::string openNativeSaveDialog() {
     ofn.nMaxFile = MAX_PATH;
     ofn.lpstrDefExt = "shitcad";
     ofn.Flags = OFN_OVERWRITEPROMPT | OFN_NOCHANGEDIR;
-    if (GetSaveFileNameA(&ofn)) return filename;
+    if (GetSaveFileNameA(&ofn)) return ansiToUtf8(filename);
     return {};
 }
 
@@ -813,7 +813,7 @@ std::string openNativeStlSaveDialog() {
     ofn.nMaxFile = MAX_PATH;
     ofn.lpstrDefExt = "stl";
     ofn.Flags = OFN_OVERWRITEPROMPT | OFN_NOCHANGEDIR;
-    if (GetSaveFileNameA(&ofn)) return filename;
+    if (GetSaveFileNameA(&ofn)) return ansiToUtf8(filename);
     return {};
 }
 
@@ -1102,7 +1102,7 @@ std::string openNativeStepSaveDialog() {
     ofn.nMaxFile = MAX_PATH;
     ofn.lpstrDefExt = "step";
     ofn.Flags = OFN_OVERWRITEPROMPT | OFN_NOCHANGEDIR;
-    if (GetSaveFileNameA(&ofn)) return filename;
+    if (GetSaveFileNameA(&ofn)) return ansiToUtf8(filename);
     return {};
 }
 
@@ -1114,7 +1114,7 @@ std::string openNativeStepOpenDialog() {
     ofn.lpstrFile = filename;
     ofn.nMaxFile = MAX_PATH;
     ofn.Flags = OFN_FILEMUSTEXIST | OFN_NOCHANGEDIR;
-    if (GetOpenFileNameA(&ofn)) return filename;
+    if (GetOpenFileNameA(&ofn)) return ansiToUtf8(filename);
     return {};
 }
 
@@ -1127,7 +1127,7 @@ std::string openNativeIgesSaveDialog() {
     ofn.nMaxFile = MAX_PATH;
     ofn.lpstrDefExt = "igs";
     ofn.Flags = OFN_OVERWRITEPROMPT | OFN_NOCHANGEDIR;
-    if (GetSaveFileNameA(&ofn)) return filename;
+    if (GetSaveFileNameA(&ofn)) return ansiToUtf8(filename);
     return {};
 }
 
@@ -1139,7 +1139,7 @@ std::string openNativeIgesOpenDialog() {
     ofn.lpstrFile = filename;
     ofn.nMaxFile = MAX_PATH;
     ofn.Flags = OFN_FILEMUSTEXIST | OFN_NOCHANGEDIR;
-    if (GetOpenFileNameA(&ofn)) return filename;
+    if (GetOpenFileNameA(&ofn)) return ansiToUtf8(filename);
     return {};
 }
 
@@ -1152,8 +1152,21 @@ std::string openNativeObjSaveDialog() {
     ofn.nMaxFile = MAX_PATH;
     ofn.lpstrDefExt = "obj";
     ofn.Flags = OFN_OVERWRITEPROMPT | OFN_NOCHANGEDIR;
-    if (GetSaveFileNameA(&ofn)) return filename;
+    if (GetSaveFileNameA(&ofn)) return ansiToUtf8(filename);
     return {};
+}
+
+std::string ansiToUtf8(const std::string& ansi) {
+    if (ansi.empty()) return ansi;
+    const int wide = MultiByteToWideChar(CP_ACP, 0, ansi.c_str(), (int)ansi.size(), nullptr, 0);
+    if (wide <= 0) return ansi;
+    std::wstring w((size_t)wide, L'\0');
+    MultiByteToWideChar(CP_ACP, 0, ansi.c_str(), (int)ansi.size(), &w[0], wide);
+    const int utf8 = WideCharToMultiByte(CP_UTF8, 0, w.c_str(), wide, nullptr, 0, nullptr, nullptr);
+    if (utf8 <= 0) return ansi;
+    std::string out((size_t)utf8, '\0');
+    WideCharToMultiByte(CP_UTF8, 0, w.c_str(), wide, &out[0], utf8, nullptr, nullptr);
+    return out;
 }
 
 std::string openNativeFolderDialog(const char* title) {
@@ -1164,7 +1177,7 @@ std::string openNativeFolderDialog(const char* title) {
     LPITEMIDLIST pidl = SHBrowseForFolderA(&bi);
     if (!pidl) return {};
     std::string out;
-    if (SHGetPathFromIDListA(pidl, path)) out = path;
+    if (SHGetPathFromIDListA(pidl, path)) out = ansiToUtf8(path);
     CoTaskMemFree(pidl);
     return out;
 }
@@ -1178,7 +1191,7 @@ std::string openNativeJsonSaveDialog() {
     ofn.nMaxFile = MAX_PATH;
     ofn.lpstrDefExt = "json";
     ofn.Flags = OFN_OVERWRITEPROMPT | OFN_NOCHANGEDIR;
-    if (GetSaveFileNameA(&ofn)) return filename;
+    if (GetSaveFileNameA(&ofn)) return ansiToUtf8(filename);
     return {};
 }
 
@@ -1191,7 +1204,7 @@ std::string openNativeDxfSaveDialog() {
     ofn.nMaxFile = MAX_PATH;
     ofn.lpstrDefExt = "dxf";
     ofn.Flags = OFN_OVERWRITEPROMPT | OFN_NOCHANGEDIR;
-    if (GetSaveFileNameA(&ofn)) return filename;
+    if (GetSaveFileNameA(&ofn)) return ansiToUtf8(filename);
     return {};
 }
 
@@ -1203,7 +1216,7 @@ std::string openNativeStlOpenDialog() {
     ofn.lpstrFile = filename;
     ofn.nMaxFile = MAX_PATH;
     ofn.Flags = OFN_FILEMUSTEXIST | OFN_NOCHANGEDIR;
-    if (GetOpenFileNameA(&ofn)) return filename;
+    if (GetOpenFileNameA(&ofn)) return ansiToUtf8(filename);
     return {};
 }
 
@@ -1219,7 +1232,7 @@ std::string openNativeImportDialog() {
     ofn.lpstrFile = filename;
     ofn.nMaxFile = MAX_PATH;
     ofn.Flags = OFN_FILEMUSTEXIST | OFN_NOCHANGEDIR;
-    if (GetOpenFileNameA(&ofn)) return filename;
+    if (GetOpenFileNameA(&ofn)) return ansiToUtf8(filename);
     return {};
 }
 

@@ -115,6 +115,17 @@ Global undo stack with typed commands: `AddFeature`, `DeleteFeature`, `SuppressF
 - `renderSectionCap` fills the opening by stencil: draw the clipped closed meshes with depth testing off, front faces incrementing and back faces decrementing, then draw a quad on the plane where the count is non-zero. Needs the stencil buffer cleared each frame.
 - Controls appear in the Simulation panel under "View" and, in the Model workspace, from the toolbar's Section button. The plane is a view setting: not saved in the project.
 
+### Fixes from the 2026-09-16 review (read before touching these)
+- **Paths are stored as UTF-8.** The native dialogs return the ANSI code page; `ansiToUtf8` converts at the boundary and filesystem calls use `u8path`. An accented character used to throw out of `dump()` inside an ImGui draw and terminate the app. JSON dumps also use `error_handler_t::replace`.
+- **State that can go stale is the main hazard here**, not the maths. `App::runInputs()` is the single definition of what a run depended on - spec + rays/bounces (which are argv, not in the spec) + a size/mtime stamp of every STL - and the Results panel compares it. `clearSimulationRun()` is called when a project is opened; `simSummary_` is cleared on start and on cancel, so a previous run's numbers can never be attributed to a later one.
+- **A mesh's unit change rescales its nozzles** (`setMeshImportData`), since they are stored in the host's scaled frame.
+- **The mesh cache keys on path + size + mtime + a sampled content hash.** Size and mtime alone collide: a re-exported STL with the same triangle count is the same size, Windows file times are ~4 ms granular, and timestamp-preserving copies collide exactly.
+- **Picking takes the section plane** (`pickMesh`/`pickFace`): a hit on the cut-away side is skipped, or a click lands on geometry that is not on screen. `pickFace` also skips hidden bodies.
+- **Culling stays off** for the body pass (both shaders are two-sided and `pickMesh` is two-sided); `SketchRenderer` enables it without restoring it, so `render3DScene` disables it explicitly and `renderSectionCap` restores what it found.
+- **The cap only caps closed surfaces** (`trianglesAreClosed`, cached per mesh as `MeshFileInfo::closed` and `Body3D::closed`). An open surface's face counts never cancel, so the stencil covers its whole projected area and the quad paints over the model.
+- **Bounds caches fold vertex positions into the key**, because a moved mesh has an identical vertex count.
+- **Result colours distinguish "no measurement" from "zero"**: NaN and zero are grey, a sprayed-but-unsampled face is amber, and unscored surfaces are muted since the legend's percentages count scored wall only. Categorical colours keep their slot when one fails to parse.
+
 ### File I/O (`Serialization.h/cpp`)
 - Project format: JSON (nlohmann/json), stores full feature history + plane definitions
 - Export: STL, STEP, IGES, OBJ, DXF (via OCCT)

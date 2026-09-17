@@ -15,6 +15,9 @@ const UnitInfo* findLengthUnit(const std::string& name);
 
 struct MeshFileInfo {
     size_t triangleCount = 0;
+    // Every edge shared by exactly two triangles. Only a closed surface can be
+    // section-capped; capping an open one paints a slab over the model.
+    bool closed = false;
     float rawMin[3] = {0, 0, 0}; // in the file's own (unknown) units
     float rawMax[3] = {0, 0, 0};
 };
@@ -46,6 +49,10 @@ void placedBounds(const MeshFileInfo& info, float unitToMm, const MeshTransform&
 
 // Apply placement to vertices already in mm. Normals are rotated, not translated.
 void applyMeshTransform(std::vector<MeshVertex>& verts, const MeshTransform& xf);
+
+// True when every edge is shared by exactly two triangles. `xyz` is 9 floats
+// per triangle.
+bool trianglesAreClosed(const float* xyz, size_t triangles);
 
 // Read an STL and return its triangles scaled to mm.
 //

@@ -21,7 +21,8 @@
 
 namespace shitcad {
 
-FacePickResult pickFace(const Scene3D& scene, const float rayOrigin[3], const float rayDir[3]) {
+FacePickResult pickFace(const Scene3D& scene, const float rayOrigin[3], const float rayDir[3],
+                        const SectionPlane* section) {
     FacePickResult best;
 
     gp_Pnt origin(rayOrigin[0], rayOrigin[1], rayOrigin[2]);
@@ -30,6 +31,7 @@ FacePickResult pickFace(const Scene3D& scene, const float rayOrigin[3], const fl
 
     for (int bi = 0; bi < (int)scene.bodyCount(); bi++) {
         const Body3D& body = scene.getBody(bi);
+        if (!body.visible) continue;   // a hidden body must not steal the pick
 
         for (TopExp_Explorer exp(body.shape, TopAbs_FACE); exp.More(); exp.Next()) {
             const TopoDS_Face& face = TopoDS::Face(exp.Current());
@@ -40,6 +42,9 @@ FacePickResult pickFace(const Scene3D& scene, const float rayOrigin[3], const fl
             for (int i = 1; i <= inter.NbPnt(); i++) {
                 float t = (float)inter.WParameter(i);
                 if (t > 0.001f && t < best.t) {
+                    gp_Pnt hp = inter.Pnt(i);
+                    const float hw[3] = {(float)hp.X(), (float)hp.Y(), (float)hp.Z()};
+                    if (section && section->cuts(hw)) continue;  // cut away: not on screen
                     best.hit = true;
                     best.bodyIndex = bi;
                     best.face = face;
@@ -56,7 +61,8 @@ FacePickResult pickFace(const Scene3D& scene, const float rayOrigin[3], const fl
     return best;
 }
 
-MeshPickResult pickMesh(const Scene3D& scene, const float rayOrigin[3], const float rayDir[3]) {
+MeshPickResult pickMesh(const Scene3D& scene, const float rayOrigin[3], const float rayDir[3],
+                        const SectionPlane* section) {
     MeshPickResult best;
 
     // Double precision: vessel-scale coordinates in mm (~1e3) with float
@@ -95,6 +101,12 @@ MeshPickResult pickMesh(const Scene3D& scene, const float rayOrigin[3], const fl
 
             const double t = (e2[0] * qv[0] + e2[1] * qv[1] + e2[2] * qv[2]) * inv;
             if (t <= 1e-6 || t >= best.t) continue;
+
+            // In a section view the near half is not on screen; picking it would
+            // place a nozzle a vessel-width from where the user clicked.
+            const float hitPt[3] = {(float)(o[0] + d[0] * t), (float)(o[1] + d[1] * t),
+                                    (float)(o[2] + d[2] * t)};
+            if (section && section->cuts(hitPt)) continue;
 
             double nx = e1[1] * e2[2] - e1[2] * e2[1];
             double ny = e1[2] * e2[0] - e1[0] * e2[2];

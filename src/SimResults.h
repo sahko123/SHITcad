@@ -13,8 +13,12 @@ struct ResultField {
     bool categorical = false;
     std::string unit;
     std::vector<std::string> labels;
-    std::vector<std::array<float, 3>> colours; // categorical display colours, if given
+    // Categorical display colours by category index. An entry that failed to
+    // parse keeps its slot with a negative red channel, so later categories are
+    // not shifted onto the wrong meaning.
+    std::vector<std::array<float, 3>> colours;
     float minValue = 0, maxValue = 0, p05 = 0, p95 = 0;
+    int noData = 0;                           // values that are not a measurement
     std::vector<float> values;                // one per triangle
 };
 
@@ -23,6 +27,7 @@ struct ResultMesh {
     std::vector<float> positionsMm;  // triangles * 9, converted from the file's units
     std::vector<ResultField> fields;
     std::vector<std::string> surfaceNames;
+    std::vector<bool> surfaceScored;  // parallel to surfaceNames
     float boundsMin[3] = {0, 0, 0};
     float boundsMax[3] = {0, 0, 0};
 
@@ -32,8 +37,16 @@ struct ResultMesh {
 bool loadResultMesh(const std::string& jsonPath, ResultMesh& out, std::string& error);
 
 // One colour (RGB 0-1) per triangle for a field. Categorical fields use their
-// own colours (or a fixed palette); continuous fields map 0..p95 onto a ramp,
-// with exactly-zero values grey so "nothing arrived" never looks like "a little".
+// own colours (or a fixed palette); continuous fields map 0..p95 onto a ramp.
+//
+// Three cases are deliberately NOT the ramp, because each means "this is not a
+// measurement" and painting them as one misleads:
+//   * no data (NaN)                       -> grey
+//   * zero                                -> grey
+//   * a flux field on a face that was hit by no forward ray -> amber:
+//     under-sampled, not dry. (Needs `direct_rays` and `reach` in the file.)
+// Triangles belonging to unscored surfaces (caps) are muted, since the
+// percentages quoted beside the legend count scored wall only.
 void colourByField(const ResultMesh& mesh, int fieldIndex, std::vector<float>& rgbPerTriangle);
 
 // Continuous ramp, t in [0, 1]. Exposed for the legend.
@@ -45,6 +58,7 @@ void categoryColour(const ResultField& field, int k, float rgb[3]);
 extern const char* kResultVertSrc;
 extern const char* kResultFragSrc;
 extern const float kNoValueColour[3];
+extern const float kUnsampledColour[3];
 
 // ---- Run summary (the CLI's "result" event) --------------------------------------
 

@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <fstream>
 
 namespace shitcad {
@@ -40,8 +41,22 @@ void App::commitSimulationEdit() {
 }
 
 float App::simulationSceneExtent() {
+    // Same trap as sceneBounds: vertexCount does not change when a mesh is
+    // moved, so fold a couple of actual vertices into the key.
     size_t key = scene_.bodyCount();
-    for (int i = 0; i < (int)scene_.bodyCount(); i++) key = key * 31 + (size_t)scene_.getBody(i).vertexCount;
+    for (int i = 0; i < (int)scene_.bodyCount(); i++) {
+        const Body3D& b = scene_.getBody(i);
+        key = key * 31 + (size_t)b.vertexCount;
+        if (!b.vertices.empty()) {
+            const MeshVertex& v = b.vertices.front();
+            const MeshVertex& w = b.vertices.back();
+            for (float f : {v.px, v.py, v.pz, w.px, w.py, w.pz}) {
+                uint32_t bits;
+                std::memcpy(&bits, &f, sizeof(bits));
+                key = key * 1099511628211u + bits;
+            }
+        }
+    }
     if (key == simUi_.sceneExtentKey) return simUi_.sceneExtentMm;
     simUi_.sceneExtentKey = key;
 

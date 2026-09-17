@@ -39,7 +39,7 @@ void App::handleBooleanInput(float vpW, float vpH) {
         float rayOrig[3], rayDir[3];
         screenToRay(mx, my, vMin.x, vMin.y, vpW, vpH, view, proj, rayOrig, rayDir);
 
-        FacePickResult hit = pickFace(scene_, rayOrig, rayDir);
+        FacePickResult hit = pickFace(scene_, rayOrig, rayDir, &section_);
         if (hit.hit) {
             int bodyIdx = hit.bodyIndex;
 

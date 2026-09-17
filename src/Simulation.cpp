@@ -98,6 +98,18 @@ static const MeshImportFeatureData* hostData(const FeatureHistory& h, FeatureID 
     return &std::get<MeshImportFeatureData>(f->data);
 }
 
+// Is this surface actually going into the spec? Suppressed, rolled back and
+// errored surfaces are left out, and a nozzle anchored to one would otherwise
+// keep firing from where that surface used to be.
+static bool featureIsActive(const FeatureHistory& h, FeatureID id) {
+    const auto& feats = h.features();
+    for (int i = 0; i < (int)feats.size(); i++) {
+        if (feats[i].id != id) continue;
+        return !feats[i].suppressed && !h.isRolledBack(i) && !feats[i].hasError;
+    }
+    return false;
+}
+
 static void normalise(double v[3]) {
     double m = std::sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
     if (m > 1e-12) { v[0] /= m; v[1] /= m; v[2] /= m; }
@@ -226,6 +238,11 @@ bool buildTier1Spec(const SimulationSetup& sim, const FeatureHistory& history,
             error = "Nozzle '" + n.name + "' was placed on a surface that has been deleted. Move or delete it.";
             return false;
         }
+        if (n.hostFeature != NullFeatureID && !featureIsActive(history, n.hostFeature)) {
+            error = "Nozzle '" + n.name + "' sits on a surface that is left out of this run "
+                    "(suppressed, rolled back, or failed to load). Unsuppress it, or delete the nozzle.";
+            return false;
+        }
         if (!(n.halfAngleDeg > 0.0f && n.halfAngleDeg <= 180.0f)) {
             error = "Nozzle '" + n.name + "': spray half-angle must be between 0 and 180 degrees.";
             return false;
@@ -251,7 +268,10 @@ bool buildTier1Spec(const SimulationSetup& sim, const FeatureHistory& history,
 
     doc["surfaces"] = surfaces;
     doc["nozzles"] = nozzles;
-    outJson = doc.dump(2);
+    // `replace` rather than the default throw: this runs inside an ImGui draw
+    // (the stale-results check), and a path byte that is not valid UTF-8 would
+    // otherwise terminate the app rather than show an error.
+    outJson = doc.dump(2, ' ', false, json::error_handler_t::replace);
     return true;
 }
 

@@ -4,14 +4,31 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 
 namespace shitcad {
 
 // Bounds of everything drawable, in mm: bodies plus loaded results. Cached on a
 // cheap key so a 500k-triangle import is not walked every frame.
 void App::sceneBounds(float lo[3], float hi[3]) {
+    // The key has to change when a body MOVES, not only when one is added or
+    // re-tessellated: replay reloads the same file and re-applies the transform,
+    // so vertexCount alone is bit-identical after a rotate, and the section
+    // slider kept the pre-move range.
     size_t key = scene_.bodyCount() * 1315423911u + (simView_.loaded ? simView_.mesh.triangles : 0);
-    for (int i = 0; i < (int)scene_.bodyCount(); i++) key = key * 31 + (size_t)scene_.getBody(i).vertexCount;
+    for (int i = 0; i < (int)scene_.bodyCount(); i++) {
+        const Body3D& b = scene_.getBody(i);
+        key = key * 31 + (size_t)b.vertexCount;
+        if (!b.vertices.empty()) {
+            const MeshVertex& v = b.vertices.front();
+            const MeshVertex& w = b.vertices.back();
+            for (float f : {v.px, v.py, v.pz, w.px, w.py, w.pz}) {
+                uint32_t bits;
+                std::memcpy(&bits, &f, sizeof(bits));
+                key = key * 1099511628211u + bits;
+            }
+        }
+    }
 
     if (key != sceneBoundsKey_) {
         sceneBoundsKey_ = key;
@@ -69,6 +86,19 @@ void App::drawSectionControls() {
     ImGui::SameLine();
     ImGui::Checkbox("Cap the cut", &section_.cap);
     ImGui::TextDisabled("Cuts geometry and results. Spray cones stay whole.");
+
+    if (section_.cap) {
+        int open = 0, closed = 0;
+        for (int i = 0; i < (int)scene_.bodyCount(); i++) {
+            if (!scene_.getBody(i).visible) continue;
+            (scene_.getBody(i).closed ? closed : open)++;
+        }
+        if (open > 0)
+            ImGui::TextDisabled("%d open surface%s cannot be capped and are left hollow.",
+                                open, open == 1 ? "" : "s");
+        if (closed == 0 && open > 0)
+            ImGui::TextDisabled("(A cap needs a watertight surface.)");
+    }
 }
 
 // Fill the opening left by the cut so the model reads as solid.
@@ -80,13 +110,30 @@ void App::drawSectionControls() {
 // stencil.
 void App::renderSectionCap(const float* view, const float* proj, bool resultsShown) {
     if (!section_.enabled || !section_.cap) return;
-    const bool haveBodies = !scene_.empty();
-    const bool haveResults = resultsShown && simView_.vao && simView_.vertexCount;
-    if (!haveBodies && !haveResults) return;
+
+    // Only CLOSED surfaces can be capped. The front/back face counts of an open
+    // surface never cancel, so the stencil ends up non-zero across its whole
+    // projected area and the cap quad paints a slab over the very thing being
+    // looked at - including the coverage colours. The panel recommends one file
+    // per surface, so open surfaces are the normal case, not an edge case.
+    const bool haveResults = resultsShown && simView_.vao && simView_.vertexCount &&
+                             simView_.closed && resultShader_.id() != 0;
+    std::vector<int> cappable;
+    for (int i = 0; i < (int)scene_.bodyCount(); i++) {
+        const Body3D& b = scene_.getBody(i);
+        if (!b.visible || !b.closed || b.vao == 0 || b.vertexCount == 0) continue;
+        if (resultsShown && b.isMeshOnly() && b.sourceFeature &&
+            std::find(simView_.coveredFeatures.begin(), simView_.coveredFeatures.end(),
+                      b.sourceFeature) != simView_.coveredFeatures.end())
+            continue;   // drawn as results instead
+        cappable.push_back(i);
+    }
+    if (cappable.empty() && !haveResults) return;
 
     float eye[3];
     viewport3D_.camera().getEyePosition(eye);
 
+    const GLboolean cullWas = glIsEnabled(GL_CULL_FACE);
     glEnable(GL_STENCIL_TEST);
     glClear(GL_STENCIL_BUFFER_BIT);
     glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
@@ -97,7 +144,22 @@ void App::renderSectionCap(const float* view, const float* proj, bool resultsSho
     glStencilOpSeparate(GL_FRONT, GL_KEEP, GL_KEEP, GL_INCR_WRAP);
     glStencilOpSeparate(GL_BACK, GL_KEEP, GL_KEEP, GL_DECR_WRAP);
 
-    if (haveBodies) scene_.render(viewport3D_.meshShader(), view, proj, eye, resultsShown, &section_);
+    if (!cappable.empty()) {
+        auto& mesh = viewport3D_.meshShader();
+        mesh.use();
+        mesh.setMat4("uView", view);
+        mesh.setMat4("uProj", proj);
+        mesh.setVec3("uEyePos", eye[0], eye[1], eye[2]);
+        mesh.setVec3("uLightDir", 0.3f, 0.8f, 0.5f);
+        mesh.setFloat("uAlpha", 1.0f);
+        applyClip(mesh, &section_);
+        for (int i : cappable) {
+            const Body3D& b = scene_.getBody(i);
+            glBindVertexArray(b.vao);
+            glDrawArrays(GL_TRIANGLES, 0, b.vertexCount);
+        }
+        glBindVertexArray(0);
+    }
     if (haveResults) {
         resultShader_.use();
         resultShader_.setMat4("uView", view);
@@ -119,9 +181,11 @@ void App::renderSectionCap(const float* view, const float* proj, bool resultsSho
     const float half = std::max(diag, 1.0f) * 0.75f;
 
     // Nudge towards the camera so the quad wins against geometry lying exactly
-    // on the plane.
-    const float toEye = (eye[0] - centre[0]) * n[0] + (eye[1] - centre[1]) * n[1] + (eye[2] - centre[2]) * n[2];
-    const float bias = std::max(diag * 1e-4f, 1e-3f) * (toEye >= 0.0f ? 1.0f : -1.0f);
+    // on the plane. Measured against the PLANE, not the model centre: with the
+    // eye inside the kept half the centre test picked the wrong sign and pushed
+    // the cap away from the camera instead.
+    const float eyeSide = eye[0] * n[0] + eye[1] * n[1] + eye[2] * n[2] - section_.offset();
+    const float bias = std::max(diag * 1e-4f, 1e-3f) * (eyeSide >= 0.0f ? 1.0f : -1.0f);
     const float d = section_.offset() + bias;
 
     const int a0 = (section_.axis + 1) % 3, a1 = (section_.axis + 2) % 3;
@@ -166,7 +230,7 @@ void App::renderSectionCap(const float* view, const float* proj, bool resultsSho
     glStencilFunc(GL_NOTEQUAL, 0, 0xFF);
     glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
 
-    auto& shader = viewport3D_.gridShader();
+    auto& shader = viewport3D_.gridShader();  // position + colour, no lighting
     shader.use();
     shader.setMat4("uView", view);
     shader.setMat4("uProj", proj);
@@ -176,6 +240,7 @@ void App::renderSectionCap(const float* view, const float* proj, bool resultsSho
     glBindVertexArray(0);
 
     glDisable(GL_STENCIL_TEST);
+    if (cullWas) glEnable(GL_CULL_FACE);   // leave GL as it was found
 }
 
 } // namespace shitcad

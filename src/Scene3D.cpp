@@ -1,4 +1,6 @@
 #include "Scene3D.h"
+
+#include <algorithm>
 #include "Preferences.h"
 
 #include <BRepMesh_IncrementalMesh.hxx>
@@ -192,7 +194,8 @@ void Scene3D::clear() {
 }
 
 void Scene3D::render(ShaderProgram& shader, const float* view, const float* proj,
-                     const float* eyePos, bool skipMeshOnly, const SectionPlane* section) {
+                     const float* eyePos, const std::vector<uint32_t>* hideFeatures,
+                     const SectionPlane* section) {
     shader.use();
     shader.setMat4("uView", view);
     shader.setMat4("uProj", proj);
@@ -203,7 +206,9 @@ void Scene3D::render(ShaderProgram& shader, const float* view, const float* proj
 
     for (const auto& body : bodies_) {
         if (!body.visible) continue;
-        if (skipMeshOnly && body.isMeshOnly()) continue;
+        if (hideFeatures && body.isMeshOnly() && body.sourceFeature &&
+            std::find(hideFeatures->begin(), hideFeatures->end(), body.sourceFeature) != hideFeatures->end())
+            continue;
         if (body.vao == 0 || body.vertexCount == 0) continue;
         shader.setVec3("uColor", body.colorR, body.colorG, body.colorB);
         glBindVertexArray(body.vao);

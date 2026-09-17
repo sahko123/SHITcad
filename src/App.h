@@ -215,7 +215,7 @@ private:
     SimPhase simPhase_ = SimPhase::Idle;
     ProcessRunner simRunner_;
     std::string simRunDir_;
-    std::string simRunSpec_;            // spec text the run was started with
+    std::string simRunInputs_;          // inputs digest the run was started with
     std::vector<std::string> simRunLog_;
     std::string simRunError_;
     double simRunStart_ = 0.0;
@@ -234,7 +234,9 @@ private:
         GLuint vao = 0, vboGeom = 0, vboColour = 0;
         int vertexCount = 0;
         bool colourDirty = true;
-        std::string specJson;           // spec that produced these results
+        std::string inputs;             // everything the run depended on (see runInputs)
+        std::vector<uint32_t> coveredFeatures; // meshes these results are drawn over
+        bool closed = false;            // can the cut face be capped?
         RunSummary summary;
         std::string runDir;
     };
@@ -244,7 +246,7 @@ private:
     // Section (cut) view through the whole scene, in either workspace.
     SectionPlane section_;
     bool sectionWindowOpen_ = false;
-    size_t sceneBoundsKey_ = 0;
+    size_t sceneBoundsKey_ = (size_t)-1;   // not 0: that is a real key for an empty scene
     float sceneLo_[3] = {0, 0, 0};
     float sceneHi_[3] = {0, 0, 0};
     GLuint capVAO_ = 0, capVBO_ = 0;
@@ -370,8 +372,13 @@ private:
     std::string engineProblem() const; // empty if the engine looks usable
     void startTier1Run();
     void pollSimulationRun();
-    bool loadSimulationResults(const RunSummary& summary, const std::string& specJson,
+    bool loadSimulationResults(const RunSummary& summary, const std::string& inputs,
                                const std::string& runDir, std::string& error);
+    // Everything a run's numbers depend on, as one string: the spec, the run
+    // settings (which are NOT in the spec), and a stamp of every STL on disk.
+    // Comparing this is how "these results are stale" is decided.
+    bool runInputs(std::string& inputs, std::string& error) const;
+    void clearSimulationRun();
     void releaseSimulationResults();
     void renderSimulationResults(const float* view, const float* proj, const float* eyePos);
     void drawSimulationRunSection();

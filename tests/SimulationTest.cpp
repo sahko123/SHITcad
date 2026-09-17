@@ -491,7 +491,8 @@ static void testResultLoaderErrors(const fs::path& dir) {
     std::ofstream(dir / "trunc.json") << R"({"format":"cipsim-trimesh","version":1,"units":"m","triangles":1,
         "positions":{"offset":0,"count":9},"fields":[],"bin":"trunc.bin","bytes":36})";
     err.clear();
-    CHECK(!loadResultMesh((dir / "trunc.json").string(), m, err) && err.find("truncated") != std::string::npos,
+    CHECK(!loadResultMesh((dir / "trunc.json").string(), m, err) &&
+              err.find("does not match its header") != std::string::npos,
           "%s", err.c_str());
 }
 
@@ -549,12 +550,23 @@ static void testEndToEnd(const fs::path& bundle, const std::string& cipSim, cons
     CHECK(f.categorical && f.colours.size() == 3 && f.labels.size() == 3, "reach metadata");
     std::vector<float> rgb;
     colourByField(mesh, reach, rgb);
-    bool coloursMatch = true;
+    const int sidx = mesh.fieldIndex("surface_id");
+    bool scoredMatch = true, capsMuted = true;
     for (size_t t = 0; t < mesh.triangles; t++) {
-        int k = (int)std::lround(f.values[t]);
-        coloursMatch = coloursMatch && k >= 0 && k <= 2 && rgb[t * 3] == f.colours[k][0] && rgb[t * 3 + 2] == f.colours[k][2];
+        const int k = (int)std::lround(f.values[t]);
+        if (k < 0 || k > 2) { scoredMatch = false; break; }
+        const int sid = sidx >= 0 ? (int)std::lround(mesh.fields[sidx].values[t]) : 0;
+        const bool scored = sid < (int)mesh.surfaceScored.size() ? mesh.surfaceScored[sid] : true;
+        if (scored) {
+            // Scored wall carries the category colour exactly.
+            scoredMatch = scoredMatch && rgb[t * 3] == f.colours[k][0] && rgb[t * 3 + 2] == f.colours[k][2];
+        } else {
+            // Caps are drawn muted: the legend's percentages do not include them.
+            capsMuted = capsMuted && rgb[t * 3] != f.colours[k][0];
+        }
     }
-    CHECK(coloursMatch, "triangle colours do not follow the reach categories");
+    CHECK(scoredMatch, "scored triangles do not carry their reach category colour");
+    CHECK(capsMuted, "cap triangles are coloured as if they counted");
     int flux = mesh.fieldIndex("total_flux");
     CHECK(flux >= 0 && !mesh.fields[flux].categorical && mesh.fields[flux].p95 > 0, "flux field");
 }
@@ -590,6 +602,164 @@ static void testSectionPlane() {
     CHECK(!sp.cuts(x), "Z plane cut on X");
 }
 
+
+// ---- fixes from the 2026-09-16 review ------------------------------------------
+
+static void testClosedDetection(const fs::path& dir) {
+    std::printf("closed-surface detection\n");
+    auto box = boxTriangles(0, 0, 0, 10, 10, 10);
+    std::vector<float> xyz;
+    for (const auto& t : box) for (float v : t.v) xyz.push_back(v);
+    CHECK(trianglesAreClosed(xyz.data(), box.size()), "a closed box is not detected as closed");
+
+    // One triangle short: the hole leaves three edges used once.
+    CHECK(!trianglesAreClosed(xyz.data(), box.size() - 1), "a box with a hole passed as closed");
+
+    // A single quad (two triangles) is open - and this is the shape the panel
+    // recommends: one file per surface.
+    CHECK(!trianglesAreClosed(xyz.data(), 2), "an open surface passed as closed");
+    CHECK(!trianglesAreClosed(xyz.data(), 0), "an empty mesh passed as closed");
+}
+
+static void testPickingRespectsTheSection(const fs::path& dir) {
+    std::printf("picking in a section view\n");
+    const fs::path stl = dir / "pickbox.stl";
+    writeBinaryStl(stl, boxTriangles(-100, 0, -100, 100, 1000, 100));
+
+    FeatureHistory h;
+    MeshImportFeatureData md;
+    md.sourcePath = stl.string();
+    md.unit = "mm";
+    h.addMeshImportFeature(md, "box");
+    auto planes = referencePlanes();
+    Scene3D scene;
+    replayFeatures(h, planes, scene);
+
+    const float from[3] = {0, 5000, 0}, down[3] = {0, -1, 0};
+    MeshPickResult open = pickMesh(scene, from, down);
+    CHECK(open.hit && near(open.hitWorld[1], 1000, 1e-3), "unsectioned pick: y=%g", open.hitWorld[1]);
+
+    // Cut the top half away: the lid is no longer on screen, so clicking must
+    // land on the floor, not on geometry the user cannot see.
+    SectionPlane sp;
+    sp.enabled = true;
+    sp.axis = 1;
+    sp.position = 500.0f;
+    MeshPickResult cut = pickMesh(scene, from, down, &sp);
+    CHECK(cut.hit, "sectioned pick found nothing");
+    CHECK(near(cut.hitWorld[1], 0.0, 1e-3), "sectioned pick landed at y=%g (should be the floor)",
+          cut.hitWorld[1]);
+    CHECK(!sp.cuts(cut.hitWorld), "sectioned pick returned a point that is cut away");
+}
+
+static void testCacheNoticesARewrite(const fs::path& dir) {
+    std::printf("mesh cache vs a same-size re-export\n");
+    const fs::path stl = dir / "reexport_same_size.stl";
+    writeBinaryStl(stl, boxTriangles(0, 0, 0, 100, 100, 100));
+    MeshFileInfo info;
+    std::string err;
+    CHECK(probeMeshFile(stl.string(), info, err), "%s", err.c_str());
+    CHECK(near(info.rawMax[0], 100, 1e-6), "first read");
+
+    // Same triangle count means an identical file size (84 + 50N), and the
+    // timestamp can land in the same ~4 ms tick - or be preserved outright by
+    // an unzip or a sync restore.
+    const auto when = fs::last_write_time(stl);
+    writeBinaryStl(stl, boxTriangles(0, 0, 0, 250, 100, 100));
+    fs::last_write_time(stl, when);
+    CHECK(fs::file_size(stl) == fs::file_size(stl), "size sanity");
+    CHECK(probeMeshFile(stl.string(), info, err), "%s", err.c_str());
+    CHECK(near(info.rawMax[0], 250, 1e-6),
+          "cache served stale triangles after a same-size, same-mtime re-export (xmax=%g)",
+          info.rawMax[0]);
+}
+
+static void testColoursSayWhatTheyMean(const fs::path& dir) {
+    std::printf("result colouring\n");
+    ResultMesh m;
+    m.triangles = 4;
+    m.surfaceNames = {"wall", "cap"};
+    m.surfaceScored = {true, false};
+
+    ResultField reach;
+    reach.name = "reach";
+    reach.categorical = true;
+    reach.labels = {"never reached", "splash only", "directly sprayed"};
+    reach.colours = {{1, 0, 0}, {-1, -1, -1}, {0, 0, 1}};   // middle one failed to parse
+    reach.values = {0, 1, 2, 2};
+    ResultField rays;
+    rays.name = "direct_rays";
+    rays.values = {0, 0, 0, 5};
+    ResultField flux;
+    flux.name = "total_flux";
+    flux.p95 = 1.0f;
+    flux.values = {0.0f, 0.0f, 0.0f, 0.5f};
+    ResultField sid;
+    sid.name = "surface_id";
+    sid.categorical = true;
+    sid.values = {0, 0, 0, 0};          // all scored for now
+    m.fields = {reach, rays, flux, sid};
+
+    std::vector<float> rgb;
+    colourByField(m, 0, rgb);
+    // A colour that failed to parse must not shift the ones after it onto the
+    // wrong meaning: category 2 is still blue, category 1 is not.
+    CHECK(rgb[2 * 3 + 2] > 0.9f && rgb[2 * 3] < 0.1f, "category 2 colour shifted: (%g, %g, %g)",
+          rgb[6], rgb[7], rgb[8]);
+    CHECK(!(rgb[1 * 3 + 2] > 0.9f && rgb[1 * 3] < 0.1f), "category 1 took category 2's colour");
+
+    // Now mark triangle 2's surface as a cap: same category, muted colour.
+    m.fields[3].values = {0, 0, 1, 0};
+    std::vector<float> muted;
+    colourByField(m, 0, muted);
+    CHECK(muted[2 * 3 + 2] != rgb[2 * 3 + 2], "cap triangle was not muted");
+    CHECK(muted[3 * 3 + 2] == rgb[3 * 3 + 2], "a scored triangle was muted");
+
+    colourByField(m, 2, rgb);   // total_flux
+    // Triangle 2 is sprayed (reach 2) with no rays: under-sampled, not dry.
+    CHECK(near(rgb[2 * 3], kUnsampledColour[0], 0.2) || rgb[2 * 3] != rgb[0],
+          "an unsampled face is coloured the same as a dry one");
+    // Triangle 2 belongs to the unscored cap, so it is muted; triangle 3 is
+    // scored and keeps its ramp colour.
+    CHECK(rgb[3 * 3] != rgb[2 * 3] || rgb[3 * 3 + 1] != rgb[2 * 3 + 1], "cap not muted");
+
+    // NaN is no data, not a value at the bottom of the ramp.
+    m.fields[2].values = {std::nanf(""), 0.0f, 0.5f, 1.0f};
+    colourByField(m, 2, rgb);
+    CHECK(near(rgb[0], kNoValueColour[0], 1e-6) && near(rgb[1], kNoValueColour[1], 1e-6),
+          "NaN was given a ramp colour: (%g, %g, %g)", rgb[0], rgb[1], rgb[2]);
+}
+
+static void testLoaderRejectsMismatchedData(const fs::path& dir) {
+    std::printf("result loader strictness\n");
+    // Header describes one triangle; the data file holds more. Reading it would
+    // pull field values out of the coordinate block - plausible numbers, wrong.
+    const fs::path js = dir / "bigger.json", bin = dir / "bigger.bin";
+    std::vector<float> data(9 + 1 + 16, 1.0f);
+    std::ofstream(bin, std::ios::binary).write((const char*)data.data(), (std::streamsize)(data.size() * 4));
+    std::ofstream(js) << R"({"format":"cipsim-trimesh","version":1,"units":"m","triangles":1,
+        "positions":{"offset":0,"count":9},
+        "fields":[{"name":"reach","kind":"categorical","offset":36,"count":1}],
+        "bin":"bigger.bin","bytes":40})";
+    ResultMesh m;
+    std::string err;
+    CHECK(!loadResultMesh(js.string(), m, err) && err.find("does not match its header") != std::string::npos,
+          "oversized data accepted: %s", err.c_str());
+
+    // Units the spec allows must all load.
+    for (const char* u : {"m", "dm", "cm", "mm", "um", "in", "ft"}) {
+        const fs::path j2 = dir / "u.json", b2 = dir / "u.bin";
+        std::vector<float> one(9, 1.0f);
+        std::ofstream(b2, std::ios::binary).write((const char*)one.data(), 36);
+        std::ofstream(j2) << R"({"format":"cipsim-trimesh","version":1,"units":")" << u
+                          << R"(","triangles":1,"positions":{"offset":0,"count":9},"fields":[],)"
+                          << R"("bin":"u.bin","bytes":36})";
+        ResultMesh mm;
+        std::string e2;
+        CHECK(loadResultMesh(j2.string(), mm, e2), "unit %s rejected: %s", u, e2.c_str());
+    }
+}
+
 int main(int argc, char** argv) {
     testSectionPlane();
     testRoles();
@@ -615,6 +785,7 @@ int main(int argc, char** argv) {
             glfwMakeContextCurrent(win);
             gladLoadGL(glfwGetProcAddress);
             writeCrossCheck(crossDir);
+            testPickingRespectsTheSection(fs::temp_directory_path() / "shitcad_simulation_test");
             {
                 // The mesh and line shaders gained clip uniforms; a typo there
                 // would only show as a blank viewport at run time.
@@ -637,6 +808,10 @@ int main(int argc, char** argv) {
     //   SimulationTest.exe <bundle_dir> <cip-sim dir> [python]
     const std::string python = argc > 3 ? argv[3] : "python";
     testResultLoaderErrors(fs::temp_directory_path() / "shitcad_simulation_test");
+    testClosedDetection(fs::temp_directory_path() / "shitcad_simulation_test");
+    testCacheNoticesARewrite(fs::temp_directory_path() / "shitcad_simulation_test");
+    testColoursSayWhatTheyMean(fs::temp_directory_path() / "shitcad_simulation_test");
+    testLoaderRejectsMismatchedData(fs::temp_directory_path() / "shitcad_simulation_test");
     if (argc > 2) {
         testProcessRunner(python);
         testEndToEnd(crossDir, argv[2], python);

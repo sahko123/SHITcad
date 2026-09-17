@@ -8,7 +8,9 @@
 #include <algorithm>
 #include <cmath>
 #include <filesystem>
+#include <array>
 #include <map>
+#include <fstream>
 #include <memory>
 
 namespace shitcad {
@@ -95,6 +97,37 @@ void applyMeshTransform(std::vector<MeshVertex>& verts, const MeshTransform& xf)
     }
 }
 
+bool trianglesAreClosed(const float* xyz, size_t triangles) {
+    if (triangles == 0) return false;
+    // Weld by rounded position: an STL stores each vertex once per triangle, so
+    // shared edges only match after welding. 1e-4 mm is far below any real
+    // feature and far above float32 noise at vessel scale.
+    std::map<std::array<long long, 3>, int> ids;
+    auto vertexId = [&](const float* p) {
+        std::array<long long, 3> key{(long long)std::llround(p[0] * 10000.0),
+                                     (long long)std::llround(p[1] * 10000.0),
+                                     (long long)std::llround(p[2] * 10000.0)};
+        auto it = ids.find(key);
+        if (it != ids.end()) return it->second;
+        const int id = (int)ids.size();
+        ids.emplace(key, id);
+        return id;
+    };
+    std::map<std::pair<int, int>, int> edges;
+    for (size_t t = 0; t < triangles; t++) {
+        const float* p = xyz + t * 9;
+        const int v[3] = {vertexId(p), vertexId(p + 3), vertexId(p + 6)};
+        for (int e = 0; e < 3; e++) {
+            int a = v[e], b = v[(e + 1) % 3];
+            if (a == b) return false;                     // degenerate
+            edges[{std::min(a, b), std::max(a, b)}]++;
+        }
+    }
+    for (const auto& kv : edges)
+        if (kv.second != 2) return false;
+    return true;
+}
+
 // ---- file loading ---------------------------------------------------------
 
 const UnitInfo* findLengthUnit(const std::string& name) {
@@ -109,6 +142,7 @@ namespace {
 struct CachedMesh {
     uintmax_t fileSize = 0;
     std::filesystem::file_time_type mtime;
+    uint64_t contentHash = 0;
     std::vector<MeshVertex> raw; // unscaled, with per-face normals
     MeshFileInfo info;
 };
@@ -120,10 +154,33 @@ std::map<std::string, std::shared_ptr<const CachedMesh>>& cache() {
     return c;
 }
 
+// FNV-1a over the head, middle and tail of the file. Cheap on a 50 MB export,
+// and re-exported geometry differs somewhere in those windows in practice.
+uint64_t sampleHash(const std::filesystem::path& path, uintmax_t size) {
+    std::ifstream f(path, std::ios::binary);
+    if (!f) return 0;
+    uint64_t h = 1469598103934665603ull;
+    char buf[4096];
+    const uintmax_t spots[3] = {0, size > 4096 ? size / 2 : 0, size > 4096 ? size - 4096 : 0};
+    for (uintmax_t at : spots) {
+        f.clear();
+        f.seekg((std::streamoff)at, std::ios::beg);
+        f.read(buf, sizeof(buf));
+        const std::streamsize got = f.gcount();
+        for (std::streamsize i = 0; i < got; i++) {
+            h ^= (unsigned char)buf[i];
+            h *= 1099511628211ull;
+        }
+    }
+    h ^= (uint64_t)size;
+    return h * 1099511628211ull;
+}
+
 std::shared_ptr<const CachedMesh> readCached(const std::string& path, std::string& error) {
     std::error_code ec;
-    // Narrow (ANSI) path, matching what the native file dialogs return.
-    const std::filesystem::path fsPath(path);
+    // Paths are stored as UTF-8 (see Serialization.h ansiToUtf8), so they have
+    // to be converted back rather than handed to the narrow constructor.
+    const std::filesystem::path fsPath = std::filesystem::u8path(path);
     uintmax_t size = std::filesystem::file_size(fsPath, ec);
     if (ec) {
         error = "File not found: " + path;
@@ -135,12 +192,19 @@ std::shared_ptr<const CachedMesh> readCached(const std::string& path, std::strin
         return nullptr;
     }
 
+    // Size + mtime alone is not enough: a re-exported STL with the same
+    // triangle count has an identical size (84 + 50N bytes), Windows file times
+    // are ~4 ms granular, and timestamp-preserving copies (unzip, sync restore)
+    // collide exactly. Hash a sample of the bytes as well - the whole file would
+    // cost too much on every replay.
+    const uint64_t hash = sampleHash(fsPath, size);
     auto it = cache().find(path);
-    if (it != cache().end() && it->second->fileSize == size && it->second->mtime == mtime) {
+    if (it != cache().end() && it->second->fileSize == size && it->second->mtime == mtime &&
+        it->second->contentHash == hash) {
         return it->second;
     }
 
-    Handle(Poly_Triangulation) tri = RWStl::ReadFile(path.c_str());
+    Handle(Poly_Triangulation) tri = RWStl::ReadFile(fsPath.string().c_str());
     if (tri.IsNull() || tri->NbTriangles() == 0) {
         error = "Not a readable STL, or it contains no triangles: " + path;
         return nullptr;
@@ -149,6 +213,7 @@ std::shared_ptr<const CachedMesh> readCached(const std::string& path, std::strin
     auto mesh = std::make_shared<CachedMesh>();
     mesh->fileSize = size;
     mesh->mtime = mtime;
+    mesh->contentHash = hash;
     mesh->raw.reserve((size_t)tri->NbTriangles() * 3);
     mesh->info.triangleCount = (size_t)tri->NbTriangles();
 
@@ -181,6 +246,7 @@ std::shared_ptr<const CachedMesh> readCached(const std::string& path, std::strin
         mesh->info.rawMin[k] = lo[k];
         mesh->info.rawMax[k] = hi[k];
     }
+    mesh->info.closed = trianglesAreClosed(&mesh->raw[0].px, mesh->info.triangleCount);
 
     cache()[path] = mesh;
     return mesh;

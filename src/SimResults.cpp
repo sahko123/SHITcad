@@ -14,6 +14,9 @@ namespace fs = std::filesystem;
 namespace shitcad {
 
 const float kNoValueColour[3] = {0.35f, 0.35f, 0.38f};
+// Sprayed, but no forward ray landed here: the flux number is a sampling
+// artefact, not a low value. Deliberately not on the viridis ramp.
+const float kUnsampledColour[3] = {0.85f, 0.65f, 0.15f};
 
 const char* kResultVertSrc = R"(
 #version 330 core
@@ -70,10 +73,16 @@ static bool hexColour(const std::string& s, std::array<float, 3>& out) {
     return true;
 }
 
+// Every length unit a spec may declare (cipsim/spec.py LENGTH_TO_M). Rejecting
+// dm/in/ft here meant a legal result file would not open.
 static double unitToMm(const std::string& u) {
     if (u == "m") return 1000.0;
-    if (u == "mm") return 1.0;
+    if (u == "dm") return 100.0;
     if (u == "cm") return 10.0;
+    if (u == "mm") return 1.0;
+    if (u == "um") return 0.001;
+    if (u == "in") return 25.4;
+    if (u == "ft") return 304.8;
     return 0.0;
 }
 
@@ -97,23 +106,41 @@ bool loadResultMesh(const std::string& jsonPath, ResultMesh& out, std::string& e
         const fs::path binPath = fs::path(jsonPath).parent_path() / h.at("bin").get<std::string>();
         const uintmax_t bytes = h.at("bytes").get<uintmax_t>();
         std::error_code ec;
-        if (fs::file_size(binPath, ec) < bytes || ec) {
-            error = "Result data file is missing or truncated: " + binPath.string();
+        const uintmax_t actual = fs::file_size(binPath, ec);
+        if (ec) {
+            error = "Result data file is missing: " + binPath.string();
             return false;
         }
+        // Exact, both ways. A file LARGER than the header describes means the
+        // header and the data are from different runs, and the fields would be
+        // read out of the wrong part of the file - silently, with plausible
+        // values, because coordinates are floats too.
+        if (actual != bytes) {
+            error = "Result data file does not match its header (" + std::to_string(actual) +
+                    " bytes on disk, header says " + std::to_string(bytes) + "): " + binPath.string();
+            return false;
+        }
+        if (bytes % 4 != 0) { error = "Result data length is not a whole number of floats"; return false; }
         std::ifstream bf(binPath, std::ios::binary);
+        if (!bf) { error = "Cannot open " + binPath.string(); return false; }
         std::vector<float> raw((size_t)(bytes / 4));
         bf.read((char*)raw.data(), (std::streamsize)(raw.size() * 4)); // little-endian float32, as x64 is
+        if ((uintmax_t)bf.gcount() != bytes) {
+            error = "Could not read all of " + binPath.string();
+            return false;
+        }
 
         ResultMesh m;
         m.triangles = n;
         const auto& pos = h.at("positions");
+        if (pos.at("offset").get<size_t>() % 4 != 0) { error = "Result positions are not float-aligned"; return false; }
         const size_t pOff = pos.at("offset").get<size_t>() / 4, pCount = pos.at("count").get<size_t>();
         if (pCount != n * 9 || pOff + pCount > raw.size()) { error = "Result positions do not match triangle count"; return false; }
         m.positionsMm.resize(pCount);
         for (int k = 0; k < 3; k++) { m.boundsMin[k] = 1e30f; m.boundsMax[k] = -1e30f; }
         for (size_t i = 0; i < pCount; i++) {
             const float v = (float)(raw[pOff + i] * scale);
+            if (!std::isfinite(v)) { error = "Result positions contain invalid numbers"; return false; }
             m.positionsMm[i] = v;
             int k = (int)(i % 3);
             m.boundsMin[k] = std::min(m.boundsMin[k], v);
@@ -125,21 +152,27 @@ bool loadResultMesh(const std::string& jsonPath, ResultMesh& out, std::string& e
             rf.name = f.at("name").get<std::string>();
             rf.categorical = f.value("kind", "") == "categorical";
             rf.unit = f.value("unit", "");
+            if (f.at("offset").get<size_t>() % 4 != 0) { error = "Field '" + rf.name + "' is not float-aligned"; return false; }
             const size_t off = f.at("offset").get<size_t>() / 4, count = f.at("count").get<size_t>();
             if (count != n || off + count > raw.size()) { error = "Field '" + rf.name + "' has the wrong size"; return false; }
             rf.values.assign(raw.begin() + off, raw.begin() + off + count);
             for (const auto& l : f.value("labels", json::array())) rf.labels.push_back(l.get<std::string>());
             for (const auto& c : f.value("colours", json::array())) {
-                std::array<float, 3> rgb;
-                if (hexColour(c.get<std::string>(), rgb)) rf.colours.push_back(rgb);
+                std::array<float, 3> rgb{-1.0f, -1.0f, -1.0f};   // slot kept even if unparseable
+                hexColour(c.is_string() ? c.get<std::string>() : "", rgb);
+                rf.colours.push_back(rgb);
             }
             rf.minValue = f.value("min", 0.0f);
             rf.maxValue = f.value("max", 0.0f);
             rf.p05 = f.value("p05", 0.0f);
             rf.p95 = f.value("p95", 0.0f);
+            rf.noData = f.value("no_data", 0);
             m.fields.push_back(std::move(rf));
         }
-        for (const auto& s : h.value("surfaces", json::array())) m.surfaceNames.push_back(s.value("name", ""));
+        for (const auto& s : h.value("surfaces", json::array())) {
+            m.surfaceNames.push_back(s.value("name", ""));
+            m.surfaceScored.push_back(s.value("scored", true));
+        }
         out = std::move(m);
         return true;
     } catch (const std::exception& e) {
@@ -160,14 +193,18 @@ void rampColour(float t, float rgb[3]) {
 }
 
 void categoryColour(const ResultField& f, int k, float rgb[3]) {
-    static const float palette[8][3] = {
+    // 16 entries: with 8, a project with nine surfaces gave two of them the
+    // same swatch in both the legend and the mesh.
+    static const float palette[16][3] = {
         {0.40f, 0.65f, 0.90f}, {0.95f, 0.60f, 0.25f}, {0.45f, 0.80f, 0.45f}, {0.85f, 0.40f, 0.55f},
-        {0.65f, 0.55f, 0.85f}, {0.85f, 0.80f, 0.35f}, {0.40f, 0.80f, 0.80f}, {0.70f, 0.70f, 0.70f}};
-    if (k >= 0 && k < (int)f.colours.size()) {
+        {0.65f, 0.55f, 0.85f}, {0.85f, 0.80f, 0.35f}, {0.40f, 0.80f, 0.80f}, {0.70f, 0.70f, 0.70f},
+        {0.20f, 0.45f, 0.70f}, {0.75f, 0.35f, 0.10f}, {0.20f, 0.55f, 0.25f}, {0.60f, 0.15f, 0.35f},
+        {0.45f, 0.30f, 0.65f}, {0.60f, 0.55f, 0.15f}, {0.15f, 0.55f, 0.55f}, {0.45f, 0.45f, 0.45f}};
+    if (k >= 0 && k < (int)f.colours.size() && f.colours[k][0] >= 0.0f) {
         for (int j = 0; j < 3; j++) rgb[j] = f.colours[k][j];
         return;
     }
-    k = ((k % 8) + 8) % 8;
+    k = ((k % 16) + 16) % 16;
     for (int j = 0; j < 3; j++) rgb[j] = palette[k][j];
 }
 
@@ -176,16 +213,39 @@ void colourByField(const ResultMesh& mesh, int fieldIndex, std::vector<float>& r
     if (fieldIndex < 0 || fieldIndex >= (int)mesh.fields.size()) return;
     const ResultField& f = mesh.fields[fieldIndex];
 
+    // A flux map cannot distinguish "nothing arrived" from "no ray sampled
+    // this face" on its own; the tracer exports the ray count so it can.
+    const bool isFlux = f.name.find("flux") != std::string::npos;
+    const int raysIdx = mesh.fieldIndex("direct_rays");
+    const int reachIdx = mesh.fieldIndex("reach");
+    const std::vector<float>* rays = (isFlux && raysIdx >= 0) ? &mesh.fields[raysIdx].values : nullptr;
+    const std::vector<float>* reach = (rays && reachIdx >= 0) ? &mesh.fields[reachIdx].values : nullptr;
+
+    // Caps and obstructions are drawn, but the percentages quoted beside the
+    // legend count scored wall only, so they are muted rather than coloured as
+    // if they were part of the answer.
+    const int surfIdx = mesh.fieldIndex("surface_id");
+    const std::vector<float>* surf = surfIdx >= 0 ? &mesh.fields[surfIdx].values : nullptr;
+
     const float hi = f.p95 > 0 ? f.p95 : (f.maxValue > 0 ? f.maxValue : 1.0f);
     for (size_t t = 0; t < mesh.triangles; t++) {
         const float v = f.values[t];
         float c[3];
-        if (f.categorical) {
+        if (!std::isfinite(v)) {
+            for (int j = 0; j < 3; j++) c[j] = kNoValueColour[j];
+        } else if (f.categorical) {
             categoryColour(f, (int)std::lround(v), c);
+        } else if (rays && (*rays)[t] <= 0.0f && reach && (*reach)[t] > 0.0f) {
+            for (int j = 0; j < 3; j++) c[j] = kUnsampledColour[j];
         } else if (!(v > 0.0f)) {
             for (int j = 0; j < 3; j++) c[j] = kNoValueColour[j];
         } else {
             rampColour(v / hi, c);
+        }
+        if (surf) {
+            const int sid = (int)std::lround((*surf)[t]);
+            if (sid >= 0 && sid < (int)mesh.surfaceScored.size() && !mesh.surfaceScored[sid])
+                for (int j = 0; j < 3; j++) c[j] = 0.35f + 0.25f * c[j];   // muted
         }
         for (int j = 0; j < 3; j++) rgb[t * 3 + j] = c[j];
     }

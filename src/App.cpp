@@ -228,11 +228,17 @@ void App::render3DScene(int w, int h) {
         glEnable(GL_POLYGON_OFFSET_FILL);
         glPolygonOffset(1.0f, 1.0f);
     }
+    // Both body shaders light back faces, pickMesh is two-sided, and a section
+    // view shows interiors - so culling must be off. SketchRenderer enables it
+    // and does not restore it, which made sectioned vessels see-through from
+    // the second frame on.
+    glDisable(GL_CULL_FACE);
     profiler_.begin("Bodies");
     // Results are drawn on the imported meshes' own triangles, so the meshes
     // step aside while results are showing.
     const bool resultsShown = workspace_ == Workspace::Simulation && simView_.loaded && simView_.show;
-    scene_.render(viewport3D_.meshShader(), view, proj, eye, resultsShown, &section_);
+    scene_.render(viewport3D_.meshShader(), view, proj, eye,
+                  resultsShown ? &simView_.coveredFeatures : nullptr, &section_);
     renderSimulationResults(view, proj, eye);
     renderSectionCap(view, proj, resultsShown);
     profiler_.end();
@@ -674,7 +680,7 @@ void App::handleNavigateInput(float vpW, float vpH) {
         float rayOrig[3], rayDir[3];
         screenToRay(io.MousePos.x, io.MousePos.y, 0, 0, vpW, vpH, view, proj, rayOrig, rayDir);
 
-        FacePickResult faceHit = pickFace(scene_, rayOrig, rayDir);
+        FacePickResult faceHit = pickFace(scene_, rayOrig, rayDir, &section_);
         if (faceHit.hit) {
             SketchPlane facePlane;
             if (extractPlaneFromFace(faceHit.face, facePlane, faceHit.hitWorld)) {
@@ -715,7 +721,7 @@ void App::handleNavigateInput(float vpW, float vpH) {
         }
 
         // Check body faces
-        FacePickResult faceHit = pickFace(scene_, rayOrig, rayDir);
+        FacePickResult faceHit = pickFace(scene_, rayOrig, rayDir, &section_);
         if (faceHit.hit && faceHit.t < bestT) {
             if (isCylindricalFace(faceHit.face)) {
                 // Open tangent plane dialog for cylinders

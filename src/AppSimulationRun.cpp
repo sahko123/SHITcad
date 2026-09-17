@@ -62,6 +62,52 @@ std::string App::engineProblem() const {
     return {};
 }
 
+// ---- what a run depends on --------------------------------------------------------
+
+// Size and modification time of a file, so a re-export is noticed. The spec
+// records only the path, and cip-sim re-reads that path at run time: without
+// this, re-exporting the vessel left the results silently describing geometry
+// that no longer exists.
+static std::string fileStamp(const std::string& path) {
+    std::error_code ec;
+    const auto size = fs::file_size(path, ec);
+    const auto when = fs::last_write_time(path, ec);
+    return path + "|" + (ec ? "missing" : std::to_string((unsigned long long)size) + "|" +
+                              std::to_string((long long)when.time_since_epoch().count()));
+}
+
+bool App::runInputs(std::string& inputs, std::string& error) const {
+    std::string spec;
+    std::vector<std::string> warnings;
+    if (!buildTier1Spec(simulation_, featureHistory_, spec, warnings, error)) return false;
+
+    // Rays and bounces are passed on the command line, not written into the
+    // spec, so comparing specs alone missed them: dragging "Splash bounces"
+    // from 2 to 0 changes never-reached from 2.8% to 21.4% with no warning.
+    std::string out = spec;
+    out += "\n#rays=" + std::to_string(simulation_.rays);
+    out += "\n#bounces=" + std::to_string(simulation_.bounces);
+    for (const auto& f : featureHistory_.features()) {
+        if (f.type != FeatureType::MeshImport) continue;
+        out += "\n#stl=" + fileStamp(std::get<MeshImportFeatureData>(f.data).sourcePath);
+    }
+    inputs = std::move(out);
+    return true;
+}
+
+void App::clearSimulationRun() {
+    if (simRunner_.running()) simRunner_.cancel();
+    releaseSimulationResults();
+    simView_ = SimResultView{};
+    simPhase_ = SimPhase::Idle;
+    simSummary_ = RunSummary{};
+    simRunLog_.clear();
+    simRunError_.clear();
+    simRunDir_.clear();
+    simRunInputs_.clear();
+    paraviewMessage_.clear();
+}
+
 // ---- running ----------------------------------------------------------------------
 
 static std::string timestamp() {
@@ -75,6 +121,10 @@ void App::startTier1Run() {
     if (simPhase_ == SimPhase::Running) return;
     simRunLog_.clear();
     simRunError_.clear();
+    // A summary left over from a previous run must never be attributed to this
+    // one: a cancelled run that had already printed its result could otherwise
+    // be reported as this run's answer.
+    simSummary_ = RunSummary{};
 
     std::string problem = engineProblem();
     if (!problem.empty()) {
@@ -90,6 +140,12 @@ void App::startTier1Run() {
         return;
     }
     for (const auto& w : warnings) simRunLog_.push_back("warning: " + w);
+    std::string inputs;
+    if (!runInputs(inputs, err)) {
+        simRunError_ = err;
+        simPhase_ = SimPhase::Failed;
+        return;
+    }
 
     // Runs sit next to the project when it has been saved, so results travel
     // with it; otherwise in the temp folder.
@@ -129,7 +185,7 @@ void App::startTier1Run() {
         return;
     }
     simRunDir_ = dir.string();
-    simRunSpec_ = spec;
+    simRunInputs_ = inputs;
     simRunStart_ = glfwGetTime();
     simPhase_ = SimPhase::Running;
 }
@@ -180,7 +236,7 @@ void App::pollSimulationRun() {
     simRunEnd_ = glfwGetTime();
     if (simRunner_.exitCode() == 0 && !simSummary_.viewerJson.empty()) {
         std::string err;
-        if (loadSimulationResults(simSummary_, simRunSpec_, simRunDir_, err)) {
+        if (loadSimulationResults(simSummary_, simRunInputs_, simRunDir_, err)) {
             simPhase_ = SimPhase::Done;
         } else {
             simRunError_ = err;
@@ -210,7 +266,7 @@ void App::releaseSimulationResults() {
     simView_.loaded = false;
 }
 
-bool App::loadSimulationResults(const RunSummary& summary, const std::string& specJson,
+bool App::loadSimulationResults(const RunSummary& summary, const std::string& inputs,
                                 const std::string& runDir, std::string& error) {
     ResultMesh mesh;
     if (!loadResultMesh(summary.viewerJson, mesh, error)) return false;
@@ -218,7 +274,17 @@ bool App::loadSimulationResults(const RunSummary& summary, const std::string& sp
     releaseSimulationResults();
     simView_.mesh = std::move(mesh);
     simView_.summary = summary;
-    simView_.specJson = specJson;
+    simView_.inputs = inputs;
+    // Which imported meshes these results replace on screen, by name. A mesh
+    // imported after the run is not in this list and stays visible.
+    simView_.coveredFeatures.clear();
+    for (const auto& f : featureHistory_.features()) {
+        if (f.type != FeatureType::MeshImport) continue;
+        if (std::find(simView_.mesh.surfaceNames.begin(), simView_.mesh.surfaceNames.end(), f.name)
+            != simView_.mesh.surfaceNames.end())
+            simView_.coveredFeatures.push_back(f.id);
+    }
+    simView_.closed = trianglesAreClosed(simView_.mesh.positionsMm.data(), simView_.mesh.triangles);
     simView_.runDir = runDir;
     int reach = simView_.mesh.fieldIndex("reach");
     simView_.field = reach >= 0 ? reach : 0;
@@ -349,6 +415,9 @@ void App::drawSimulationRunSection() {
             if (ImGui::Button("Cancel", {-1, 0})) {
                 simRunner_.cancel();
                 simPhase_ = SimPhase::Cancelled;
+                // The engine may already have printed its result before the
+                // kill landed; that answer belongs to no run now.
+                simSummary_ = RunSummary{};
             }
         } else {
             bool ready = problem.empty();
@@ -387,12 +456,14 @@ void App::drawSimulationResultsSection() {
     if (!simView_.loaded) return;
     if (!ImGui::CollapsingHeader("Results", ImGuiTreeNodeFlags_DefaultOpen)) return;
 
-    // Stale: the set-up that would be run now differs from the one that made these.
+    // Stale: anything the run depended on has changed - the spec, the run
+    // settings, or an STL on disk.
     {
         std::string now, err;
-        std::vector<std::string> w;
-        bool same = buildTier1Spec(simulation_, featureHistory_, now, w, err) && now == simView_.specJson;
-        if (!same) ImGui::TextColored({1, 0.8f, 0.3f, 1}, "Set-up changed since this run - run again.");
+        const bool same = runInputs(now, err) && now == simView_.inputs;
+        if (!same)
+            ImGui::TextColored({1, 0.8f, 0.3f, 1},
+                               "Set-up, settings or geometry changed since this run - run again.");
     }
 
     ImGui::Checkbox("Show on geometry", &simView_.show);
@@ -429,6 +500,9 @@ void App::drawSimulationResultsSection() {
                 } else {
                     ImGui::TextUnformatted(label.c_str());
                 }
+                if (f.name == "reach" && k == 2)
+                    ImGui::TextDisabled("  percentages are of scored wall area;\n"
+                                        "  caps and obstructions are drawn muted");
             }
         } else {
             const float hi = f.p95 > 0 ? f.p95 : f.maxValue;
@@ -455,8 +529,20 @@ void App::drawSimulationResultsSection() {
             ImGui::Dummy({sw, sw});
             ImGui::SameLine();
             ImGui::TextDisabled("none reached (scale tops out at the 95th percentile)");
-            if ((f.name.find("flux") != std::string::npos) && !simView_.summary.fluxTrustworthy)
-                ImGui::TextColored({1, 0.8f, 0.3f, 1}, "Flux map under-sampled: raise rays. Coverage is unaffected.");
+            if (f.name.find("flux") != std::string::npos) {
+                ImVec2 q2 = ImGui::GetCursorScreenPos();
+                dl->AddRectFilled(q2, {q2.x + sw, q2.y + sw},
+                    IM_COL32((int)(kUnsampledColour[0] * 255), (int)(kUnsampledColour[1] * 255),
+                             (int)(kUnsampledColour[2] * 255), 255));
+                ImGui::Dummy({sw, sw});
+                ImGui::SameLine();
+                ImGui::TextDisabled("sprayed, but no ray sampled it - raise rays");
+                if (!simView_.summary.fluxTrustworthy)
+                    ImGui::TextColored({1, 0.8f, 0.3f, 1},
+                                       "Flux map under-sampled: raise rays. Coverage is unaffected.");
+            }
+            if (f.noData > 0)
+                ImGui::TextDisabled("%d faces have no value for this field", f.noData);
         }
     }
 

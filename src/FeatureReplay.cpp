@@ -730,6 +730,7 @@ void replayFeatures(FeatureHistory& history,
             }
             applyMeshTransform(body.vertices, md.transform);
             body.sourceFeature = feat.id;
+            body.closed = info.closed;
             Scene3D::uploadMesh(body);
             scene.addMeshBody(std::move(body));
         } else if (feat.type == FeatureType::Boolean) {

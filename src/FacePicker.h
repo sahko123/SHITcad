@@ -1,6 +1,7 @@
 #pragma once
 #include "SketchPlane.h"
 #include "Scene3D.h"
+#include "Section.h"
 #include <TopoDS_Face.hxx>
 
 namespace shitcad {
@@ -13,7 +14,10 @@ struct FacePickResult {
     float t = 1e30f;
 };
 
-FacePickResult pickFace(const Scene3D& scene, const float rayOrigin[3], const float rayDir[3]);
+// `section`: hits on the cut-away side are ignored, so a click in a section
+// view lands on what is actually on screen rather than on the hidden near wall.
+FacePickResult pickFace(const Scene3D& scene, const float rayOrigin[3], const float rayDir[3],
+                        const SectionPlane* section = nullptr);
 
 // Picking on mesh-only bodies (imported STL), which pickFace cannot see because
 // they have no TopoDS faces.
@@ -29,7 +33,8 @@ struct MeshPickResult {
 
 // Nearest triangle hit over all visible mesh-only bodies. Brute force: fine for
 // clicks and hover on exports of a few hundred thousand triangles.
-MeshPickResult pickMesh(const Scene3D& scene, const float rayOrigin[3], const float rayDir[3]);
+MeshPickResult pickMesh(const Scene3D& scene, const float rayOrigin[3], const float rayDir[3],
+                        const SectionPlane* section = nullptr);
 
 // Extract a sketch plane from a face. For non-planar faces, pass the hit point
 // to compute a tangent plane at that location.
