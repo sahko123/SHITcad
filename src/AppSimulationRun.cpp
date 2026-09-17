@@ -227,6 +227,11 @@ void App::pollSimulationRun() {
             std::string perr;
             if (parseResultEvent(l, summary, perr)) gotResult = true;
             else errors += perr;
+        } else if (kind.empty()) {
+            // Not JSON: a native library wrote to stdout, or the line was
+            // corrupted. Keep it rather than dropping it silently - it is
+            // usually the only clue about what went wrong.
+            simRunLog_.push_back("engine output: " + l.substr(0, 200));
         }
     }
     if (!errors.empty()) simRunError_ += (simRunError_.empty() ? "" : "\n") + errors;
