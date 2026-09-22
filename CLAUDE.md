@@ -10,7 +10,7 @@ cmake -B build -S . -DCMAKE_TOOLCHAIN_FILE=[vcpkg-root]/scripts/buildsystems/vcp
 cmake --build build --config Release
 ```
 
-Tests are opt-in (`-DSHITCAD_BUILD_TESTS=ON`), then run `build/Release/MeshImportTest.exe`.
+Tests are opt-in (`-DSHITCAD_BUILD_TESTS=ON`), then run `build/Release/MeshImportTest.exe`, `SimulationTest.exe` and `ReplayTest.exe`. `ReplayTest` builds one history per feature type in code and checks volumes, bounds, every constraint type and save/load round trips; it is the regression net for the Qt migration (`docs/qt-migration-plan.md`, manual part in `docs/smoke-checklist.md`).
 Run the build from PowerShell or cmd: Git Bash rewrites MSBuild's `/m` switch into a path.
 
 Dependencies are auto-fetched via FetchContent (GLFW 3.4, GLAD, ImGui 1.91.9, nlohmann/json 3.11.3). OpenCASCADE comes from vcpkg.

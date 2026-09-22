@@ -62,7 +62,7 @@ if(SHITCAD_BUILD_TESTS)
     get_target_property(_shitcad_sources SHITcad SOURCES)
     list(FILTER _shitcad_sources EXCLUDE REGEX "src/(main|App[A-Za-z]*)\\.cpp$")
 
-    foreach(_test MeshImportTest SimulationTest)
+    foreach(_test MeshImportTest SimulationTest ReplayTest)
         add_executable(${_test} tests/${_test}.cpp ${_shitcad_sources})
         target_include_directories(${_test} PRIVATE ${CMAKE_SOURCE_DIR}/src)
         target_link_libraries(${_test} PRIVATE imgui opengl32 occt_libs nlohmann_json::nlohmann_json dbghelp)

@@ -38,8 +38,13 @@ is a goal; Linux is kept compiling but is not run or debugged yet.
   `AppSketch.cpp`), the sketch message, and the dimension value box. `AppSketch.cpp`
   reaches into ImGui internals (`GImGui->ActiveId = 0`) to reset an InputText.
 - The viewport is the **whole window**; panels float over it. Handlers receive
-  `vpW/vpH = io.DisplaySize`. Two handlers hard-code the toolbar height
-  (`io.MousePos.y < 30.0f` in `AppSimulation.cpp` and `AppUI.cpp`).
+  `vpW/vpH = io.DisplaySize`. Three handlers hard-code the toolbar height
+  (`io.MousePos.y < 30.0f` in `App.cpp` `handleNavigateInput`, `AppSimulation.cpp`
+  and `AppUI.cpp`).
+- **Shortcuts depend on the mode.** `Ctrl+Z/Y` undo the *sketch* history in a sketch
+  (`AppSketch.cpp`) and the *global* history in Navigate and Simulation. `E` enters
+  extrude, but `Ctrl+E` exports STL. `O` toggles the projection, but `Ctrl+O` opens a
+  project.
 - `Theme` in `Preferences.h` stores dimension colours as `ImU32`, and
   `Preferences::applyTheme()` styles ImGui.
 - The tests (`MeshImportTest`, `SimulationTest`) exclude `App*.cpp`, so nothing
@@ -69,8 +74,8 @@ is a goal; Linux is kept compiling but is not run or debugged yet.
    and nlohmann's default object type sorts keys). This covers everything under
    the UI. Until Phase 3 makes GPU upload lazy, it uses a hidden GLFW window, like
    `MeshImportTest`.
-4. **Smoke checklist** (`docs/smoke-checklist.md`): a short manual script that
-   covers every interaction path:
+4. **Smoke checklist** ([smoke-checklist.md](smoke-checklist.md)): a manual script
+   that covers every interaction path:
    - orbit, pan, zoom, ortho toggle
    - enter a sketch; draw each entity; snaps; box and lasso select; drag; delete
    - the inline dimension input and the dimension tool (new and editing existing)
@@ -270,7 +275,9 @@ Order, from low risk to high:
      become `QAction`s with `Qt::ApplicationShortcut` that `post()` the existing
      operation. **Remove them from the viewport handlers in the same commit**, so
      nothing fires twice. Keep today's modes: if a shortcut is ignored in a mode now,
-     the action's handler checks the same condition.
+     the action's handler checks the same condition. Undo and redo **dispatch on the
+     mode**: sketch history in a sketch, global history otherwise. They are also
+     ignored while the inline dimension input is active, as today.
    - **Mode-dependent keys** (E, T, O, V, Escape, Delete, digits for inline
      dimensions, ...) stay in the viewport handlers. An event filter on the main
      window forwards key presses to the viewport unless the focus widget is a text
