@@ -7,7 +7,8 @@
 // would see: bodies, volumes, sizes, errors, solved sketches, saved files.
 //
 // Build with -DSHITCAD_BUILD_TESTS=ON, run build/Release/ReplayTest.exe.
-// Uses a hidden GLFW window only because replay uploads meshes to OpenGL.
+// Runs without a GL context on purpose: Scene3D uploads lazily at render
+// time, so replay must not call OpenGL (a stray call would crash here).
 
 #include "FeatureHistory.h"
 #include "FeatureReplay.h"
@@ -22,9 +23,6 @@
 
 #include <BRepGProp.hxx>
 #include <GProp_GProps.hxx>
-
-#include <glad/gl.h>
-#include <GLFW/glfw3.h>
 
 #include <algorithm>
 #include <cmath>
@@ -149,6 +147,8 @@ static Outcome replayAndMeasure(FeatureHistory& h, std::vector<SketchPlane>& pla
     o.bodies = scene.bodyCount();
     for (int i = 0; i < (int)scene.bodyCount(); i++) {
         const Body3D& b = scene.getBody(i);
+        CHECK(b.vao == 0 && b.gpuDirty, "body %d was uploaded during replay", i);
+        CHECK(b.vertexCount == (int)b.vertices.size(), "body %d vertexCount %d != %zu", i, b.vertexCount, b.vertices.size());
         if (b.isMeshOnly()) {
             o.meshBodies++;
         } else {
@@ -600,32 +600,13 @@ int main() {
 
     testEveryConstraintType(dir);
 
-    if (!glfwInit()) {
-        std::printf("glfwInit failed; replay tests skipped\n");
-        g_failures++;
-    } else {
-        glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
-        glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
-        glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
-        glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
-        GLFWwindow* win = glfwCreateWindow(64, 64, "test", nullptr, nullptr);
-        if (!win) {
-            std::printf("no GL context; replay tests skipped\n");
-            g_failures++;
-        } else {
-            glfwMakeContextCurrent(win);
-            gladLoadGL(glfwGetProcAddress);
-            testExtrudeJoinCut();
-            testRevolve();
-            testLoft();
-            testBoolean();
-            testSuppressAndRollback();
-            testMeshAndSimulation(stl);
-            testRoundTrips(dir, stl);
-            glfwDestroyWindow(win);
-        }
-        glfwTerminate();
-    }
+    testExtrudeJoinCut();
+    testRevolve();
+    testLoft();
+    testBoolean();
+    testSuppressAndRollback();
+    testMeshAndSimulation(stl);
+    testRoundTrips(dir, stl);
 
     std::printf("\n%d checks, %d failed\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;

@@ -15,11 +15,8 @@
 #include <TopoDS_Solid.hxx>
 
 #include <glad/gl.h>
-#include <GLFW/glfw3.h>
 #include <imgui.h>
 #include <imgui_internal.h>
-#include <imgui_impl_glfw.h>
-#include <imgui_impl_opengl3.h>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -614,7 +611,7 @@ void App::updateMeshHover(float vpW, float vpH) {
     meshHoverMouse_[1] = in_.mouseY;
 
     int w, h;
-    glfwGetFramebufferSize(window_, &w, &h);
+    framebufferSize(w, h);
     float view[16], proj[16];
     getViewProj(w, h, view, proj);
     float rayOrig[3], rayDir[3];
@@ -629,7 +626,7 @@ void App::drawMeshHoverReadout() {
     const Feature* feat = featureHistory_.findFeature(body.sourceFeature);
 
     int w, h;
-    glfwGetFramebufferSize(window_, &w, &h);
+    framebufferSize(w, h);
     float view[16], proj[16];
     getViewProj(w, h, view, proj);
 
@@ -752,7 +749,7 @@ void App::updateWindowTitle() {
     if (unsavedChanges_) {
         title += " *";
     }
-    glfwSetWindowTitle(window_, title.c_str());
+    if (host_) host_->setWindowTitle(title);
 }
 
 void App::markDirty() {

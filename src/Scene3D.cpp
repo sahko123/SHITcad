@@ -101,14 +101,10 @@ void Scene3D::extractEdges(const TopoDS_Shape& shape, std::vector<EdgeVertex>& o
 void Scene3D::uploadEdges(Body3D& body) {
     if (body.edgeVAO) { glDeleteVertexArrays(1, &body.edgeVAO); body.edgeVAO = 0; }
     if (body.edgeVBO) { glDeleteBuffers(1, &body.edgeVBO); body.edgeVBO = 0; }
-    body.edgeVertexCount = 0;
 
-    std::vector<EdgeVertex> edgeVerts;
-    if (!body.shape.IsNull())
-        extractEdges(body.shape, edgeVerts);
+    const auto& edgeVerts = body.edges;
     if (edgeVerts.empty()) return;
 
-    body.edgeVertexCount = (int)edgeVerts.size();
     glGenVertexArrays(1, &body.edgeVAO);
     glGenBuffers(1, &body.edgeVBO);
     glBindVertexArray(body.edgeVAO);
@@ -154,48 +150,79 @@ void Scene3D::addBody(const TopoDS_Shape& shape) {
     const auto& bc = activeTheme().bodyColor;
     body.colorR = bc[0]; body.colorG = bc[1]; body.colorB = bc[2];
     triangulateShape(shape, body.vertices);
-    uploadMesh(body);
-    uploadEdges(body);
+    extractEdges(shape, body.edges);
+    body.vertexCount = (int)body.vertices.size();
+    body.edgeVertexCount = (int)body.edges.size();
+    body.gpuDirty = true;
     bodies_.push_back(std::move(body));
 }
 
 void Scene3D::addMeshBody(Body3D&& body) {
     const auto& bc = activeTheme().bodyColor;
     body.colorR = bc[0]; body.colorG = bc[1]; body.colorB = bc[2];
+    body.vertexCount = (int)body.vertices.size();
+    body.edgeVertexCount = (int)body.edges.size();
+    body.gpuDirty = true;
     bodies_.push_back(std::move(body));
 }
 
 void Scene3D::replaceBody(int index, const TopoDS_Shape& newShape) {
     if (index < 0 || index >= (int)bodies_.size()) return;
     auto& b = bodies_[index];
-    // uploadMesh/uploadEdges handle freeing old GL resources before re-creating
+    releaseGpu(b);
     b.shape = newShape;
     b.vertices.clear();
+    b.edges.clear();
     triangulateShape(newShape, b.vertices);
-    uploadMesh(b);
-    uploadEdges(b);
+    extractEdges(newShape, b.edges);
+    b.vertexCount = (int)b.vertices.size();
+    b.edgeVertexCount = (int)b.edges.size();
+    b.gpuDirty = true;
 }
 
 void Scene3D::removeBody(int index) {
     if (index < 0 || index >= (int)bodies_.size()) return;
-    // Body3D destructor handles GL cleanup via RAII
+    releaseGpu(bodies_[index]);
     bodies_.erase(bodies_.begin() + index);
 }
 
 void Scene3D::removeLastBody() {
     if (bodies_.empty()) return;
-    // Body3D destructor handles GL cleanup via RAII
+    releaseGpu(bodies_.back());
     bodies_.pop_back();
 }
 
 void Scene3D::clear() {
-    // Body3D destructors handle GL cleanup via RAII
+    for (auto& b : bodies_) releaseGpu(b);
     bodies_.clear();
+}
+
+void Scene3D::releaseGpu(Body3D& b) {
+    if (b.vao) pendingVAOs_.push_back(b.vao);
+    if (b.edgeVAO) pendingVAOs_.push_back(b.edgeVAO);
+    if (b.vbo) pendingVBOs_.push_back(b.vbo);
+    if (b.edgeVBO) pendingVBOs_.push_back(b.edgeVBO);
+    b.vao = b.vbo = b.edgeVAO = b.edgeVBO = 0;
+    b.gpuDirty = true;
+}
+
+void Scene3D::syncGpu() {
+    if (!pendingVAOs_.empty()) glDeleteVertexArrays((GLsizei)pendingVAOs_.size(), pendingVAOs_.data());
+    if (!pendingVBOs_.empty()) glDeleteBuffers((GLsizei)pendingVBOs_.size(), pendingVBOs_.data());
+    pendingVAOs_.clear();
+    pendingVBOs_.clear();
+    for (auto& b : bodies_) {
+        if (!b.gpuDirty) continue;
+        uploadMesh(b);
+        uploadEdges(b);
+        b.gpuDirty = false;
+    }
 }
 
 void Scene3D::render(ShaderProgram& shader, const float* view, const float* proj,
                      const float* eyePos, const std::vector<uint32_t>* hideFeatures,
                      const SectionPlane* section) {
+    syncGpu();
     shader.use();
     shader.setMat4("uView", view);
     shader.setMat4("uProj", proj);
@@ -220,6 +247,7 @@ void Scene3D::render(ShaderProgram& shader, const float* view, const float* proj
 
 void Scene3D::renderEdges(ShaderProgram& shader, const float* view, const float* proj,
                           const float* edgeColor, const SectionPlane* section) {
+    syncGpu();
     shader.use();
     shader.setMat4("uView", view);
     shader.setMat4("uProj", proj);

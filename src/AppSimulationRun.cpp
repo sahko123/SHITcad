@@ -11,7 +11,6 @@
 #undef near
 #undef far
 
-#include <GLFW/glfw3.h>
 #include <imgui.h>
 #include <nlohmann/json.hpp>
 
@@ -187,7 +186,7 @@ void App::startTier1Run() {
     }
     simRunDir_ = utf8(dir);
     simRunInputs_ = inputs;
-    simRunStart_ = glfwGetTime();
+    simRunStart_ = nowSeconds();
     simPhase_ = SimPhase::Running;
 }
 
@@ -239,7 +238,7 @@ void App::pollSimulationRun() {
     if (gotResult) simSummary_ = summary;
 
     if (!simRunner_.finished()) return;
-    simRunEnd_ = glfwGetTime();
+    simRunEnd_ = nowSeconds();
     if (simRunner_.exitCode() == 0 && !simSummary_.viewerJson.empty()) {
         std::string err;
         if (loadSimulationResults(simSummary_, simRunInputs_, simRunDir_, err)) {
@@ -415,7 +414,7 @@ void App::drawSimulationRunSection() {
         }
 
         if (simPhase_ == SimPhase::Running) {
-            double elapsed = glfwGetTime() - simRunStart_;
+            double elapsed = nowSeconds() - simRunStart_;
             ImGui::Text("Running Tier 1... %.0f s", elapsed);
             if (!simRunLog_.empty()) ImGui::TextDisabled("%s", simRunLog_.back().c_str());
             if (ImGui::Button("Cancel", {-1, 0})) {

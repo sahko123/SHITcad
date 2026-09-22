@@ -17,12 +17,18 @@ struct EdgeVertex {
     float px, py, pz;
 };
 
+// A body's geometry lives on the CPU (vertices, edges); its GL buffers are a
+// cache that Scene3D fills lazily when it renders (gpuDirty). Building,
+// replacing and removing bodies therefore never touches OpenGL, so replay,
+// undo and commit work without a current GL context.
 struct Body3D {
     TopoDS_Shape shape; // null for mesh-only bodies (imported STL) - check before OCCT ops
     std::vector<MeshVertex> vertices;
+    std::vector<EdgeVertex> edges;  // wireframe, extracted when the body is built
     GLuint vao = 0;
     GLuint vbo = 0;
-    int vertexCount = 0;
+    int vertexCount = 0;            // vertices.size(), set when the body is built
+    bool gpuDirty = true;           // GL buffers do not match vertices/edges yet
     float colorR = 0.6f, colorG = 0.65f, colorB = 0.7f;
     bool visible = true;
     uint32_t sourceFeature = 0; // FeatureID of the MeshImport that made a mesh-only body, else 0
@@ -46,7 +52,8 @@ struct Body3D {
     // Move constructor: transfer ownership, zero source
     Body3D(Body3D&& other) noexcept
         : shape(std::move(other.shape)), vertices(std::move(other.vertices)),
-          vao(other.vao), vbo(other.vbo), vertexCount(other.vertexCount),
+          edges(std::move(other.edges)),
+          vao(other.vao), vbo(other.vbo), vertexCount(other.vertexCount), gpuDirty(other.gpuDirty),
           colorR(other.colorR), colorG(other.colorG), colorB(other.colorB),
           visible(other.visible), sourceFeature(other.sourceFeature), closed(other.closed),
           edgeVAO(other.edgeVAO), edgeVBO(other.edgeVBO), edgeVertexCount(other.edgeVertexCount) {
@@ -66,7 +73,9 @@ struct Body3D {
             // Transfer
             shape = std::move(other.shape);
             vertices = std::move(other.vertices);
+            edges = std::move(other.edges);
             vao = other.vao; vbo = other.vbo; vertexCount = other.vertexCount;
+            gpuDirty = other.gpuDirty;
             colorR = other.colorR; colorG = other.colorG; colorB = other.colorB;
             visible = other.visible;
             sourceFeature = other.sourceFeature;
@@ -112,14 +121,24 @@ public:
 
     static void triangulateShape(const TopoDS_Shape& shape, std::vector<MeshVertex>& out);
     static void extractEdges(const TopoDS_Shape& shape, std::vector<EdgeVertex>& out);
+    // Immediate upload, for tool preview bodies that live outside the scene.
     static void uploadMesh(Body3D& body);
-    static void uploadEdges(Body3D& body);
+
+    // Frees buffers of removed/replaced bodies and uploads dirty ones. Needs a
+    // current GL context; render() and renderEdges() call it themselves.
+    void syncGpu();
 
     void renderEdges(ShaderProgram& shader, const float* view, const float* proj,
                      const float* edgeColor, const SectionPlane* section = nullptr);
 
 private:
+    static void uploadEdges(Body3D& body);
+    // Hand a body's GL buffers to the pending lists so its destructor does not
+    // call GL; they are freed by the next syncGpu().
+    void releaseGpu(Body3D& body);
+
     std::vector<Body3D> bodies_;
+    std::vector<GLuint> pendingVAOs_, pendingVBOs_;
 };
 
 } // namespace shitcad

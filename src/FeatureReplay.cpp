@@ -731,8 +731,7 @@ void replayFeatures(FeatureHistory& history,
             applyMeshTransform(body.vertices, md.transform);
             body.sourceFeature = feat.id;
             body.closed = info.closed;
-            Scene3D::uploadMesh(body);
-            scene.addMeshBody(std::move(body));
+            scene.addMeshBody(std::move(body)); // uploaded when next rendered
         } else if (feat.type == FeatureType::Boolean) {
             const auto& bd = std::get<BooleanFeatureData>(feat.data);
 

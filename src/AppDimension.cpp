@@ -3,11 +3,8 @@
 #include "AutoConstraint.h"
 
 #include <glad/gl.h>
-#include <GLFW/glfw3.h>
 #include <imgui.h>
 #include <imgui_internal.h>
-#include <imgui_impl_glfw.h>
-#include <imgui_impl_opengl3.h>
 #include "UnitUtils.h"
 #include <cstdio>
 #include <cmath>
@@ -309,7 +306,7 @@ static void renderAngleDim(Overlay2D& ov, const SketchPlane& sp, const Sketch& s
 
 void App::handleDimToolClick(Sketch& sketch) {
     int w, h;
-    glfwGetFramebufferSize(window_, &w, &h);
+    framebufferSize(w, h);
     float view[16], proj[16];
     getViewProj(w, h, view, proj);
     float apparentScale = computeApparentScale(activePlane(), view, proj, (float)w, (float)h);

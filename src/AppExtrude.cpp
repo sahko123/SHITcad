@@ -13,11 +13,8 @@
 #include <TopoDS_Solid.hxx>
 
 #include <glad/gl.h>
-#include <GLFW/glfw3.h>
 #include <imgui.h>
 #include <imgui_internal.h>
-#include <imgui_impl_glfw.h>
-#include <imgui_impl_opengl3.h>
 #include <cstdio>
 #include <cmath>
 #include <algorithm>
@@ -103,7 +100,7 @@ void App::handleExtrudeInput(float vpW, float vpH) {
     // Project mouse to sketch plane
     if (!in_.uiWantsMouse) {
         int w, h;
-        glfwGetFramebufferSize(window_, &w, &h);
+        framebufferSize(w, h);
         float view[16], proj[16];
         getViewProj(w, h, view, proj);
 
@@ -152,7 +149,7 @@ void App::handleExtrudeInput(float vpW, float vpH) {
         extrudeTool_.handleVisible && in_.mouseClicked(MouseButton::Left)) {
         // Compute handle tip position in screen space
         int w, h;
-        glfwGetFramebufferSize(window_, &w, &h);
+        framebufferSize(w, h);
         float view[16], proj[16];
         getViewProj(w, h, view, proj);
 
@@ -180,7 +177,7 @@ void App::handleExtrudeInput(float vpW, float vpH) {
     if (extrudeTool_.isDragging) {
         // Compute pixels-per-unit along the extrude normal for 1:1 screen mapping
         int w, h;
-        glfwGetFramebufferSize(window_, &w, &h);
+        framebufferSize(w, h);
         float view[16], proj[16];
         getViewProj(w, h, view, proj);
 

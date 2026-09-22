@@ -238,6 +238,17 @@ else.
 **Done when:** `App` has no GLFW calls, the tests run without a GL window, and
 the checklist passes.
 
+**Status (done, with two items moved).** Lazy upload is in `Scene3D` (`syncGpu`,
+`releaseGpu`, CPU `edges`); `ReplayTest` and `MeshImportTest` now run with no GL
+context and check that replay uploaded nothing. `App` has no GLFW calls:
+`main.cpp` holds `GlfwHost`, `AppHost.h` is the interface, and App exposes
+`init(host, dpi)`, `frame(dt, w, h)`, `paint()`, `post()`, `shutdown()`. The frame
+loop keeps its old order. All three input scenarios were pixel-identical to the
+pre-migration build.
+**Moved to Phase 5:** the change counters (item 2) and extracting named operations
+from each panel (item 1). Both are added with the first Qt panel that uses them, so
+each is checked by a real consumer rather than written speculatively.
+
 ## Phase 4: Qt host, with the existing ImGui UI running inside it
 
 1. Add Qt 6 `qtbase` (features `widgets`, `opengl`) to `vcpkg.json`. In CMake:

@@ -13,11 +13,8 @@
 #include <TopoDS_Solid.hxx>
 
 #include <glad/gl.h>
-#include <GLFW/glfw3.h>
 #include <imgui.h>
 #include <imgui_internal.h>
-#include <imgui_impl_glfw.h>
-#include <imgui_impl_opengl3.h>
 #include <cstdio>
 #include <cmath>
 #include <algorithm>
@@ -86,7 +83,7 @@ void App::handleRevolveInput(float vpW, float vpH) {
 
     if (!in_.uiWantsMouse) {
         int w, h;
-        glfwGetFramebufferSize(window_, &w, &h);
+        framebufferSize(w, h);
         float view[16], proj[16];
         getViewProj(w, h, view, proj);
 
@@ -129,7 +126,7 @@ void App::handleRevolveInput(float vpW, float vpH) {
             // Hit test lines in sketch
             const Sketch& sketch = revolveSketch();
             int w, h;
-            glfwGetFramebufferSize(window_, &w, &h);
+            framebufferSize(w, h);
             float view[16], proj[16];
             getViewProj(w, h, view, proj);
             float apparentScale = computeApparentScale(revolvePlane(), view, proj, (float)w, (float)h);

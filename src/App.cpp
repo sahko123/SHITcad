@@ -14,11 +14,8 @@
 #include <TopoDS_Solid.hxx>
 
 #include <glad/gl.h>
-#include <GLFW/glfw3.h>
 #include <imgui.h>
 #include <imgui_internal.h>
-#include <imgui_impl_glfw.h>
-#include <imgui_impl_opengl3.h>
 #include "UnitUtils.h"
 #include <cstdio>
 #include <cstdlib>
@@ -26,6 +23,7 @@
 #include <cmath>
 #include <algorithm>
 #include <string>
+#include <chrono>
 
 namespace shitcad {
 
@@ -115,73 +113,16 @@ static void fillInputFromImGui(InputFrame& in, float viewY) {
         in.typed.push_back((char32_t)io.InputQueueCharacters[i]);
 }
 
-bool App::init() {
-    if (!glfwInit()) {
-        fprintf(stderr, "Failed to initialize GLFW\n");
-        return false;
-    }
-
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
-    glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
-    glfwWindowHint(GLFW_MAXIMIZED, GLFW_TRUE);
-
-    window_ = glfwCreateWindow(1280, 720, "SHITcad", nullptr, nullptr);
-    if (!window_) {
-        fprintf(stderr, "Failed to create GLFW window\n");
-        glfwTerminate();
-        return false;
-    }
-
-    glfwMakeContextCurrent(window_);
-    glfwSwapInterval(1);
-
-    int version = gladLoadGL(glfwGetProcAddress);
-    if (version == 0) {
-        fprintf(stderr, "Failed to initialize OpenGL loader\n");
-        return false;
-    }
-
-    IMGUI_CHECKVERSION();
-    ImGui::CreateContext();
-
-    // DPI scaling: query monitor content scale
-    float xscale = 1.0f, yscale = 1.0f;
-    glfwGetWindowContentScale(window_, &xscale, &yscale);
-    dpiScale_ = xscale > yscale ? xscale : yscale;
-    if (dpiScale_ < 1.0f) dpiScale_ = 1.0f;
-
-    // Load a crisp TTF font at native DPI size (no blurry bitmap scaling)
-    ImGuiIO& io = ImGui::GetIO();
-    float fontSize = 15.0f * dpiScale_;
-    const char* fontPaths[] = {
-        "C:/Windows/Fonts/segoeui.ttf",   // Segoe UI (Windows 10/11)
-        "C:/Windows/Fonts/calibri.ttf",    // Calibri fallback
-        "C:/Windows/Fonts/arial.ttf",      // Arial fallback
-    };
-    bool fontLoaded = false;
-    for (const char* path : fontPaths) {
-        FILE* f = fopen(path, "rb");
-        if (f) {
-            fclose(f);
-            io.Fonts->AddFontFromFileTTF(path, fontSize);
-            fontLoaded = true;
-            break;
-        }
-    }
-    if (!fontLoaded) {
-        // Fall back to default bitmap font with scaling
-        io.FontGlobalScale = dpiScale_;
-    }
+bool App::init(AppHost* host, float dpiScale) {
+    host_ = host;
+    dpiScale_ = dpiScale;
 
     prefs_.applyTheme();
 
     // Scale ImGui style for high-DPI
     ImGui::GetStyle().ScaleAllSizes(dpiScale_);
 
-    ImGui_ImplGlfw_InitForOpenGL(window_, true);
     overlay_.setMeasure(measureWithImGui);
-    ImGui_ImplOpenGL3_Init("#version 330");
 
     if (!viewport3D_.init()) {
         fprintf(stderr, "Failed to init 3D viewport\n");
@@ -233,54 +174,40 @@ bool App::init() {
     return true;
 }
 
-void App::run() {
-    double lastTime = glfwGetTime();
+void App::frame(float dt, int framebufferW, int framebufferH) {
+    fbW_ = framebufferW;
+    fbH_ = framebufferH;
 
-    while (!glfwWindowShouldClose(window_)) {
-        profiler_.beginFrame();
+    updateCameraAnimation(dt);
 
-        profiler_.begin("PollEvents");
-        glfwPollEvents();
-        profiler_.end();
-
-        double now = glfwGetTime();
-        float dt = (float)(now - lastTime);
-        lastTime = now;
-
-        updateCameraAnimation(dt);
-
-        ImGui_ImplOpenGL3_NewFrame();
-        ImGui_ImplGlfw_NewFrame();
-        ImGui::NewFrame();
-
-        profiler_.begin("UI+Input");
-        overlay_.clear();
-        renderFrame();
-        profiler_.end();
-
-        int w, h;
-        glfwGetFramebufferSize(window_, &w, &h);
-
-        profiler_.begin("Render3D");
-        render3DScene(w, h);
-        profiler_.end();
-
-        // After the 3D pass, which records overlays too (extrude handle, box
-        // select, simulation labels), and before ImGui builds its draw data.
-        flushOverlayToImGui(overlay_);
-        ImGui::Render();
-
-        profiler_.begin("ImGuiDraw");
-        ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
-        profiler_.end();
-
-        profiler_.begin("SwapBuffers");
-        glfwSwapBuffers(window_);
-        profiler_.end();
-
-        profiler_.recordFrameEnd();
-        profiler_.endFrame();
+    // Posted operations run first, with the context current and before any
+    // of this frame's input or UI is built. Taken out first: one may post more.
+    if (!posted_.empty()) {
+        auto work = std::move(posted_);
+        posted_.clear();
+        for (auto& fn : work) fn();
     }
+
+    overlay_.clear();
+    renderFrame();
+}
+
+void App::paint() {
+    render3DScene(fbW_, fbH_);
+
+    // After the 3D pass, which records overlays too (extrude handle, box
+    // select, simulation labels), and before ImGui builds its draw data.
+    flushOverlayToImGui(overlay_);
+}
+
+void App::post(std::function<void()> fn) {
+    posted_.push_back(std::move(fn));
+    if (host_) host_->requestRedraw();
+}
+
+double App::nowSeconds() const {
+    using namespace std::chrono;
+    return duration<double>(steady_clock::now().time_since_epoch()).count();
 }
 
 void App::getViewProj(int w, int h, float view[16], float proj[16]) {
@@ -675,7 +602,7 @@ void App::renderFrame() {
     // Dimension annotations (must be in ImGui frame, before ImGui::Render())
     {
         int w, h;
-        glfwGetFramebufferSize(window_, &w, &h);
+        framebufferSize(w, h);
         float view[16], proj[16];
         getViewProj(w, h, view, proj);
         renderDimensions(view, proj, (float)w, (float)h);
@@ -684,7 +611,7 @@ void App::renderFrame() {
     // Scale ruler — bottom-left of viewport, only in sketch mode
     if (mode_ == InteractionMode::Sketching && hasActiveSketch()) {
         int fbW, fbH;
-        glfwGetFramebufferSize(window_, &fbW, &fbH);
+        framebufferSize(fbW, fbH);
         float view[16], proj[16];
         getViewProj(fbW, fbH, view, proj);
         const auto& sp = activePlane();
@@ -764,7 +691,7 @@ void App::handleNavigateInput(float vpW, float vpH) {
     // Face pick for "Add Reference Plane" dialog
     if (addPlaneWaitingFace_ && in_.mouseClicked(MouseButton::Left) && !in_.uiWantsMouse) {
         int w, h;
-        glfwGetFramebufferSize(window_, &w, &h);
+        framebufferSize(w, h);
         float view[16], proj[16];
         getViewProj(w, h, view, proj);
 
@@ -786,7 +713,7 @@ void App::handleNavigateInput(float vpW, float vpH) {
     // Double-click: start sketch on a reference plane or body face
     if (in_.mouseDoubleClicked(MouseButton::Left) && !in_.uiWantsMouse) {
         int w, h;
-        glfwGetFramebufferSize(window_, &w, &h);
+        framebufferSize(w, h);
         float view[16], proj[16];
         getViewProj(w, h, view, proj);
 
@@ -1091,16 +1018,6 @@ void App::shutdown() {
     if (capVBO_) { glDeleteBuffers(1, &capVBO_); capVBO_ = 0; }
     if (simRunner_.running()) simRunner_.cancel();
     releaseSimulationResults();
-
-    ImGui_ImplOpenGL3_Shutdown();
-    ImGui_ImplGlfw_Shutdown();
-    ImGui::DestroyContext();
-
-    if (window_) {
-        glfwDestroyWindow(window_);
-        window_ = nullptr;
-    }
-    glfwTerminate();
 }
 
 } // namespace shitcad

@@ -28,7 +28,8 @@ The `App` class is large and split across multiple .cpp files by responsibility:
 
 | File | Methods |
 |------|---------|
-| `App.cpp` | `init()`, `run()`, `shutdown()`, `renderFrame()`, camera, navigation input |
+| `main.cpp` | `GlfwHost`: window, GL context, ImGui context and fonts, the frame loop (implements `AppHost`) |
+| `App.cpp` | `init()`, `frame()`, `paint()`, `post()`, `shutdown()`, `renderFrame()`, camera, navigation input, the ImGui input/overlay glue |
 | `AppSketch.cpp` | `handleSketchInput()`, `handleToolAction()`, `handleSelection()`, `handleDrag()`, constraint application |
 | `AppUI.cpp` | `drawToolbar()`, `drawObjectTree()`, `drawTimeline()`, `drawPreferencesWindow()` |
 | `AppDimension.cpp` | `drawDimensionPanel()`, `handleDimToolClick()`, `renderDimensions()`, dimension label layout |
@@ -83,7 +84,9 @@ Global undo stack with typed commands: `AddFeature`, `DeleteFeature`, `SuppressF
 
 ### Rendering pipeline
 - `Viewport3D` - orbit camera (yaw/pitch/distance), orthographic/perspective, ground grid
-- `Scene3D` - stores `Body3D` objects (OCCT shape + tessellated mesh + OpenGL VAO/VBO)
+- `Scene3D` - stores `Body3D` objects (OCCT shape + tessellated mesh and edges on the CPU; VAO/VBO are a cache uploaded lazily by `syncGpu()` when rendering). Adding, replacing and removing bodies never calls GL, so replay/undo/commit need no GL context (the tests run without one); freed buffers are queued and deleted at the next render. `vertexCount` is set when the body is built.
+- Host boundary: App never calls GLFW. The host drives `App::frame(dt, fbW, fbH)` then `App::paint()` with the context current; `AppHost` gives App the window title and redraw requests. Code outside the ImGui frame changes App state only through `App::post()`, which runs at the start of the next frame.
+- Viewport input comes from `App::in_` (`ViewportInput.h`), filled once per frame; screen-space drawing over the 3D view goes through `App::overlay_` (`Overlay2D.h`), flushed after the 3D pass. Handlers must not query ImGui input or draw lists directly.
 - `SketchRenderer` - draws sketch geometry, tool previews, selection highlights, dimension labels
 - Shaders are compiled at init via `ShaderProgram`
 

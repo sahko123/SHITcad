@@ -23,8 +23,8 @@
 #include "SimResults.h"
 #include "ViewportInput.h"
 #include "Overlay2D.h"
-
-struct GLFWwindow;
+#include "AppHost.h"
+#include <functional>
 
 namespace shitcad {
 
@@ -43,9 +43,24 @@ enum class Workspace : uint8_t {
 
 class App {
 public:
-    bool init();
-    void run();
+    // Called by the host once a GL context is current and an ImGui context
+    // (with fonts) exists, before the ImGui backends are initialised.
+    bool init(AppHost* host, float dpiScale);
+    // One frame: runs posted commands, reads input, builds the UI. The host
+    // has begun the ImGui frame.
+    void frame(float dt, int framebufferW, int framebufferH);
+    // Draws the 3D scene into the current framebuffer, then hands this
+    // frame's overlays to ImGui. The host calls ImGui::Render() after it.
+    void paint();
+    // Frees App's GL resources. The host tears down ImGui and the window after.
     void shutdown();
+
+    // Queue an operation to run at the start of the next frame, when the GL
+    // context is current and no frame is half-built. Panels that live outside
+    // the ImGui frame (Qt, later) must change App state only through this.
+    void post(std::function<void()> fn);
+
+    FrameProfiler& profiler() { return profiler_; }
 
     InteractionMode mode() const { return mode_; }
     Scene3D& scene() { return scene_; }
@@ -72,7 +87,11 @@ public:
     static constexpr int kRefPlaneCount = 3;
 
 private:
-    GLFWwindow* window_ = nullptr;
+    AppHost* host_ = nullptr;
+    int fbW_ = 0, fbH_ = 0;               // framebuffer size for this frame
+    std::vector<std::function<void()>> posted_;
+    void framebufferSize(int& w, int& h) const { w = fbW_; h = fbH_; }
+    double nowSeconds() const;            // monotonic, for durations
     InteractionMode mode_ = InteractionMode::Navigate;
 
     // This frame's input for the 3D view, filled once at the top of

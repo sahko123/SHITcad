@@ -7,11 +7,8 @@
 #include "FeatureReplay.h"
 
 #include <glad/gl.h>
-#include <GLFW/glfw3.h>
 #include <imgui.h>
 #include <imgui_internal.h>
-#include <imgui_impl_glfw.h>
-#include <imgui_impl_opengl3.h>
 #include "UnitUtils.h"
 #include <cstdio>
 #include <cmath>
@@ -154,7 +151,7 @@ void App::handleSketchInput(float vpW, float vpH) {
     bool mouseOverUI = in_.uiWantsMouse;
 
     int w, h;
-    glfwGetFramebufferSize(window_, &w, &h);
+    framebufferSize(w, h);
     float view[16], proj[16];
     getViewProj(w, h, view, proj);
 
@@ -1655,7 +1652,7 @@ void App::switchTool(ToolType newTool) {
 
 void App::handleSelection(Sketch& sketch, bool ctrlHeld) {
     int w, h;
-    glfwGetFramebufferSize(window_, &w, &h);
+    framebufferSize(w, h);
     float view[16], proj[16];
     getViewProj(w, h, view, proj);
     float apparentScale = computeApparentScale(activePlane(), view, proj, (float)w, (float)h);

@@ -3,7 +3,6 @@
 #include "UnitUtils.h"
 #include "Utf8Path.h"
 
-#include <GLFW/glfw3.h>
 #include <imgui.h>
 #include <imgui_internal.h> // GetActiveID, for the name field's edit buffer
 
@@ -124,7 +123,7 @@ void App::handleSimulationInput(float vpW, float vpH) {
 
     // Click near a nozzle to select it; anywhere else clears the selection.
     int w, h;
-    glfwGetFramebufferSize(window_, &w, &h);
+    framebufferSize(w, h);
     float view[16], proj[16];
     getViewProj(w, h, view, proj);
     float bestD = 14.0f * dpiScale_;
@@ -441,7 +440,7 @@ void App::drawSimulationPanel() {
     // Nozzle names beside their apexes (drawn here: labels must be emitted
     // during the ImGui frame, and the 3D overlay renders after it).
     int w, h;
-    glfwGetFramebufferSize(window_, &w, &h);
+    framebufferSize(w, h);
     float view[16], proj[16];
     getViewProj(w, h, view, proj);
     Overlay2D& ov = overlay_;

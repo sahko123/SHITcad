@@ -2,7 +2,8 @@
 // and replay alongside OCCT features.
 //
 // Build with -DSHITCAD_BUILD_TESTS=ON, run build/Release/MeshImportTest.exe.
-// Uses a hidden GLFW window only because replay uploads meshes to OpenGL.
+// Runs without a GL context on purpose: Scene3D uploads lazily at render
+// time, so replay must not call OpenGL (a stray call would crash here).
 
 #include "FacePicker.h"
 #include "FeatureHistory.h"
@@ -13,8 +14,6 @@
 #include "Serialization.h"
 #include "SketchPlane.h"
 
-#include <glad/gl.h>
-#include <GLFW/glfw3.h>
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
@@ -508,26 +507,7 @@ int main() {
     testPlacement(box);
     testSaveLoad(dir, box);
 
-    if (!glfwInit()) {
-        std::printf("glfwInit failed; replay tests skipped\n");
-        g_failures++;
-    } else {
-        glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
-        glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
-        glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
-        glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
-        GLFWwindow* win = glfwCreateWindow(64, 64, "test", nullptr, nullptr);
-        if (!win) {
-            std::printf("no GL context; replay tests skipped\n");
-            g_failures++;
-        } else {
-            glfwMakeContextCurrent(win);
-            gladLoadGL(glfwGetProcAddress);
-            testReplay(dir, box);
-            glfwDestroyWindow(win);
-        }
-        glfwTerminate();
-    }
+    testReplay(dir, box);
 
     std::printf("\n%d checks, %d failed\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;
