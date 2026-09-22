@@ -10,10 +10,7 @@
 #include <sstream>
 #include <cmath>
 #include <StlAPI_Writer.hxx>
-#include <RWStl.hxx>
 #include <Poly_Triangulation.hxx>
-#include <BRepBuilderAPI_MakeFace.hxx>
-#include <BRepBuilderAPI_Sewing.hxx>
 #include <gp_Pnt.hxx>
 #include <BRep_Builder.hxx>
 #include <TopoDS_Compound.hxx>
