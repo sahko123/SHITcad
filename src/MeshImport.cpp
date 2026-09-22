@@ -1,5 +1,6 @@
 #include "MeshImport.h"
 #include "UnitUtils.h"
+#include "Utf8Path.h"
 
 #include <RWStl.hxx>
 #include <Poly_Triangulation.hxx>
@@ -180,13 +181,13 @@ std::shared_ptr<const CachedMesh> readCached(const std::string& path, std::strin
     std::error_code ec;
     // Paths are stored as UTF-8 (see Serialization.h ansiToUtf8), so they have
     // to be converted back rather than handed to the narrow constructor.
-    const std::filesystem::path fsPath = std::filesystem::u8path(path);
-    uintmax_t size = std::filesystem::file_size(fsPath, ec);
+    const std::filesystem::path file = fsPath(path);
+    uintmax_t size = std::filesystem::file_size(file, ec);
     if (ec) {
         error = "File not found: " + path;
         return nullptr;
     }
-    auto mtime = std::filesystem::last_write_time(fsPath, ec);
+    auto mtime = std::filesystem::last_write_time(file, ec);
     if (ec) {
         error = "Cannot read file time: " + path;
         return nullptr;
@@ -197,14 +198,14 @@ std::shared_ptr<const CachedMesh> readCached(const std::string& path, std::strin
     // are ~4 ms granular, and timestamp-preserving copies (unzip, sync restore)
     // collide exactly. Hash a sample of the bytes as well - the whole file would
     // cost too much on every replay.
-    const uint64_t hash = sampleHash(fsPath, size);
+    const uint64_t hash = sampleHash(file, size);
     auto it = cache().find(path);
     if (it != cache().end() && it->second->fileSize == size && it->second->mtime == mtime &&
         it->second->contentHash == hash) {
         return it->second;
     }
 
-    Handle(Poly_Triangulation) tri = RWStl::ReadFile(fsPath.string().c_str());
+    Handle(Poly_Triangulation) tri = RWStl::ReadFile(path.c_str()); // OCCT takes UTF-8; path::string() would be ANSI
     if (tri.IsNull() || tri->NbTriangles() == 0) {
         error = "Not a readable STL, or it contains no triangles: " + path;
         return nullptr;

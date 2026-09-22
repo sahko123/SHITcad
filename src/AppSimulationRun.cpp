@@ -1,6 +1,7 @@
 // App.h first: windows.h defines `near` and `far` as empty macros, which breaks
 // headers that use those names (Viewport3D.h's makePerspective).
 #include "App.h"
+#include "Utf8Path.h"
 
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -56,7 +57,7 @@ void App::saveEngineSettings() {
 std::string App::engineProblem() const {
     if (simEngine_.cipSimPath.empty()) return "Set the cip-sim folder under Engine.";
     std::error_code ec;
-    if (!fs::is_regular_file(fs::path(simEngine_.cipSimPath) / "cipsim" / "cli.py", ec))
+    if (!fs::is_regular_file(fsPath(simEngine_.cipSimPath) / "cipsim" / "cli.py", ec))
         return "No cipsim/cli.py in " + simEngine_.cipSimPath + " - is that the cip-sim folder?";
     if (simEngine_.python.empty()) return "Set the Python executable under Engine.";
     return {};
@@ -70,8 +71,8 @@ std::string App::engineProblem() const {
 // that no longer exists.
 static std::string fileStamp(const std::string& path) {
     std::error_code ec;
-    const auto size = fs::file_size(path, ec);
-    const auto when = fs::last_write_time(path, ec);
+    const auto size = fs::file_size(fsPath(path), ec);
+    const auto when = fs::last_write_time(fsPath(path), ec);
     return path + "|" + (ec ? "missing" : std::to_string((unsigned long long)size) + "|" +
                               std::to_string((long long)when.time_since_epoch().count()));
 }
@@ -151,8 +152,8 @@ void App::startTier1Run() {
     // with it; otherwise in the temp folder.
     fs::path base;
     if (!currentFilePath_.empty()) {
-        fs::path proj(currentFilePath_);
-        base = proj.parent_path() / (proj.stem().string() + "_sim");
+        fs::path proj = fsPath(currentFilePath_);
+        base = proj.parent_path() / fsPath(utf8(proj.stem()) + "_sim");
     } else {
         base = fs::temp_directory_path() / "SHITcad_sim";
     }
@@ -160,7 +161,7 @@ void App::startTier1Run() {
     std::error_code ec;
     fs::create_directories(dir, ec);
     if (ec) {
-        simRunError_ = "Could not create " + dir.string() + ": " + ec.message();
+        simRunError_ = "Could not create " + utf8(dir) + ": " + ec.message();
         simPhase_ = SimPhase::Failed;
         return;
     }
@@ -169,7 +170,7 @@ void App::startTier1Run() {
         std::ofstream out(specPath, std::ios::binary);
         out << spec << "\n";
         if (!out) {
-            simRunError_ = "Could not write " + specPath.string();
+            simRunError_ = "Could not write " + utf8(specPath);
             simPhase_ = SimPhase::Failed;
             return;
         }
@@ -177,14 +178,14 @@ void App::startTier1Run() {
 
     std::vector<std::string> argv = {
         simEngine_.python, "-u", "-m", "cipsim.cli", "tier1",
-        "--spec", specPath.string(), "--out", dir.string(),
+        "--spec", utf8(specPath), "--out", utf8(dir),
         "--rays", std::to_string(simulation_.rays), "--bounces", std::to_string(simulation_.bounces)};
     if (!simRunner_.start(argv, simEngine_.cipSimPath, true, err)) {
         simRunError_ = err;
         simPhase_ = SimPhase::Failed;
         return;
     }
-    simRunDir_ = dir.string();
+    simRunDir_ = utf8(dir);
     simRunInputs_ = inputs;
     simRunStart_ = glfwGetTime();
     simPhase_ = SimPhase::Running;
@@ -581,7 +582,7 @@ void App::drawSimulationResultsSection() {
     if (ImGui::Button("Open in ParaView")) openResultsInParaView();
     ImGui::SameLine();
     if (ImGui::Button("Open run folder"))
-        ShellExecuteA(nullptr, "open", simView_.runDir.c_str(), nullptr, nullptr, 1 /* SW_SHOWNORMAL */);
+        ShellExecuteW(nullptr, L"open", fsPath(simView_.runDir).c_str(), nullptr, nullptr, 1 /* SW_SHOWNORMAL */);
     if (!paraviewMessage_.empty()) {
         ImGui::PushTextWrapPos(0.0f);
         ImGui::TextDisabled("%s", paraviewMessage_.c_str());

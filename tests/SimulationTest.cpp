@@ -18,6 +18,7 @@
 #include "SimResults.h"
 #include "Simulation.h"
 #include "SketchPlane.h"
+#include "Utf8Path.h"
 
 #include <chrono>
 #include <thread>
@@ -760,6 +761,76 @@ static void testLoaderRejectsMismatchedData(const fs::path& dir) {
     }
 }
 
+// Paths are UTF-8 everywhere inside SHITcad (Utf8Path.h), but the narrow
+// standard-library and Win32 calls read ANSI. A folder name with a character
+// ANSI has (e-diaeresis) and one it does not (Omega) exercises both failure
+// modes: a file that silently fails to open, and path::string() throwing.
+static void testNonAsciiPaths(const std::string* python) {
+    std::printf("non-ASCII paths\n");
+    const std::string dir = utf8(fs::temp_directory_path() / "shitcad_t\xC3\xABst_\xCE\xA9");
+    std::error_code ec;
+    fs::create_directories(fsPath(dir), ec);
+    CHECK(!ec, "could not create the test folder: %s", ec.message().c_str());
+    writeBinaryStl(fsPath(dir) / "box.stl", boxTriangles(0, 0, 0, 100, 200, 300));
+
+    // Import + replay: the feature must load, not fail as "file not found".
+    FeatureHistory h;
+    MeshImportFeatureData md;
+    md.sourcePath = dir + "\\box.stl";
+    md.unit = "mm";
+    const FeatureID fid = h.addMeshImportFeature(md, "box");
+    auto planes = referencePlanes();
+    Scene3D scene;
+    replayFeatures(h, planes, scene);
+    const Feature* f = h.findFeature(fid);
+    CHECK(f && !f->hasError, "import failed: %s", f ? f->errorMsg.c_str() : "no feature");
+    CHECK(scene.bodyCount() == 1, "bodies=%zu", scene.bodyCount());
+
+    // Project save / load.
+    const std::string proj = dir + "\\project.shitcad";
+    SimulationSetup s;
+    s.addNozzle(SimNozzle{});
+    CHECK(saveProject(proj, h, planes, &s), "save: %s", lastLoadError().c_str());
+    FeatureHistory h2;
+    std::vector<SketchPlane> pl2;
+    SimulationSetup s2;
+    CHECK(loadProject(proj, h2, pl2, &s2), "load: %s", lastLoadError().c_str());
+    CHECK(h2.features().size() == 1 &&
+              std::get<MeshImportFeatureData>(h2.features()[0].data).sourcePath == md.sourcePath,
+          "source path changed across save/load");
+
+    // Result loader.
+    {
+        std::vector<float> one(9, 1.0f);
+        std::ofstream(fsPath(dir) / "r.bin", std::ios::binary).write((const char*)one.data(), 36);
+        std::ofstream(fsPath(dir) / "r.json")
+            << R"({"format":"cipsim-trimesh","version":1,"units":"mm","triangles":1,)"
+            << R"("positions":{"offset":0,"count":9},"fields":[],"bin":"r.bin","bytes":36})";
+        ResultMesh m;
+        std::string err;
+        CHECK(loadResultMesh(dir + "\\r.json", m, err), "result load: %s", err.c_str());
+    }
+
+    // The engine is started with a spec path and a working directory like this.
+    if (python) {
+        ProcessRunner r;
+        std::string err;
+        CHECK(r.start({*python, "-c", "import sys, os, json; print(json.dumps({'arg': sys.argv[1], 'cwd': os.getcwd()}))",
+                       dir + "\\spec.json"},
+                      dir, true, err),
+              "start: %s", err.c_str());
+        std::vector<std::string> lines;
+        CHECK(runToCompletion(r, lines, 60) && lines.size() == 1, "lines=%zu stderr=%s", lines.size(),
+              r.stderrTail().c_str());
+        if (lines.size() == 1) {
+            json j = json::parse(lines[0]);
+            CHECK(j["arg"] == dir + "\\spec.json", "argument mangled: %s", lines[0].c_str());
+            CHECK(fs::equivalent(fsPath(j["cwd"].get<std::string>()), fsPath(dir), ec),
+                  "working directory mangled: %s", lines[0].c_str());
+        }
+    }
+}
+
 int main(int argc, char** argv) {
     testSectionPlane();
     testRoles();
@@ -812,6 +883,7 @@ int main(int argc, char** argv) {
     testCacheNoticesARewrite(fs::temp_directory_path() / "shitcad_simulation_test");
     testColoursSayWhatTheyMean(fs::temp_directory_path() / "shitcad_simulation_test");
     testLoaderRejectsMismatchedData(fs::temp_directory_path() / "shitcad_simulation_test");
+    testNonAsciiPaths(argc > 2 ? &python : nullptr);
     if (argc > 2) {
         testProcessRunner(python);
         testEndToEnd(crossDir, argv[2], python);

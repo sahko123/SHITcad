@@ -7,6 +7,7 @@
 #include <windows.h>
 
 #include "SimProcess.h"
+#include "Utf8Path.h"
 
 #include <algorithm>
 
@@ -53,8 +54,8 @@ bool ProcessRunner::start(const std::vector<std::string>& argv, const std::strin
     HANDLE outR = nullptr, outW = nullptr, errR = nullptr, errW = nullptr;
     if (!CreatePipe(&outR, &outW, &sa, 0) || !CreatePipe(&errR, &errW, &sa, 0)) {
         error = "CreatePipe failed";
-        if (outR) CloseHandle(outR);
-        if (outW) CloseHandle(outW);
+        for (HANDLE h : {outR, outW, errR, errW})
+            if (h) CloseHandle(h);
         return false;
     }
     // Only the write ends go to the child.
@@ -68,10 +69,15 @@ bool ProcessRunner::start(const std::vector<std::string>& argv, const std::strin
         if (i) cmd.push_back(' ');
         cmd += quoteArg(argv[i]);
     }
-    std::vector<char> cmdBuf(cmd.begin(), cmd.end());
-    cmdBuf.push_back('\0');
+    // The arguments are UTF-8 (paths included - see Utf8Path.h). CreateProcessA
+    // would read them as ANSI and hand the child a mangled spec path whenever
+    // the project folder has a non-ASCII name, so go through the wide API.
+    std::wstring wcmd = fsPath(cmd).wstring();
+    std::vector<wchar_t> cmdBuf(wcmd.begin(), wcmd.end());
+    cmdBuf.push_back(L'\0');
+    const std::wstring wcwd = cwd.empty() ? std::wstring() : fsPath(cwd).wstring();
 
-    STARTUPINFOA si = {};
+    STARTUPINFOW si = {};
     si.cb = sizeof(si);
     si.dwFlags = STARTF_USESTDHANDLES;
     si.hStdOutput = outW;
@@ -80,8 +86,8 @@ bool ProcessRunner::start(const std::vector<std::string>& argv, const std::strin
     PROCESS_INFORMATION pi = {};
 
     DWORD flags = CREATE_NO_WINDOW | (killWithApp ? CREATE_SUSPENDED : 0);
-    BOOL ok = CreateProcessA(nullptr, cmdBuf.data(), nullptr, nullptr, TRUE, flags, nullptr,
-                             cwd.empty() ? nullptr : cwd.c_str(), &si, &pi);
+    BOOL ok = CreateProcessW(nullptr, cmdBuf.data(), nullptr, nullptr, TRUE, flags, nullptr,
+                             wcwd.empty() ? nullptr : wcwd.c_str(), &si, &pi);
     CloseHandle(outW);
     CloseHandle(errW);
     if (nul != INVALID_HANDLE_VALUE) CloseHandle(nul);

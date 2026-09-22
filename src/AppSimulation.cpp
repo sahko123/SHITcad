@@ -1,6 +1,7 @@
 #include "App.h"
 #include "FacePicker.h"
 #include "UnitUtils.h"
+#include "Utf8Path.h"
 
 #include <GLFW/glfw3.h>
 #include <imgui.h>
@@ -264,7 +265,7 @@ void App::exportSimulationSpecDialog() {
     }
     std::string path = openNativeJsonSaveDialog();
     if (path.empty()) return;
-    std::ofstream out(path, std::ios::binary);
+    std::ofstream out(fsPath(path), std::ios::binary);
     out << json << "\n";
     if (!out) {
         simUi_.message = "Could not write " + path;

@@ -4,6 +4,7 @@
 #include <shlobj.h>
 
 #include "Serialization.h"
+#include "Utf8Path.h"
 #include <nlohmann/json.hpp>
 #include <fstream>
 #include <sstream>
@@ -705,7 +706,7 @@ bool saveProject(const std::string& filepath,
     doc["sketchPlanes"] = json::array();
     for (auto& sp : planes) doc["sketchPlanes"].push_back(sketchPlaneToJson(sp));
 
-    std::ofstream out(filepath);
+    std::ofstream out(fsPath(filepath));
     if (!out.is_open()) {
         s_lastError = "Could not open file for writing: " + filepath;
         return false;
@@ -724,7 +725,7 @@ bool loadProject(const std::string& filepath,
                  FeatureHistory& history,
                  std::vector<SketchPlane>& planes,
                  SimulationSetup* simulation) {
-    std::ifstream in(filepath);
+    std::ifstream in(fsPath(filepath));
     if (!in.is_open()) {
         s_lastError = "Could not open file: " + filepath;
         return false;
@@ -971,7 +972,7 @@ bool exportOBJ(const std::string& filepath, const Scene3D& scene) {
         return false;
     }
 
-    std::ofstream out(filepath);
+    std::ofstream out(fsPath(filepath));
     if (!out.is_open()) {
         s_lastError = "Cannot open file for writing";
         return false;
@@ -1021,7 +1022,7 @@ bool exportOBJ(const std::string& filepath, const Scene3D& scene) {
 // ─── DXF export (2D sketch) ─────────────────────────────────────────
 
 bool exportDXF(const std::string& filepath, const Sketch& sketch) {
-    std::ofstream out(filepath);
+    std::ofstream out(fsPath(filepath));
     if (!out.is_open()) {
         s_lastError = "Cannot open file for writing";
         return false;

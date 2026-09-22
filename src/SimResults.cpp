@@ -1,4 +1,5 @@
 #include "SimResults.h"
+#include "Utf8Path.h"
 
 #include <nlohmann/json.hpp>
 
@@ -88,7 +89,7 @@ static double unitToMm(const std::string& u) {
 
 bool loadResultMesh(const std::string& jsonPath, ResultMesh& out, std::string& error) {
     try {
-        std::ifstream jf(fs::path(jsonPath), std::ios::binary);
+        std::ifstream jf(fsPath(jsonPath), std::ios::binary);
         if (!jf) { error = "Cannot open " + jsonPath; return false; }
         json h = json::parse(jf);
         if (h.value("format", "") != "cipsim-trimesh") {
@@ -103,12 +104,12 @@ bool loadResultMesh(const std::string& jsonPath, ResultMesh& out, std::string& e
         if (scale == 0.0) { error = "Unknown result units '" + h.value("units", "") + "'"; return false; }
 
         const size_t n = h.at("triangles").get<size_t>();
-        const fs::path binPath = fs::path(jsonPath).parent_path() / h.at("bin").get<std::string>();
+        const fs::path binPath = fsPath(jsonPath).parent_path() / fsPath(h.at("bin").get<std::string>());
         const uintmax_t bytes = h.at("bytes").get<uintmax_t>();
         std::error_code ec;
         const uintmax_t actual = fs::file_size(binPath, ec);
         if (ec) {
-            error = "Result data file is missing: " + binPath.string();
+            error = "Result data file is missing: " + utf8(binPath);
             return false;
         }
         // Exact, both ways. A file LARGER than the header describes means the
@@ -117,16 +118,16 @@ bool loadResultMesh(const std::string& jsonPath, ResultMesh& out, std::string& e
         // values, because coordinates are floats too.
         if (actual != bytes) {
             error = "Result data file does not match its header (" + std::to_string(actual) +
-                    " bytes on disk, header says " + std::to_string(bytes) + "): " + binPath.string();
+                    " bytes on disk, header says " + std::to_string(bytes) + "): " + utf8(binPath);
             return false;
         }
         if (bytes % 4 != 0) { error = "Result data length is not a whole number of floats"; return false; }
         std::ifstream bf(binPath, std::ios::binary);
-        if (!bf) { error = "Cannot open " + binPath.string(); return false; }
+        if (!bf) { error = "Cannot open " + utf8(binPath); return false; }
         std::vector<float> raw((size_t)(bytes / 4));
         bf.read((char*)raw.data(), (std::streamsize)(raw.size() * 4)); // little-endian float32, as x64 is
         if ((uintmax_t)bf.gcount() != bytes) {
-            error = "Could not read all of " + binPath.string();
+            error = "Could not read all of " + utf8(binPath);
             return false;
         }
 
