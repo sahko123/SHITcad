@@ -77,19 +77,18 @@ float App::simulationSceneExtent() {
 // ---- input --------------------------------------------------------------------
 
 void App::handleSimulationInput(float vpW, float vpH) {
-    ImGuiIO& io = ImGui::GetIO();
 
-    if (!io.WantCaptureKeyboard) {
-        if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_Z) && !io.KeyShift) globalUndo();
-        if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_Y)) globalRedo();
-        if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_Z) && io.KeyShift) globalRedo();
-        if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_S)) saveProjectDialog();
-        if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_O)) openProjectDialog();
-        if (ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+    if (!in_.uiWantsKeyboard) {
+        if (in_.ctrl && in_.keyPressed(Key::Z) && !in_.shift) globalUndo();
+        if (in_.ctrl && in_.keyPressed(Key::Y)) globalRedo();
+        if (in_.ctrl && in_.keyPressed(Key::Z) && in_.shift) globalRedo();
+        if (in_.ctrl && in_.keyPressed(Key::S)) saveProjectDialog();
+        if (in_.ctrl && in_.keyPressed(Key::O)) openProjectDialog();
+        if (in_.keyPressed(Key::Escape)) {
             if (simUi_.placing) simUi_.placing = false;
             else simUi_.selectedNozzle = 0;
         }
-        if (ImGui::IsKeyPressed(ImGuiKey_Delete) && simUi_.selectedNozzle &&
+        if (in_.keyPressed(Key::Delete) && simUi_.selectedNozzle &&
             simulation_.findNozzle(simUi_.selectedNozzle)) {
             simulation_.removeNozzle(simUi_.selectedNozzle);
             simUi_.selectedNozzle = 0;
@@ -97,8 +96,8 @@ void App::handleSimulationInput(float vpW, float vpH) {
         }
     }
 
-    if (io.MousePos.y < 30.0f || io.WantCaptureMouse) return;
-    if (!ImGui::IsMouseClicked(ImGuiMouseButton_Left)) return;
+    if (in_.mouseY < in_.viewY || in_.uiWantsMouse) return;
+    if (!in_.mouseClicked(MouseButton::Left)) return;
 
     if (simUi_.placing) {
         if (!meshHover_.hit || meshHover_.bodyIndex >= (int)scene_.bodyCount()) return;
@@ -118,7 +117,7 @@ void App::handleSimulationInput(float vpW, float vpH) {
         n.hostFeature = body.sourceFeature;
         setNozzleWorld(n, featureHistory_, pos, inward);
         simUi_.selectedNozzle = simulation_.addNozzle(n);
-        if (!io.KeyShift) simUi_.placing = false;
+        if (!in_.shift) simUi_.placing = false;
         commitSimulationEdit();
         return;
     }
@@ -136,7 +135,7 @@ void App::handleSimulationInput(float vpW, float vpH) {
         const float pf[3] = {(float)p[0], (float)p[1], (float)p[2]};
         float sx, sy;
         if (!worldToScreen(pf, view, proj, vpW, vpH, sx, sy)) continue;
-        float d = std::hypot(sx - io.MousePos.x, sy - io.MousePos.y);
+        float d = std::hypot(sx - in_.mouseX, sy - in_.mouseY);
         if (d < bestD) { bestD = d; best = n.id; }
     }
     simUi_.selectedNozzle = best;

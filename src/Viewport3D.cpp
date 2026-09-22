@@ -1,7 +1,6 @@
 #include "Viewport3D.h"
 #include "Preferences.h"
 #include "Section.h"
-#include <imgui.h>
 #include <cstring>
 #include <vector>
 #include <algorithm>
@@ -299,30 +298,27 @@ void Viewport3D::drawGrid(const float* view, const float* proj) {
     glBindVertexArray(0);
 }
 
-void Viewport3D::handleInput(float canvasX, float canvasY, float canvasW, float canvasH) {
-    ImGuiIO& io = ImGui::GetIO();
-    ImVec2 mouse = io.MousePos;
-
-    // Don't handle input when ImGui wants the mouse (e.g., scrolling in a panel)
-    if (io.WantCaptureMouse) return;
+void Viewport3D::handleInput(const InputFrame& in, float canvasX, float canvasY, float canvasW, float canvasH) {
+    // Don't handle input when a panel wants the mouse (e.g., scrolling in a panel)
+    if (in.uiWantsMouse) return;
 
     // Check if mouse is within the viewport area
-    bool hovered = mouse.x >= canvasX && mouse.x < canvasX + canvasW &&
-                   mouse.y >= canvasY && mouse.y < canvasY + canvasH;
+    bool hovered = in.mouseX >= canvasX && in.mouseX < canvasX + canvasW &&
+                   in.mouseY >= canvasY && in.mouseY < canvasY + canvasH;
     if (!hovered) return;
 
     // Middle mouse: orbit (or pan with shift)
-    if (ImGui::IsMouseDragging(ImGuiMouseButton_Middle, 0.0f)) {
-        if (io.KeyShift) {
-            camera_.pan(io.MouseDelta.x, io.MouseDelta.y, canvasW, canvasH);
+    if (in.dragging(MouseButton::Middle, 0.0f)) {
+        if (in.shift) {
+            camera_.pan(in.mouseDX, in.mouseDY, canvasW, canvasH);
         } else {
-            camera_.orbit(io.MouseDelta.x, io.MouseDelta.y);
+            camera_.orbit(in.mouseDX, in.mouseDY);
         }
     }
 
     // Scroll: zoom
-    if (io.MouseWheel != 0.0f) {
-        camera_.zoom(io.MouseWheel);
+    if (in.wheel != 0.0f) {
+        camera_.zoom(in.wheel);
     }
 
 }

@@ -97,19 +97,18 @@ void App::enterExtrudeMode() {
 
 void App::handleExtrudeInput(float vpW, float vpH) {
     if (!hasExtrudeSketch()) return;
-    ImGuiIO& io = ImGui::GetIO();
 
     const SketchPlane& plane = extrudePlane();
 
     // Project mouse to sketch plane
-    if (!io.WantCaptureMouse) {
+    if (!in_.uiWantsMouse) {
         int w, h;
         glfwGetFramebufferSize(window_, &w, &h);
         float view[16], proj[16];
         getViewProj(w, h, view, proj);
 
         float rayOrig[3], rayDir[3];
-        screenToRay(io.MousePos.x, io.MousePos.y, 0, 0, vpW, vpH, view, proj, rayOrig, rayDir);
+        screenToRay(in_.mouseX, in_.mouseY, 0, 0, vpW, vpH, view, proj, rayOrig, rayDir);
 
         float lx, ly, t;
         if (plane.rayIntersect(rayOrig, rayDir, lx, ly, t)) {
@@ -118,12 +117,12 @@ void App::handleExtrudeInput(float vpW, float vpH) {
     }
 
     // Keyboard
-    if (!io.WantCaptureKeyboard) {
-        if (ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+    if (!in_.uiWantsKeyboard) {
+        if (in_.keyPressed(Key::Escape)) {
             cancelExtrude();
             return;
         }
-        if (ImGui::IsKeyPressed(ImGuiKey_Enter) || ImGui::IsKeyPressed(ImGuiKey_KeypadEnter)) {
+        if (in_.keyPressed(Key::Enter) || in_.keyPressed(Key::KeypadEnter)) {
             if (extrudeTool_.hasSelectedProfiles()) {
                 commitExtrude();
                 return;
@@ -131,11 +130,11 @@ void App::handleExtrudeInput(float vpW, float vpH) {
         }
     }
 
-    if (io.WantCaptureMouse) return;
+    if (in_.uiWantsMouse) return;
 
     // Profile selection: click to toggle (disabled during handle drag)
     if (!extrudeTool_.isDragging) {
-        if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+        if (in_.mouseClicked(MouseButton::Left)) {
             int hitIdx = hitTestProfile(extrudeSketch(), extrudeTool_.allProfiles, cursorLocal_,
                                         extrudeTool_.renderCache);
             if (hitIdx >= 0) {
@@ -150,7 +149,7 @@ void App::handleExtrudeInput(float vpW, float vpH) {
 
     // Drag handle hit test: only start drag when clicking near the handle arrow tip
     if (extrudeTool_.hasSelectedProfiles() && !extrudeTool_.isDragging &&
-        extrudeTool_.handleVisible && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+        extrudeTool_.handleVisible && in_.mouseClicked(MouseButton::Left)) {
         // Compute handle tip position in screen space
         int w, h;
         glfwGetFramebufferSize(window_, &w, &h);
@@ -165,13 +164,13 @@ void App::handleExtrudeInput(float vpW, float vpH) {
         };
         float tipSx, tipSy;
         if (worldToScreen(tipWorld, view, proj, vpW, vpH, tipSx, tipSy)) {
-            float dx = io.MousePos.x - tipSx;
-            float dy = io.MousePos.y - tipSy;
+            float dx = in_.mouseX - tipSx;
+            float dy = in_.mouseY - tipSy;
             float handleRadius = 20.0f; // pixels
             if (dx*dx + dy*dy < handleRadius * handleRadius) {
                 extrudeTool_.isDragging = true;
-                extrudeTool_.dragStartMouseX = io.MousePos.x;
-                extrudeTool_.dragStartMouseY = io.MousePos.y;
+                extrudeTool_.dragStartMouseX = in_.mouseX;
+                extrudeTool_.dragStartMouseY = in_.mouseY;
                 extrudeTool_.dragStartHeight = extrudeTool_.height;
             }
         }
@@ -203,8 +202,8 @@ void App::handleExtrudeInput(float vpW, float vpH) {
         }
 
         // Mouse delta projected onto the normal's screen direction
-        float mouseDx = io.MousePos.x - extrudeTool_.dragStartMouseX;
-        float mouseDy = io.MousePos.y - extrudeTool_.dragStartMouseY;
+        float mouseDx = in_.mouseX - extrudeTool_.dragStartMouseX;
+        float mouseDy = in_.mouseY - extrudeTool_.dragStartMouseY;
 
         // Screen direction of the normal (base → tip)
         float tipAtStart[3] = {
@@ -239,13 +238,13 @@ void App::handleExtrudeInput(float vpW, float vpH) {
     }
 
     // End drag — force final preview rebuild
-    if (extrudeTool_.isDragging && ImGui::IsMouseReleased(ImGuiMouseButton_Left)) {
+    if (extrudeTool_.isDragging && in_.mouseReleased(MouseButton::Left)) {
         extrudeTool_.isDragging = false;
         extrudeTool_.previewDirty = true;
     }
 
     // Right click: cancel
-    if (ImGui::IsMouseClicked(ImGuiMouseButton_Right)) {
+    if (in_.mouseClicked(MouseButton::Right)) {
         cancelExtrude();
     }
 }

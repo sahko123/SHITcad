@@ -138,6 +138,20 @@ struct InputFrame {
 **Done when:** no input handler reads input from ImGui or draws ImGui widgets, and
 the checklist passes.
 
+**Status (done).** `InputFrame` is in `ViewportInput.h`; `App::in_` is filled once by
+`fillInputFromImGui` at the top of `renderFrame` (a member rather than a parameter,
+so the handler signatures did not change; `Viewport3D::handleInput` takes it as a
+parameter). The snapshot is exact: ImGui updates capture flags and mouse/key state in
+`NewFrame`, clears typed characters in `EndFrame`, and every query the handlers made
+uses the "any owner" test, which no widget earlier in the frame can lock. The
+toolbar checks compare `mouseY < viewY` (the toolbar height) instead of `< 30`, which
+is the same set of pixels once ImGui's own capture over the toolbar is counted.
+`drawInlineDimInput` and `drawSketchMessage` are separate functions called from the
+same point in `handleSketchInput`. A scripted input scenario run against the old and
+new builds gave pixel-identical screenshots. Still in the handlers, by design:
+`ImDrawList` overlays (Phase 2) and the `GImGui->ActiveId = 0` resets of the
+dimension InputText (Phase 5.10).
+
 ## Phase 2: overlay abstraction (still ImGui)
 
 Add `Overlay2D.h`, an interface for screen-space drawing: `line`, `rect`,

@@ -81,18 +81,17 @@ void App::enterRevolveMode() {
 
 void App::handleRevolveInput(float vpW, float vpH) {
     if (!hasRevolveSketch()) return;
-    ImGuiIO& io = ImGui::GetIO();
 
     const SketchPlane& plane = revolvePlane();
 
-    if (!io.WantCaptureMouse) {
+    if (!in_.uiWantsMouse) {
         int w, h;
         glfwGetFramebufferSize(window_, &w, &h);
         float view[16], proj[16];
         getViewProj(w, h, view, proj);
 
         float rayOrig[3], rayDir[3];
-        screenToRay(io.MousePos.x, io.MousePos.y, 0, 0, vpW, vpH, view, proj, rayOrig, rayDir);
+        screenToRay(in_.mouseX, in_.mouseY, 0, 0, vpW, vpH, view, proj, rayOrig, rayDir);
 
         float lx, ly, t;
         if (plane.rayIntersect(rayOrig, rayDir, lx, ly, t)) {
@@ -100,12 +99,12 @@ void App::handleRevolveInput(float vpW, float vpH) {
         }
     }
 
-    if (!io.WantCaptureKeyboard) {
-        if (ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+    if (!in_.uiWantsKeyboard) {
+        if (in_.keyPressed(Key::Escape)) {
             cancelRevolve();
             return;
         }
-        if (ImGui::IsKeyPressed(ImGuiKey_Enter) || ImGui::IsKeyPressed(ImGuiKey_KeypadEnter)) {
+        if (in_.keyPressed(Key::Enter) || in_.keyPressed(Key::KeypadEnter)) {
             if (revolveTool_.hasSelectedProfiles() && revolveTool_.axisLineID != NullID) {
                 commitRevolve();
                 return;
@@ -113,9 +112,9 @@ void App::handleRevolveInput(float vpW, float vpH) {
         }
     }
 
-    if (io.WantCaptureMouse) return;
+    if (in_.uiWantsMouse) return;
 
-    if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+    if (in_.mouseClicked(MouseButton::Left)) {
         if (revolveTool_.phase == RevolvePhase::SelectingProfiles) {
             int hitIdx = hitTestProfile(revolveSketch(), revolveTool_.allProfiles, cursorLocal_,
                                         revolveTool_.renderCache);

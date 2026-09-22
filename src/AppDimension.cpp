@@ -316,12 +316,12 @@ void App::handleDimToolClick(Sketch& sketch) {
 
     // When editing existing dimension, clicking elsewhere should select another dim or deselect
     if (dimTool_.editingExisting && dimTool_.phase == DimToolState::Editing) {
-        handleSelection(sketch, ImGui::GetIO().KeyCtrl);
+        handleSelection(sketch, in_.ctrl);
         return;
     }
 
     // Check if user clicked on an existing dimension label first
-    ImVec2 mouse = ImGui::GetIO().MousePos;
+    ImVec2 mouse(in_.mouseX, in_.mouseY);
     for (const auto& r : dimLabelRects_) {
         if (r.sketchPlaneIndex != activeSketchPlane_) continue;
         if (mouse.x >= r.x0 && mouse.x <= r.x1 && mouse.y >= r.y0 && mouse.y <= r.y1) {

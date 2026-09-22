@@ -144,8 +144,6 @@ void App::applyGeometricConstraint(Sketch& sketch, ConstraintType type) {
 }
 
 void App::handleSketchInput(float vpW, float vpH) {
-    ImGuiIO& io = ImGui::GetIO();
-
     // Extrude input is now handled in renderFrame before this function
     if (tool_.type == ToolType::Extrude) {
         return;
@@ -153,7 +151,7 @@ void App::handleSketchInput(float vpW, float vpH) {
 
     Sketch& sketch = activeSketch();
     const SketchPlane& plane = activePlane();
-    bool mouseOverUI = io.WantCaptureMouse;
+    bool mouseOverUI = in_.uiWantsMouse;
 
     int w, h;
     glfwGetFramebufferSize(window_, &w, &h);
@@ -166,7 +164,7 @@ void App::handleSketchInput(float vpW, float vpH) {
     if (!mouseOverUI) {
         // Project mouse to sketch plane
         float rayOrig[3], rayDir[3];
-        screenToRay(io.MousePos.x, io.MousePos.y, 0, 0, vpW, vpH, view, proj, rayOrig, rayDir);
+        screenToRay(in_.mouseX, in_.mouseY, 0, 0, vpW, vpH, view, proj, rayOrig, rayDir);
 
         float lx, ly, t;
         if (plane.rayIntersect(rayOrig, rayDir, lx, ly, t)) {
@@ -175,7 +173,7 @@ void App::handleSketchInput(float vpW, float vpH) {
     }
 
     // Dimension label drag end — must be before early returns
-    if (selection_.dragMode == SelectionDragMode::DimDrag && ImGui::IsMouseReleased(ImGuiMouseButton_Left)) {
+    if (selection_.dragMode == SelectionDragMode::DimDrag && in_.mouseReleased(MouseButton::Left)) {
         if (selection_.dragStarted) {
             history_.pushState(sketch);
         }
@@ -301,8 +299,8 @@ void App::handleSketchInput(float vpW, float vpH) {
         }
     }
     if (selection_.dragMode == SelectionDragMode::None &&
-        ImGui::IsMouseDragging(ImGuiMouseButton_Left, 3.0f)) {
-        ImVec2 clickPos = ImGui::GetIO().MouseClickedPos[0];
+        in_.dragging(MouseButton::Left, 3.0f)) {
+        ImVec2 clickPos(in_.pressX[0], in_.pressY[0]);
         for (const auto& r : dimLabelRects_) {
             if (r.sketchPlaneIndex != activeSketchPlane_) continue;
             if (clickPos.x >= r.x0 && clickPos.x <= r.x1 &&
@@ -320,7 +318,7 @@ void App::handleSketchInput(float vpW, float vpH) {
         (dimTool_.phase == DimToolState::Editing || dimTool_.phase == DimToolState::EditingAndPlacing)) {
         // Escape during EditingAndPlacing cancels label placement, removing the constraint
         if (dimTool_.phase == DimToolState::EditingAndPlacing &&
-            ImGui::IsKeyPressed(ImGuiKey_Escape) && !io.WantCaptureKeyboard) {
+            in_.keyPressed(Key::Escape) && !in_.uiWantsKeyboard) {
             sketch.removeConstraint(dimTool_.constraintID);
             dimTool_.reset();
             tool_.type = ToolType::Dimension;
@@ -330,7 +328,7 @@ void App::handleSketchInput(float vpW, float vpH) {
         }
         // Delete key removes the dimension being edited
         if (dimTool_.phase == DimToolState::Editing &&
-            ImGui::IsKeyPressed(ImGuiKey_Delete) && !io.WantCaptureKeyboard) {
+            in_.keyPressed(Key::Delete) && !in_.uiWantsKeyboard) {
             sketch.removeConstraint(dimTool_.constraintID);
             dimTool_.reset();
             selection_.clear();
@@ -366,7 +364,7 @@ void App::handleSketchInput(float vpW, float vpH) {
                     // Auto-side: flip between acute/reflex based on which side cursor is on
                     if (dimTool_.angleAutoSide) {
                         // Check if user started typing → exit auto mode
-                        if (io.InputQueueCharacters.Size > 0) {
+                        if (!in_.typed.empty()) {
                             dimTool_.angleAutoSide = false;
                         } else {
                             Point2D vtx = mid;
@@ -448,7 +446,7 @@ void App::handleSketchInput(float vpW, float vpH) {
             // Left click finalizes placement (skip the frame we entered this phase)
             if (dimTool_.placingFirstFrame) {
                 dimTool_.placingFirstFrame = false;
-            } else if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) && !mouseOverUI) {
+            } else if (in_.mouseClicked(MouseButton::Left) && !mouseOverUI) {
                 // If placing a line length and user clicks a second line → switch to angle
                 if (dimTool_.selType == HitType::Line && dimTool_.entityB == NullID) {
                     HitResult hit2 = hitTest(cursorLocal_, apparentScale, sketch, 10.0f);
@@ -993,7 +991,7 @@ void App::handleSketchInput(float vpW, float vpH) {
 
     // Inline dimension input — intercept number keys when circle tool has center placed
     // or fillet tool has vertex placed
-    if (!io.WantCaptureKeyboard && !tool_.inlineInputActive &&
+    if (!in_.uiWantsKeyboard && !tool_.inlineInputActive &&
         ((tool_.type == ToolType::Circle && tool_.hasFirstPoint) ||
          (tool_.type == ToolType::Fillet && tool_.hasFirstPoint))) {
         // Check for number, decimal key press to activate inline input (main + numpad)
@@ -1003,151 +1001,61 @@ void App::handleSketchInput(float vpW, float vpH) {
             tool_.inlineInputBuf[1] = '\0';
             tool_.inlineInputFocus = true;
         };
-        for (int k = ImGuiKey_0; k <= ImGuiKey_9; k++) {
-            if (ImGui::IsKeyPressed((ImGuiKey)k)) { activateInline((char)('0' + (k - ImGuiKey_0))); break; }
+        for (int d = 0; d <= 9; d++) {
+            if (in_.keyPressed(digitKey(d))) { activateInline((char)('0' + d)); break; }
         }
         if (!tool_.inlineInputActive) {
-            for (int k = ImGuiKey_Keypad0; k <= ImGuiKey_Keypad9; k++) {
-                if (ImGui::IsKeyPressed((ImGuiKey)k)) { activateInline((char)('0' + (k - ImGuiKey_Keypad0))); break; }
+            for (int d = 0; d <= 9; d++) {
+                if (in_.keyPressed(keypadDigitKey(d))) { activateInline((char)('0' + d)); break; }
             }
         }
-        if (!tool_.inlineInputActive && (ImGui::IsKeyPressed(ImGuiKey_Period) || ImGui::IsKeyPressed(ImGuiKey_KeypadDecimal))) {
+        if (!tool_.inlineInputActive && (in_.keyPressed(Key::Period) || in_.keyPressed(Key::KeypadDecimal))) {
             activateInline('.');
         }
     }
 
-    // Show inline dimension input floating window
-    if (tool_.inlineInputActive) {
-        ImVec2 mouse = io.MousePos;
-        ImGui::SetNextWindowPos(ImVec2(mouse.x + 20, mouse.y - 10), ImGuiCond_Always);
-        ImGui::SetNextWindowSize(ImVec2(120, 0));
-        ImGui::Begin("##InlineDim", nullptr,
-            ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
-            ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoScrollbar |
-            ImGuiWindowFlags_AlwaysAutoResize);
-
-        ImGui::SetNextItemWidth(100);
-        if (tool_.inlineInputFocus) {
-            ImGui::SetKeyboardFocusHere();
-            tool_.inlineInputFocus = false;
-        }
-
-        // Callback to move cursor to end and clear selection on first focus
-        auto cursorEndCb = [](ImGuiInputTextCallbackData* data) -> int {
-            data->CursorPos = data->BufTextLen;
-            data->SelectionStart = data->SelectionEnd = data->BufTextLen;
-            return 0;
-        };
-
-        bool submitted = ImGui::InputText("##inlineDimInput", tool_.inlineInputBuf,
-            sizeof(tool_.inlineInputBuf),
-            ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_CallbackAlways,
-            cursorEndCb);
-
-        if (submitted) {
-            std::string unit;
-            float inputVal = 0;
-            float valueMm = parseUnitInput(tool_.inlineInputBuf, unit, inputVal);
-            if (tool_.type == ToolType::Circle) {
-                if (valueMm > 0.001f) {
-                    float radius = valueMm * 0.5f;
-                    EntityID circID = sketch.addCircle(tool_.firstPointID, radius);
-                    sketch.addConstraint(ConstraintType::Diameter, circID, NullID, valueMm, false);
-                    lastSketchDof_ = solver_.solve(sketch).dof;
-                    history_.pushState(sketch);
-                    tool_.reset();
-                } else {
-                    snprintf(sketchMsg_, sizeof(sketchMsg_), "Enter a positive diameter");
-                    sketchMsgTimer_ = 2.0f;
-                    tool_.inlineInputActive = false;
-                    tool_.inlineInputBuf[0] = '\0';
-                }
-            } else if (tool_.type == ToolType::Fillet) {
-                if (valueMm > 0.001f) {
-                    bool ok = applyFillet(sketch, filletTool_, tool_.firstPointID, valueMm);
-                    if (ok) {
-                        lastSketchDof_ = solver_.solve(sketch).dof;
-                        history_.pushState(sketch);
-                    }
-                    tool_.reset();
-                    filletTool_.reset();
-                } else {
-                    tool_.inlineInputActive = false;
-                    tool_.inlineInputBuf[0] = '\0';
-                }
-            }
-        }
-
-        if (ImGui::IsKeyPressed(ImGuiKey_Escape)) {
-            if (tool_.type == ToolType::Fillet && tool_.hasFirstPoint) {
-                // Cancel the whole fillet vertex selection, stay in fillet tool
-                switchTool(ToolType::Fillet);
-            } else {
-                tool_.inlineInputActive = false;
-                tool_.inlineInputBuf[0] = '\0';
-            }
-        }
-
-        ImGui::End();
-    }
-
-    // Sketch status message overlay (warnings, constraint feedback, etc.)
-    if (sketchMsgTimer_ > 0.0f) {
-        sketchMsgTimer_ -= io.DeltaTime;
-        ImVec2 displaySize = io.DisplaySize;
-        ImGui::SetNextWindowPos(ImVec2(displaySize.x * 0.5f, displaySize.y - 60.0f),
-                                ImGuiCond_Always, ImVec2(0.5f, 0.5f));
-        ImGui::SetNextWindowBgAlpha(0.78f);
-        ImGui::Begin("##SketchMsg", nullptr,
-            ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
-            ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoScrollbar |
-            ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoFocusOnAppearing |
-            ImGuiWindowFlags_NoInputs);
-        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.85f, 0.3f, 1.0f));
-        ImGui::Text("%s", sketchMsg_);
-        ImGui::PopStyleColor();
-        ImGui::End();
-    }
+    drawInlineDimInput(sketch);
+    drawSketchMessage();
 
     // Keyboard shortcuts
-    if (!io.WantCaptureKeyboard && !tool_.inlineInputActive) {
+    if (!in_.uiWantsKeyboard && !tool_.inlineInputActive) {
         // Undo/redo
-        if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_Z)) {
-            if (io.KeyShift) { history_.redo(sketch); }
+        if (in_.ctrl && in_.keyPressed(Key::Z)) {
+            if (in_.shift) { history_.redo(sketch); }
             else { history_.undo(sketch); }
             switchTool(tool_.type);
         }
-        if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_Y)) {
+        if (in_.ctrl && in_.keyPressed(Key::Y)) {
             history_.redo(sketch); switchTool(tool_.type);
         }
 
-        if (ImGui::IsKeyPressed(ImGuiKey_P) && !io.KeyShift) { switchTool(ToolType::Point); }
-        if (ImGui::IsKeyPressed(ImGuiKey_L)) { switchTool(ToolType::Line); }
-        if (ImGui::IsKeyPressed(ImGuiKey_C)) { switchTool(ToolType::Circle); }
-        if (ImGui::IsKeyPressed(ImGuiKey_R) && !io.KeyShift) { switchTool(ToolType::Rectangle); }
-        if (ImGui::IsKeyPressed(ImGuiKey_A) && !io.KeyShift) { switchTool(ToolType::Arc3Point); }
-        if (ImGui::IsKeyPressed(ImGuiKey_A) && io.KeyShift) { switchTool(ToolType::ArcCenter); }
-        if (ImGui::IsKeyPressed(ImGuiKey_R) && io.KeyShift) { switchTool(ToolType::CenterRect); }
+        if (in_.keyPressed(Key::P) && !in_.shift) { switchTool(ToolType::Point); }
+        if (in_.keyPressed(Key::L)) { switchTool(ToolType::Line); }
+        if (in_.keyPressed(Key::C)) { switchTool(ToolType::Circle); }
+        if (in_.keyPressed(Key::R) && !in_.shift) { switchTool(ToolType::Rectangle); }
+        if (in_.keyPressed(Key::A) && !in_.shift) { switchTool(ToolType::Arc3Point); }
+        if (in_.keyPressed(Key::A) && in_.shift) { switchTool(ToolType::ArcCenter); }
+        if (in_.keyPressed(Key::R) && in_.shift) { switchTool(ToolType::CenterRect); }
 
-        if (ImGui::IsKeyPressed(ImGuiKey_E) && tool_.type != ToolType::Extrude) {
+        if (in_.keyPressed(Key::E) && tool_.type != ToolType::Extrude) {
             enterExtrudeMode();
         }
-        if (ImGui::IsKeyPressed(ImGuiKey_V) && tool_.type != ToolType::Revolve) {
+        if (in_.keyPressed(Key::V) && tool_.type != ToolType::Revolve) {
             enterRevolveMode();
         }
 
-        if (ImGui::IsKeyPressed(ImGuiKey_N)) {
+        if (in_.keyPressed(Key::N)) {
             orientCameraToPlane(activePlane());
         }
 
-        if (ImGui::IsKeyPressed(ImGuiKey_D)) { switchTool(ToolType::Dimension); }
-        if (ImGui::IsKeyPressed(ImGuiKey_F)) { switchTool(ToolType::Fillet); }
+        if (in_.keyPressed(Key::D)) { switchTool(ToolType::Dimension); }
+        if (in_.keyPressed(Key::F)) { switchTool(ToolType::Fillet); }
 
-        if (ImGui::IsKeyPressed(ImGuiKey_Delete) || ImGui::IsKeyPressed(ImGuiKey_Backspace)) {
+        if (in_.keyPressed(Key::Delete) || in_.keyPressed(Key::Backspace)) {
             handleDeletion(sketch);
         }
 
-        if (ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+        if (in_.keyPressed(Key::Escape)) {
             if (tool_.hasFirstPoint || arcTool_.clickCount > 0) {
                 // Cancel in-progress tool action, stay in same tool
                 switchTool(tool_.type);
@@ -1170,7 +1078,7 @@ void App::handleSketchInput(float vpW, float vpH) {
     // (Dimension label drag is handled above, before the dim tool early return)
 
     // Double-click: end continuous line chain (Fusion 360 parity)
-    if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
+    if (in_.mouseDoubleClicked(MouseButton::Left)) {
         if (tool_.type == ToolType::Line && tool_.hasFirstPoint) {
             switchTool(ToolType::None);
             goto skipLeftClick;
@@ -1178,14 +1086,14 @@ void App::handleSketchInput(float vpW, float vpH) {
     }
 
     // Left click
-    if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+    if (in_.mouseClicked(MouseButton::Left)) {
         if (tool_.type != ToolType::None) {
             // Always use currentSnap_.position: for type=None it equals cursorLocal_,
             // but H/V snap may have overridden it to the guide-locked position.
             Point2D effectivePos = currentSnap_.position;
             handleToolAction(sketch, effectivePos);
         } else {
-            handleSelection(sketch, io.KeyCtrl);
+            handleSelection(sketch, in_.ctrl);
         }
     }
     skipLeftClick:;
@@ -1193,7 +1101,7 @@ void App::handleSketchInput(float vpW, float vpH) {
     // Start drag (dim drag is handled above; here handle point drag, box/lasso)
     if (tool_.type == ToolType::None &&
         selection_.dragMode == SelectionDragMode::None &&
-        ImGui::IsMouseDragging(ImGuiMouseButton_Left, 3.0f)) {
+        in_.dragging(MouseButton::Left, 3.0f)) {
 
         // Check if drag started on a selected point → PointDrag
         bool startedOnPoint = false;
@@ -1220,7 +1128,7 @@ void App::handleSketchInput(float vpW, float vpH) {
             // Check if we hit anything at the drag start point — if so, don't start box/lasso
             HitResult hitAtAnchor = hitTest(selection_.dragAnchor, apparentScale, sketch, 10.0f);
             if (hitAtAnchor.type == HitType::None) {
-                if (io.KeyAlt) {
+                if (in_.alt) {
                     selection_.dragMode = SelectionDragMode::LassoSelect;
                     selection_.lassoPoints.clear();
                     selection_.lassoPoints.push_back(selection_.dragAnchor);
@@ -1243,7 +1151,7 @@ void App::handleSketchInput(float vpW, float vpH) {
     }
 
     // End drag
-    if (ImGui::IsMouseReleased(ImGuiMouseButton_Left)) {
+    if (in_.mouseReleased(MouseButton::Left)) {
         if (selection_.dragMode == SelectionDragMode::PointDrag) {
             if (selection_.dragStarted) {
                 history_.pushState(sketch);
@@ -1263,7 +1171,7 @@ void App::handleSketchInput(float vpW, float vpH) {
         } else if (selection_.dragMode == SelectionDragMode::BoxSelect) {
             // Select entities contained in screen-space box
             Point2D a = selection_.dragAnchorScreen;
-            Point2D b = {io.MousePos.x, io.MousePos.y};
+            Point2D b = {in_.mouseX, in_.mouseY};
             Point2D mn = {std::min(a.x, b.x), std::min(a.y, b.y)};
             Point2D mx = {std::max(a.x, b.x), std::max(a.y, b.y)};
 
@@ -1281,7 +1189,7 @@ void App::handleSketchInput(float vpW, float vpH) {
                 return sx >= mn.x && sx <= mx.x && sy >= mn.y && sy <= mx.y;
             };
 
-            if (!io.KeyCtrl) selection_.selected.clear();
+            if (!in_.ctrl) selection_.selected.clear();
 
             for (const auto& pt : sketch.points) {
                 if (screenPtInRect(pt.x, pt.y))
@@ -1349,7 +1257,7 @@ void App::handleSketchInput(float vpW, float vpH) {
             selection_.lassoPoints.push_back(cursorLocal_);
             const auto& poly = selection_.lassoPoints;
 
-            if (!io.KeyCtrl) selection_.selected.clear();
+            if (!in_.ctrl) selection_.selected.clear();
 
             if (poly.size() >= 3) {
                 for (const auto& pt : sketch.points) {
@@ -1411,7 +1319,7 @@ void App::handleSketchInput(float vpW, float vpH) {
     }
 
     // Right click: cancel current action, then tool, then selection
-    if (ImGui::IsMouseClicked(ImGuiMouseButton_Right)) {
+    if (in_.mouseClicked(MouseButton::Right)) {
         if (tool_.hasFirstPoint || arcTool_.clickCount > 0) {
             switchTool(tool_.type);
         } else if (selection_.dragMode == SelectionDragMode::PointDrag) {
@@ -1428,6 +1336,106 @@ void App::handleSketchInput(float vpW, float vpH) {
         } else {
             selection_.clear();
         }
+    }
+}
+
+// Value box for a circle diameter or fillet radius, opened by typing a digit
+// while the tool is waiting (see handleSketchInput). Called from the same point
+// in the frame as before, so submit and Escape happen in the same order.
+void App::drawInlineDimInput(Sketch& sketch) {
+    // Show inline dimension input floating window
+    if (tool_.inlineInputActive) {
+        ImVec2 mouse(in_.mouseX, in_.mouseY);
+        ImGui::SetNextWindowPos(ImVec2(mouse.x + 20, mouse.y - 10), ImGuiCond_Always);
+        ImGui::SetNextWindowSize(ImVec2(120, 0));
+        ImGui::Begin("##InlineDim", nullptr,
+            ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
+            ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoScrollbar |
+            ImGuiWindowFlags_AlwaysAutoResize);
+
+        ImGui::SetNextItemWidth(100);
+        if (tool_.inlineInputFocus) {
+            ImGui::SetKeyboardFocusHere();
+            tool_.inlineInputFocus = false;
+        }
+
+        // Callback to move cursor to end and clear selection on first focus
+        auto cursorEndCb = [](ImGuiInputTextCallbackData* data) -> int {
+            data->CursorPos = data->BufTextLen;
+            data->SelectionStart = data->SelectionEnd = data->BufTextLen;
+            return 0;
+        };
+
+        bool submitted = ImGui::InputText("##inlineDimInput", tool_.inlineInputBuf,
+            sizeof(tool_.inlineInputBuf),
+            ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_CallbackAlways,
+            cursorEndCb);
+
+        if (submitted) {
+            std::string unit;
+            float inputVal = 0;
+            float valueMm = parseUnitInput(tool_.inlineInputBuf, unit, inputVal);
+            if (tool_.type == ToolType::Circle) {
+                if (valueMm > 0.001f) {
+                    float radius = valueMm * 0.5f;
+                    EntityID circID = sketch.addCircle(tool_.firstPointID, radius);
+                    sketch.addConstraint(ConstraintType::Diameter, circID, NullID, valueMm, false);
+                    lastSketchDof_ = solver_.solve(sketch).dof;
+                    history_.pushState(sketch);
+                    tool_.reset();
+                } else {
+                    snprintf(sketchMsg_, sizeof(sketchMsg_), "Enter a positive diameter");
+                    sketchMsgTimer_ = 2.0f;
+                    tool_.inlineInputActive = false;
+                    tool_.inlineInputBuf[0] = '\0';
+                }
+            } else if (tool_.type == ToolType::Fillet) {
+                if (valueMm > 0.001f) {
+                    bool ok = applyFillet(sketch, filletTool_, tool_.firstPointID, valueMm);
+                    if (ok) {
+                        lastSketchDof_ = solver_.solve(sketch).dof;
+                        history_.pushState(sketch);
+                    }
+                    tool_.reset();
+                    filletTool_.reset();
+                } else {
+                    tool_.inlineInputActive = false;
+                    tool_.inlineInputBuf[0] = '\0';
+                }
+            }
+        }
+
+        if (in_.keyPressed(Key::Escape)) {
+            if (tool_.type == ToolType::Fillet && tool_.hasFirstPoint) {
+                // Cancel the whole fillet vertex selection, stay in fillet tool
+                switchTool(ToolType::Fillet);
+            } else {
+                tool_.inlineInputActive = false;
+                tool_.inlineInputBuf[0] = '\0';
+            }
+        }
+
+        ImGui::End();
+    }
+}
+
+void App::drawSketchMessage() {
+    // Sketch status message overlay (warnings, constraint feedback, etc.)
+    if (sketchMsgTimer_ > 0.0f) {
+        sketchMsgTimer_ -= in_.dt;
+        ImVec2 displaySize = ImGui::GetIO().DisplaySize;
+        ImGui::SetNextWindowPos(ImVec2(displaySize.x * 0.5f, displaySize.y - 60.0f),
+                                ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+        ImGui::SetNextWindowBgAlpha(0.78f);
+        ImGui::Begin("##SketchMsg", nullptr,
+            ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
+            ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoScrollbar |
+            ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoFocusOnAppearing |
+            ImGuiWindowFlags_NoInputs);
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.85f, 0.3f, 1.0f));
+        ImGui::Text("%s", sketchMsg_);
+        ImGui::PopStyleColor();
+        ImGui::End();
     }
 }
 
@@ -1653,7 +1661,7 @@ void App::handleSelection(Sketch& sketch, bool ctrlHeld) {
     float apparentScale = computeApparentScale(activePlane(), view, proj, (float)w, (float)h);
 
     // Check dimension label rects first (they're drawn on top)
-    ImVec2 mouse = ImGui::GetIO().MousePos;
+    ImVec2 mouse(in_.mouseX, in_.mouseY);
     EntityID dimHitID = NullID;
     for (const auto& r : dimLabelRects_) {
         if (r.sketchPlaneIndex != activeSketchPlane_) continue;
@@ -1671,7 +1679,7 @@ void App::handleSelection(Sketch& sketch, bool ctrlHeld) {
         }
         // Double-click: enter editing mode for this existing constraint
         Constraint* cc = sketch.findConstraint(dimHitID);
-        if (cc && !ctrlHeld && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
+        if (cc && !ctrlHeld && in_.mouseDoubleClicked(MouseButton::Left)) {
             tool_.type = ToolType::Dimension;
             dimTool_.reset();
             dimTool_.phase = DimToolState::Editing;
@@ -1717,8 +1725,7 @@ void App::handleSelection(Sketch& sketch, bool ctrlHeld) {
         if (dimTool_.editingExisting) dimTool_.reset();
         // Store drag anchor for potential box/lasso select
         selection_.dragAnchor = cursorLocal_;
-        ImGuiIO& anchorIO = ImGui::GetIO();
-        selection_.dragAnchorScreen = {anchorIO.MousePos.x, anchorIO.MousePos.y};
+        selection_.dragAnchorScreen = {in_.mouseX, in_.mouseY};
     }
 }
 

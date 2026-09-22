@@ -18,26 +18,25 @@ void App::enterBooleanMode(BooleanOperation op) {
 }
 
 void App::handleBooleanInput(float vpW, float vpH) {
-    if (ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+    if (in_.keyPressed(Key::Escape)) {
         cancelBoolean();
         return;
     }
-    if (ImGui::IsKeyPressed(ImGuiKey_Enter) && booleanTool_.canCommit()) {
+    if (in_.keyPressed(Key::Enter) && booleanTool_.canCommit()) {
         commitBoolean();
         return;
     }
 
     // Click to pick bodies
-    if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) && !ImGui::GetIO().WantCaptureMouse) {
-        float mx = ImGui::GetMousePos().x;
-        float my = ImGui::GetMousePos().y;
-        ImVec2 vMin = ImGui::GetMainViewport()->WorkPos;
+    if (in_.mouseClicked(MouseButton::Left) && !in_.uiWantsMouse) {
+        float mx = in_.mouseX;
+        float my = in_.mouseY;
 
         float view[16], proj[16];
         getViewProj((int)vpW, (int)vpH, view, proj);
 
         float rayOrig[3], rayDir[3];
-        screenToRay(mx, my, vMin.x, vMin.y, vpW, vpH, view, proj, rayOrig, rayDir);
+        screenToRay(mx, my, 0, 0, vpW, vpH, view, proj, rayOrig, rayDir);
 
         FacePickResult hit = pickFace(scene_, rayOrig, rayDir, &section_);
         if (hit.hit) {

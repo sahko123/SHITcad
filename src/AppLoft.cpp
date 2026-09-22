@@ -35,14 +35,13 @@ void App::enterLoftMode() {
 
 void App::handleLoftInput(float vpW, float vpH) {
     (void)vpW; (void)vpH;
-    ImGuiIO& io = ImGui::GetIO();
 
-    if (!io.WantCaptureKeyboard) {
-        if (ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+    if (!in_.uiWantsKeyboard) {
+        if (in_.keyPressed(Key::Escape)) {
             cancelLoft();
             return;
         }
-        if (ImGui::IsKeyPressed(ImGuiKey_Enter) || ImGui::IsKeyPressed(ImGuiKey_KeypadEnter)) {
+        if (in_.keyPressed(Key::Enter) || in_.keyPressed(Key::KeypadEnter)) {
             if (loftTool_.canCommit()) {
                 commitLoft();
                 return;

@@ -31,6 +31,53 @@ namespace shitcad {
 
 static float lerp(float a, float b, float t) { return a + (b - a) * t; }
 
+// The only place viewport input is read from ImGui. Called after
+// ImGui::NewFrame(), so every value is the one the handlers used to query.
+static void fillInputFromImGui(InputFrame& in, float viewY) {
+    static const ImGuiKey kKeys[(int)Key::Count] = {
+        ImGuiKey_A, ImGuiKey_C, ImGuiKey_D, ImGuiKey_E, ImGuiKey_F, ImGuiKey_L, ImGuiKey_N,
+        ImGuiKey_O, ImGuiKey_P, ImGuiKey_R, ImGuiKey_S, ImGuiKey_T, ImGuiKey_V, ImGuiKey_Y, ImGuiKey_Z,
+        ImGuiKey_0, ImGuiKey_1, ImGuiKey_2, ImGuiKey_3, ImGuiKey_4,
+        ImGuiKey_5, ImGuiKey_6, ImGuiKey_7, ImGuiKey_8, ImGuiKey_9,
+        ImGuiKey_Keypad0, ImGuiKey_Keypad1, ImGuiKey_Keypad2, ImGuiKey_Keypad3, ImGuiKey_Keypad4,
+        ImGuiKey_Keypad5, ImGuiKey_Keypad6, ImGuiKey_Keypad7, ImGuiKey_Keypad8, ImGuiKey_Keypad9,
+        ImGuiKey_KeypadDecimal, ImGuiKey_KeypadEnter, ImGuiKey_Period, ImGuiKey_Enter,
+        ImGuiKey_Escape, ImGuiKey_Delete, ImGuiKey_Backspace,
+    };
+    static_assert(sizeof(kKeys) / sizeof(kKeys[0]) == (size_t)Key::Count, "every Key needs an ImGuiKey");
+
+    const ImGuiIO& io = ImGui::GetIO();
+    in.mouseX = io.MousePos.x;
+    in.mouseY = io.MousePos.y;
+    in.mouseDX = io.MouseDelta.x;
+    in.mouseDY = io.MouseDelta.y;
+    in.wheel = io.MouseWheel;
+    in.dt = io.DeltaTime;
+    in.viewX = 0.0f;
+    in.viewY = viewY;
+    in.viewW = io.DisplaySize.x;
+    in.viewH = io.DisplaySize.y - viewY;
+    in.shift = io.KeyShift;
+    in.ctrl = io.KeyCtrl;
+    in.alt = io.KeyAlt;
+    in.uiWantsMouse = io.WantCaptureMouse;
+    in.uiWantsKeyboard = io.WantCaptureKeyboard;
+    for (int b = 0; b < (int)MouseButton::Count; b++) {
+        in.down[b] = io.MouseDown[b];
+        in.clicked[b] = ImGui::IsMouseClicked(b);
+        in.released[b] = ImGui::IsMouseReleased(b);
+        in.doubleClicked[b] = ImGui::IsMouseDoubleClicked(b);
+        in.pressX[b] = io.MouseClickedPos[b].x;
+        in.pressY[b] = io.MouseClickedPos[b].y;
+        in.dragMaxDistSqr[b] = io.MouseDragMaxDistanceSqr[b];
+    }
+    for (int k = 0; k < (int)Key::Count; k++)
+        in.pressed[(size_t)k] = ImGui::IsKeyPressed(kKeys[k]); // with auto-repeat, as before
+    in.typed.clear();
+    for (int i = 0; i < io.InputQueueCharacters.Size; i++)
+        in.typed.push_back((char32_t)io.InputQueueCharacters[i]);
+}
+
 bool App::init() {
     if (!glfwInit()) {
         fprintf(stderr, "Failed to initialize GLFW\n");
@@ -391,7 +438,7 @@ void App::render3DScene(int w, int h) {
             // Draw box in screen space using ImGui
             ImDrawList* dl = ImGui::GetForegroundDrawList();
             ImVec2 a(f(selection_.dragAnchorScreen.x), f(selection_.dragAnchorScreen.y));
-            ImVec2 b = ImGui::GetIO().MousePos;
+            ImVec2 b(in_.mouseX, in_.mouseY);
             ImVec2 mn(std::min(a.x, b.x), std::min(a.y, b.y));
             ImVec2 mx(std::max(a.x, b.x), std::max(a.y, b.y));
             dl->AddRectFilled(mn, mx, IM_COL32(0, 230, 230, 38));
@@ -411,6 +458,10 @@ void App::renderFrame() {
     float vpW = io.DisplaySize.x;
     float vpH = io.DisplaySize.y;
 
+    // Toolbar height, needed for the input rect before the toolbar is drawn
+    float toolbarH = ImGui::GetFrameHeight() + ImGui::GetStyle().WindowPadding.y * 2.0f;
+    fillInputFromImGui(in_, toolbarH);
+
     // Sync user-adjustable dimension colors into active theme (before renderDimensions)
     {
         auto& tm = activeThemeMut();
@@ -423,18 +474,17 @@ void App::renderFrame() {
     }
 
     // Toggle object tree with T key (only in navigate mode)
-    if (!io.WantCaptureKeyboard && mode_ == InteractionMode::Navigate &&
-        ImGui::IsKeyPressed(ImGuiKey_T)) {
+    if (!in_.uiWantsKeyboard && mode_ == InteractionMode::Navigate &&
+        in_.keyPressed(Key::T)) {
         objectTreeOpen_ = !objectTreeOpen_;
     }
 
     // Toggle ortho/perspective with O key
-    if (!io.WantCaptureKeyboard && ImGui::IsKeyPressed(ImGuiKey_O)) {
+    if (!in_.uiWantsKeyboard && in_.keyPressed(Key::O)) {
         viewport3D_.camera().orthographic = !viewport3D_.camera().orthographic;
     }
 
     // Toolbar — auto-fit height
-    float toolbarH = ImGui::GetFrameHeight() + ImGui::GetStyle().WindowPadding.y * 2.0f;
     ImGui::SetNextWindowPos({0, 0});
     ImGui::SetNextWindowSize({vpW, toolbarH});
     ImGui::Begin("##toolbar", nullptr,
@@ -456,7 +506,7 @@ void App::renderFrame() {
     float inputY = toolbarH;
     float inputH = vpH - inputY;
 
-    viewport3D_.handleInput(panelW, inputY, vpW - panelW, inputH);
+    viewport3D_.handleInput(in_, panelW, inputY, vpW - panelW, inputH);
 
     // Route extrude/revolve input regardless of mode
     profiler_.begin("Input");
@@ -644,41 +694,40 @@ void App::renderFrame() {
 
 
 void App::handleNavigateInput(float vpW, float vpH) {
-    ImGuiIO& io = ImGui::GetIO();
 
     // Global undo/redo in navigate mode
-    if (!io.WantCaptureKeyboard) {
-        if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_Z) && !io.KeyShift) globalUndo();
-        if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_Y)) globalRedo();
-        if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_Z) && io.KeyShift) globalRedo();
-        if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_S)) saveProjectDialog();
-        if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_O)) openProjectDialog();
-        if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_E)) exportStlDialog();
+    if (!in_.uiWantsKeyboard) {
+        if (in_.ctrl && in_.keyPressed(Key::Z) && !in_.shift) globalUndo();
+        if (in_.ctrl && in_.keyPressed(Key::Y)) globalRedo();
+        if (in_.ctrl && in_.keyPressed(Key::Z) && in_.shift) globalRedo();
+        if (in_.ctrl && in_.keyPressed(Key::S)) saveProjectDialog();
+        if (in_.ctrl && in_.keyPressed(Key::O)) openProjectDialog();
+        if (in_.ctrl && in_.keyPressed(Key::E)) exportStlDialog();
     }
 
     // E key: enter extrude mode from navigate mode
-    if (!io.WantCaptureKeyboard && ImGui::IsKeyPressed(ImGuiKey_E)) {
+    if (!in_.uiWantsKeyboard && in_.keyPressed(Key::E)) {
         enterExtrudeMode();
         return;
     }
     // V key: enter revolve mode from navigate mode
-    if (!io.WantCaptureKeyboard && ImGui::IsKeyPressed(ImGuiKey_V)) {
+    if (!in_.uiWantsKeyboard && in_.keyPressed(Key::V)) {
         enterRevolveMode();
         return;
     }
 
     // Don't handle clicks on toolbar
-    if (io.MousePos.y < 30.0f) return;
+    if (in_.mouseY < in_.viewY) return;
 
     // Face pick for "Add Reference Plane" dialog
-    if (addPlaneWaitingFace_ && ImGui::IsMouseClicked(ImGuiMouseButton_Left) && !io.WantCaptureMouse) {
+    if (addPlaneWaitingFace_ && in_.mouseClicked(MouseButton::Left) && !in_.uiWantsMouse) {
         int w, h;
         glfwGetFramebufferSize(window_, &w, &h);
         float view[16], proj[16];
         getViewProj(w, h, view, proj);
 
         float rayOrig[3], rayDir[3];
-        screenToRay(io.MousePos.x, io.MousePos.y, 0, 0, vpW, vpH, view, proj, rayOrig, rayDir);
+        screenToRay(in_.mouseX, in_.mouseY, 0, 0, vpW, vpH, view, proj, rayOrig, rayDir);
 
         FacePickResult faceHit = pickFace(scene_, rayOrig, rayDir, &section_);
         if (faceHit.hit) {
@@ -693,14 +742,14 @@ void App::handleNavigateInput(float vpW, float vpH) {
     }
 
     // Double-click: start sketch on a reference plane or body face
-    if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) && !io.WantCaptureMouse) {
+    if (in_.mouseDoubleClicked(MouseButton::Left) && !in_.uiWantsMouse) {
         int w, h;
         glfwGetFramebufferSize(window_, &w, &h);
         float view[16], proj[16];
         getViewProj(w, h, view, proj);
 
         float rayOrig[3], rayDir[3];
-        screenToRay(io.MousePos.x, io.MousePos.y, 0, 0, vpW, vpH, view, proj, rayOrig, rayDir);
+        screenToRay(in_.mouseX, in_.mouseY, 0, 0, vpW, vpH, view, proj, rayOrig, rayDir);
 
         // Check reference planes first (built-in + user-created)
         float bestT = 1e30f;

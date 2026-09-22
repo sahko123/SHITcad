@@ -594,32 +594,31 @@ void App::drawMeshPlacePanel() {
 }
 
 void App::updateMeshHover(float vpW, float vpH) {
-    ImGuiIO& io = ImGui::GetIO();
 
     bool anyMesh = false;
     for (int i = 0; i < (int)scene_.bodyCount(); i++) {
         const auto& b = scene_.getBody(i);
         if (b.visible && b.isMeshOnly()) { anyMesh = true; break; }
     }
-    if (!anyMesh || io.WantCaptureMouse || io.MousePos.y < 30.0f) {
+    if (!anyMesh || in_.uiWantsMouse || in_.mouseY < in_.viewY) {
         meshHover_ = {};
         return;
     }
 
     // Brute-force pick, so only redo it when the view or cursor could have
     // changed: large exports are hundreds of thousands of triangles.
-    bool moved = io.MousePos.x != meshHoverMouse_[0] || io.MousePos.y != meshHoverMouse_[1];
-    bool viewChanging = io.MouseWheel != 0.0f || io.MouseDown[0] || io.MouseDown[1] || io.MouseDown[2];
+    bool moved = in_.mouseX != meshHoverMouse_[0] || in_.mouseY != meshHoverMouse_[1];
+    bool viewChanging = in_.wheel != 0.0f || in_.down[0] || in_.down[1] || in_.down[2];
     if (!moved && !viewChanging && meshHover_.bodyIndex < (int)scene_.bodyCount()) return;
-    meshHoverMouse_[0] = io.MousePos.x;
-    meshHoverMouse_[1] = io.MousePos.y;
+    meshHoverMouse_[0] = in_.mouseX;
+    meshHoverMouse_[1] = in_.mouseY;
 
     int w, h;
     glfwGetFramebufferSize(window_, &w, &h);
     float view[16], proj[16];
     getViewProj(w, h, view, proj);
     float rayOrig[3], rayDir[3];
-    screenToRay(io.MousePos.x, io.MousePos.y, 0, 0, vpW, vpH, view, proj, rayOrig, rayDir);
+    screenToRay(in_.mouseX, in_.mouseY, 0, 0, vpW, vpH, view, proj, rayOrig, rayDir);
     meshHover_ = pickMesh(scene_, rayOrig, rayDir, &section_);
 }
 

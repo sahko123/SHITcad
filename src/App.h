@@ -21,6 +21,7 @@
 #include "MeshImport.h"
 #include "SimProcess.h"
 #include "SimResults.h"
+#include "ViewportInput.h"
 
 struct GLFWwindow;
 
@@ -72,6 +73,10 @@ public:
 private:
     GLFWwindow* window_ = nullptr;
     InteractionMode mode_ = InteractionMode::Navigate;
+
+    // This frame's input for the 3D view, filled once at the top of
+    // renderFrame(). Viewport handlers read this, never the GUI toolkit.
+    InputFrame in_;
 
     // 3D
     Viewport3D viewport3D_;
@@ -299,6 +304,8 @@ private:
     void drawObjectTree();
     void handleNavigateInput(float vpW, float vpH);
     void handleSketchInput(float vpW, float vpH);
+    void drawInlineDimInput(Sketch& sketch);   // value box while drawing a circle / fillet
+    void drawSketchMessage();                  // transient warning at the bottom of the view
     void handleToolAction(Sketch& sketch, Point2D localPos);
     void switchTool(ToolType newTool);
     void handleSelection(Sketch& sketch, bool ctrlHeld = false);
