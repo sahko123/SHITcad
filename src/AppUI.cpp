@@ -1099,7 +1099,7 @@ timeline_end:
 void App::drawObjectTree() {
     ImGuiIO& io = ImGui::GetIO();
     float panelW = 200.0f;
-    float toolbarH = ImGui::GetFrameHeight() + ImGui::GetStyle().WindowPadding.y * 2.0f;
+    float toolbarH = imguiToolbarHeight();
     float panelH = io.DisplaySize.y - toolbarH;
 
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, {8, 8});
@@ -1320,291 +1320,294 @@ void App::drawObjectTree() {
     }
 }
 
+// ---- Toolbar model ------------------------------------------------------------
+
+const App::ToolbarConstraint App::kToolbarConstraints[App::kToolbarConstraintCount] = {
+    {"Perp",   ConstraintType::Perpendicular},
+    {"Para",   ConstraintType::Parallel},
+    {"Colin",  ConstraintType::Collinear},
+    {"Equal",  ConstraintType::EqualLength},
+    {"Tang",   ConstraintType::Tangent},
+    {"OnLine", ConstraintType::PointOnLine},
+    {"Mid",    ConstraintType::Midpoint},
+    {"Sym",    ConstraintType::Symmetric},
+    {"Conc",   ConstraintType::Concentric},
+};
+
+const ToolType App::kSketchTools[App::kSketchToolCount] = {
+    ToolType::None, ToolType::Point, ToolType::Line, ToolType::Circle, ToolType::Rectangle,
+    ToolType::Arc3Point, ToolType::ArcCenter, ToolType::CenterRect, ToolType::Dimension, ToolType::Fillet};
+const char* const App::kSketchToolLabels[App::kSketchToolCount] = {
+    "[None]", "[P]oint", "[L]ine", "[C]ircle", "[R]ect", "[A]rc 3pt", "Arc Ctr", "Ctr Rect", "[D]im", "[F]illet"};
+
+bool ToolbarModel::operator==(const ToolbarModel& o) const {
+    if (variant != o.variant || tool != o.tool || workspace != o.workspace ||
+        canSwitchWorkspace != o.canSwitchWorkspace || extrudeActive != o.extrudeActive ||
+        revolveActive != o.revolveActive || loftActive != o.loftActive ||
+        unionActive != o.unionActive || subtractActive != o.subtractActive ||
+        ortho != o.ortho || sectionOn != o.sectionOn || bodyCount != o.bodyCount ||
+        sketchPlaneName != o.sketchPlaneName)
+        return false;
+    for (int i = 0; i < App::kToolbarConstraintCount; i++)
+        if (constraintValid[i] != o.constraintValid[i]) return false;
+    return true;
+}
+
+ToolbarModel App::toolbarModel() const {
+    ToolbarModel m;
+    if (mode_ == InteractionMode::Sketching && activeSketchPlane_ >= 0)
+        m.variant = ToolbarModel::Variant::Sketch;
+    else
+        m.variant = workspace_ == Workspace::Simulation ? ToolbarModel::Variant::Simulation
+                                                        : ToolbarModel::Variant::Model;
+    m.tool = tool_.type;
+    m.workspace = workspace_;
+    m.canSwitchWorkspace = canSwitchWorkspace();
+    m.extrudeActive = tool_.type == ToolType::Extrude;
+    m.revolveActive = tool_.type == ToolType::Revolve;
+    m.loftActive = tool_.type == ToolType::Loft;
+    m.unionActive = tool_.type == ToolType::BooleanUnion;
+    m.subtractActive = tool_.type == ToolType::BooleanSubtract;
+    m.ortho = viewport3D_.camera().orthographic;
+    m.sectionOn = sectionWindowOpen_ || section_.enabled;
+    m.bodyCount = scene_.bodyCount();
+    if (m.variant == ToolbarModel::Variant::Sketch) {
+        m.sketchPlaneName = sketchPlanes_[activeSketchPlane_].name;
+
+        const auto& sel = selection_.selected;
+        auto countType = [&](HitType t) {
+            int n = 0;
+            for (auto& s : sel) if (s.type == t) n++;
+            return n;
+        };
+        int nLines = countType(HitType::Line);
+        int nPoints = countType(HitType::Point);
+        int nCircles = countType(HitType::Circle);
+        int nArcs = countType(HitType::Arc);
+        const bool valid[kToolbarConstraintCount] = {
+            nLines == 2 && sel.size() == 2,                              // Perp
+            nLines == 2 && sel.size() == 2,                              // Para
+            nLines == 2 && sel.size() == 2,                              // Colin
+            nLines == 2 && sel.size() == 2,                              // Equal
+            nLines == 1 && (nCircles + nArcs) == 1 && sel.size() == 2,   // Tang
+            nPoints == 1 && nLines == 1 && sel.size() == 2,              // OnLine
+            nPoints == 1 && nLines == 1 && sel.size() == 2,              // Mid
+            nPoints == 2 && nLines == 1 && sel.size() == 3,              // Sym
+            (nCircles + nArcs) == 2 && sel.size() == 2,                  // Conc
+        };
+        for (int i = 0; i < kToolbarConstraintCount; i++) m.constraintValid[i] = valid[i];
+    }
+    return m;
+}
+
+void App::perform(UiAction action, int arg) {
+    const bool sketchBar = mode_ == InteractionMode::Sketching && activeSketchPlane_ >= 0;
+    switch (action) {
+        case UiAction::FinishSketch: if (sketchBar) finishSketch(); break;
+        case UiAction::SelectTool: if (sketchBar) switchTool((ToolType)arg); break;
+        // On the sketch toolbar these toggle; on the model toolbar they only enter.
+        case UiAction::Extrude:
+            if (sketchBar && tool_.type == ToolType::Extrude) cancelExtrude(); else enterExtrudeMode();
+            break;
+        case UiAction::Revolve:
+            if (sketchBar && tool_.type == ToolType::Revolve) cancelRevolve(); else enterRevolveMode();
+            break;
+        case UiAction::Loft:
+            if (sketchBar && tool_.type == ToolType::Loft) cancelLoft(); else enterLoftMode();
+            break;
+        case UiAction::SnapView: if (sketchBar) orientCameraToPlane(activePlane()); break;
+        case UiAction::ApplyConstraint:
+            if (sketchBar && arg >= 0 && arg < kToolbarConstraintCount && toolbarModel().constraintValid[arg])
+                applyGeometricConstraint(activeSketch(), kToolbarConstraints[arg].type);
+            break;
+        case UiAction::ExportDxf: exportDxfDialog(); break;
+        case UiAction::SetWorkspace:
+            if (canSwitchWorkspace() || workspace_ == (Workspace)arg) setWorkspace((Workspace)arg);
+            break;
+        case UiAction::Save: saveProjectDialog(); break;
+        case UiAction::Open: openProjectDialog(); break;
+        case UiAction::ImportStep: importStepDialog(); break;
+        case UiAction::ImportIges: importIgesDialog(); break;
+        case UiAction::ImportStl: importStlDialog(); break;
+        case UiAction::ExportStep: exportStepDialog(); break;
+        case UiAction::ExportIges: exportIgesDialog(); break;
+        case UiAction::ExportStl: exportStlDialog(); break;
+        case UiAction::ExportObj: exportObjDialog(); break;
+        case UiAction::ToggleSection: sectionWindowOpen_ = !sectionWindowOpen_; break;
+        case UiAction::Union:
+            if (tool_.type == ToolType::BooleanUnion) cancelBoolean(); else enterBooleanMode(BooleanOperation::Union);
+            break;
+        case UiAction::Subtract:
+            if (tool_.type == ToolType::BooleanSubtract) cancelBoolean(); else enterBooleanMode(BooleanOperation::Subtract);
+            break;
+        case UiAction::ToggleOrtho: viewport3D_.camera().orthographic = !viewport3D_.camera().orthographic; break;
+        case UiAction::TogglePrefs: prefsOpen_ = !prefsOpen_; break;
+    }
+}
+
+// ImGui front end for ToolbarModel (the Qt one is src/qt/Toolbar.cpp).
 void App::drawToolbar() {
+    const ToolbarModel m = toolbarModel();
     ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, {4, 0});
     ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, {8, 4});
 
-    if (mode_ == InteractionMode::Sketching && activeSketchPlane_ >= 0) {
+    auto orthoButton = [&] {
+        if (ImGui::Button(m.ortho ? "[O]rtho" : "[O] Persp")) perform(UiAction::ToggleOrtho);
+    };
+    // A coloured button: `on` shows the tool as active.
+    auto toolButton = [&](const char* label, bool on, ImVec4 offColour, UiAction a, int arg = 0) {
+        ImGui::PushStyleColor(ImGuiCol_Button, on ? ImVec4(0.3f, 0.5f, 0.8f, 1.0f) : offColour);
+        if (ImGui::Button(label)) perform(a, arg);
+        ImGui::PopStyleColor();
+    };
+    auto sep = [] {
+        ImGui::SameLine();
+        ImGui::TextDisabled("|");
+        ImGui::SameLine();
+    };
+    const ImVec4 kBrown(0.5f, 0.3f, 0.1f, 1.0f);
+    const ImVec4 kTeal(0.1f, 0.4f, 0.5f, 1.0f);
+
+    if (m.variant == ToolbarModel::Variant::Sketch) {
         // Sketch mode toolbar
         if (ImGui::Button("Finish Sketch [Esc]")) {
-            finishSketch();
+            perform(UiAction::FinishSketch);
             ImGui::PopStyleVar(2);
             return;
         }
-        ImGui::SameLine();
-        ImGui::TextDisabled("|");
-        ImGui::SameLine();
+        sep();
 
-        const char* toolNames[] = {"[None]", "[P]oint", "[L]ine", "[C]ircle", "[R]ect", "[A]rc 3pt", "Arc Ctr", "Ctr Rect", "[D]im", "[F]illet"};
-        ToolType toolTypes[] = {ToolType::None, ToolType::Point, ToolType::Line, ToolType::Circle, ToolType::Rectangle, ToolType::Arc3Point, ToolType::ArcCenter, ToolType::CenterRect, ToolType::Dimension, ToolType::Fillet};
-        for (int i = 0; i < 10; i++) {
+        for (int i = 0; i < kSketchToolCount; i++) {
             ImGui::SameLine();
-            bool selected = (tool_.type == toolTypes[i]);
+            bool selected = (m.tool == kSketchTools[i]);
             if (selected) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.3f, 0.5f, 0.8f, 1.0f));
-            if (ImGui::Button(toolNames[i])) {
-                switchTool(toolTypes[i]);
-            }
+            if (ImGui::Button(kSketchToolLabels[i])) perform(UiAction::SelectTool, (int)kSketchTools[i]);
             if (selected) ImGui::PopStyleColor();
         }
 
+        sep();
+        toolButton("[E]xtrude", m.extrudeActive, kBrown, UiAction::Extrude);
         ImGui::SameLine();
-        ImGui::TextDisabled("|");
+        toolButton("Re[v]olve", m.revolveActive, kBrown, UiAction::Revolve);
         ImGui::SameLine();
-        bool extrudeActive = (tool_.type == ToolType::Extrude);
-        if (extrudeActive)
-            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.3f, 0.5f, 0.8f, 1.0f));
-        else
-            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.5f, 0.3f, 0.1f, 1.0f));
-        if (ImGui::Button("[E]xtrude")) {
-            if (extrudeActive)
-                cancelExtrude();
-            else
-                enterExtrudeMode();
-        }
-        ImGui::PopStyleColor();
+        toolButton("Loft", m.loftActive, kBrown, UiAction::Loft);
 
-        ImGui::SameLine();
-        bool revolveActive = (tool_.type == ToolType::Revolve);
-        if (revolveActive)
-            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.3f, 0.5f, 0.8f, 1.0f));
-        else
-            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.5f, 0.3f, 0.1f, 1.0f));
-        if (ImGui::Button("Re[v]olve")) {
-            if (revolveActive)
-                cancelRevolve();
-            else
-                enterRevolveMode();
-        }
-        ImGui::PopStyleColor();
-
-        ImGui::SameLine();
-        bool loftActive = (tool_.type == ToolType::Loft);
-        if (loftActive)
-            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.3f, 0.5f, 0.8f, 1.0f));
-        else
-            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.5f, 0.3f, 0.1f, 1.0f));
-        if (ImGui::Button("Loft")) {
-            if (loftActive)
-                cancelLoft();
-            else
-                enterLoftMode();
-        }
-        ImGui::PopStyleColor();
-
-        ImGui::SameLine();
-        ImGui::TextDisabled("|");
-        ImGui::SameLine();
-        if (ImGui::Button("[N] Snap View")) {
-            orientCameraToPlane(activePlane());
-        }
+        sep();
+        if (ImGui::Button("[N] Snap View")) perform(UiAction::SnapView);
 
         // Constraint buttons
-        ImGui::SameLine();
-        ImGui::TextDisabled("|");
-        ImGui::SameLine();
-        {
-            auto& sel = selection_.selected;
-            auto countType = [&](HitType t) {
-                int n = 0;
-                for (auto& s : sel) if (s.type == t) n++;
-                return n;
-            };
-            int nLines = countType(HitType::Line);
-            int nPoints = countType(HitType::Point);
-            int nCircles = countType(HitType::Circle);
-            int nArcs = countType(HitType::Arc);
-
-            struct CBtn { const char* label; ConstraintType type; bool valid; };
-            CBtn cbtns[] = {
-                {"Perp",    ConstraintType::Perpendicular, nLines == 2 && sel.size() == 2},
-                {"Para",    ConstraintType::Parallel,      nLines == 2 && sel.size() == 2},
-                {"Colin",   ConstraintType::Collinear,     nLines == 2 && sel.size() == 2},
-                {"Equal",   ConstraintType::EqualLength,   nLines == 2 && sel.size() == 2},
-                {"Tang",    ConstraintType::Tangent,        nLines == 1 && (nCircles + nArcs) == 1 && sel.size() == 2},
-                {"OnLine",  ConstraintType::PointOnLine,   nPoints == 1 && nLines == 1 && sel.size() == 2},
-                {"Mid",     ConstraintType::Midpoint,      nPoints == 1 && nLines == 1 && sel.size() == 2},
-                {"Sym",     ConstraintType::Symmetric,     nPoints == 2 && nLines == 1 && sel.size() == 3},
-                {"Conc",    ConstraintType::Concentric,    (nCircles + nArcs) == 2 && sel.size() == 2},
-            };
-            Sketch& sk = activeSketch();
-            for (auto& cb : cbtns) {
-                if (!cb.valid) {
-                    ImGui::PushStyleVar(ImGuiStyleVar_Alpha, 0.4f);
-                    ImGui::Button(cb.label);
-                    ImGui::PopStyleVar();
-                } else if (ImGui::Button(cb.label)) {
-                    applyGeometricConstraint(sk, cb.type);
-                }
-                ImGui::SameLine();
+        sep();
+        for (int i = 0; i < kToolbarConstraintCount; i++) {
+            if (!m.constraintValid[i]) {
+                ImGui::PushStyleVar(ImGuiStyleVar_Alpha, 0.4f);
+                ImGui::Button(kToolbarConstraints[i].label);
+                ImGui::PopStyleVar();
+            } else if (ImGui::Button(kToolbarConstraints[i].label)) {
+                perform(UiAction::ApplyConstraint, i);
             }
+            ImGui::SameLine();
         }
 
         ImGui::TextDisabled("|");
         ImGui::SameLine();
 
         char label[64];
-        snprintf(label, sizeof(label), "Sketching: %s", sketchPlanes_[activeSketchPlane_].name.c_str());
+        snprintf(label, sizeof(label), "Sketching: %s", m.sketchPlaneName.c_str());
         ImGui::TextUnformatted(label);
 
+        sep();
+        orthoButton();
         ImGui::SameLine();
-        ImGui::TextDisabled("|");
+        if (ImGui::Button("Export DXF")) perform(UiAction::ExportDxf);
         ImGui::SameLine();
-        {
-            bool& ortho = viewport3D_.camera().orthographic;
-            if (ImGui::Button(ortho ? "[O]rtho" : "[O] Persp")) ortho = !ortho;
-        }
-        ImGui::SameLine();
-        if (ImGui::Button("Export DXF")) exportDxfDialog();
-        ImGui::SameLine();
-        if (ImGui::Button("Prefs")) prefsOpen_ = !prefsOpen_;
+        if (ImGui::Button("Prefs")) perform(UiAction::TogglePrefs);
     } else {
         // Workspace tabs: Model (CAD) | Simulation
         {
-            bool canSwitch = canSwitchWorkspace();
             auto tab = [&](const char* label, Workspace w) {
-                bool on = workspace_ == w;
+                bool on = m.workspace == w;
                 ImGui::PushStyleColor(ImGuiCol_Button, on ? ImVec4(0.25f, 0.45f, 0.75f, 1.0f)
                                                          : ImVec4(0.35f, 0.35f, 0.38f, 1.0f));
-                if (!canSwitch && !on) ImGui::BeginDisabled();
-                if (ImGui::Button(label)) setWorkspace(w);
-                if (!canSwitch && !on) ImGui::EndDisabled();
+                if (!m.canSwitchWorkspace && !on) ImGui::BeginDisabled();
+                if (ImGui::Button(label)) perform(UiAction::SetWorkspace, (int)w);
+                if (!m.canSwitchWorkspace && !on) ImGui::EndDisabled();
                 ImGui::PopStyleColor();
             };
             tab("Model", Workspace::Model);
             ImGui::SameLine();
             tab("Simulation", Workspace::Simulation);
-            ImGui::SameLine();
-            ImGui::TextDisabled("|");
-            ImGui::SameLine();
+            sep();
         }
 
-        if (workspace_ == Workspace::Simulation) {
-            if (ImGui::Button("Save")) saveProjectDialog();
+        if (m.variant == ToolbarModel::Variant::Simulation) {
+            if (ImGui::Button("Save")) perform(UiAction::Save);
             ImGui::SameLine();
-            if (ImGui::Button("Open")) openProjectDialog();
+            if (ImGui::Button("Open")) perform(UiAction::Open);
             ImGui::SameLine();
-            if (ImGui::Button("Import STL")) importStlDialog();
-            ImGui::SameLine();
-            ImGui::TextDisabled("|");
-            ImGui::SameLine();
+            if (ImGui::Button("Import STL")) perform(UiAction::ImportStl);
+            sep();
             ImGui::TextDisabled("Set up surfaces and nozzles in the Simulation panel");
+            sep();
+            orthoButton();
             ImGui::SameLine();
-            ImGui::TextDisabled("|");
-            ImGui::SameLine();
-            {
-                bool& ortho = viewport3D_.camera().orthographic;
-                if (ImGui::Button(ortho ? "[O]rtho" : "[O] Persp")) ortho = !ortho;
-            }
-            ImGui::SameLine();
-            if (ImGui::Button("Prefs")) prefsOpen_ = !prefsOpen_;
+            if (ImGui::Button("Prefs")) perform(UiAction::TogglePrefs);
             ImGui::PopStyleVar(2);
             return;
         }
 
         // Navigate mode toolbar
-        if (ImGui::Button("Save")) saveProjectDialog();
+        if (ImGui::Button("Save")) perform(UiAction::Save);
         ImGui::SameLine();
-        if (ImGui::Button("Open")) openProjectDialog();
+        if (ImGui::Button("Open")) perform(UiAction::Open);
         ImGui::SameLine();
         if (ImGui::Button("Import")) ImGui::OpenPopup("ImportPopup");
         if (ImGui::BeginPopup("ImportPopup")) {
-            if (ImGui::MenuItem("STEP (.step/.stp)")) importStepDialog();
-            if (ImGui::MenuItem("IGES (.igs/.iges)")) importIgesDialog();
-            if (ImGui::MenuItem("STL (.stl)"))        importStlDialog();
+            if (ImGui::MenuItem("STEP (.step/.stp)")) perform(UiAction::ImportStep);
+            if (ImGui::MenuItem("IGES (.igs/.iges)")) perform(UiAction::ImportIges);
+            if (ImGui::MenuItem("STL (.stl)"))        perform(UiAction::ImportStl);
             ImGui::EndPopup();
         }
         ImGui::SameLine();
         if (ImGui::Button("Export")) ImGui::OpenPopup("ExportPopup");
         if (ImGui::BeginPopup("ExportPopup")) {
-            if (ImGui::MenuItem("STEP (.step)")) exportStepDialog();
-            if (ImGui::MenuItem("IGES (.igs)"))  exportIgesDialog();
-            if (ImGui::MenuItem("STL (.stl)"))   exportStlDialog();
-            if (ImGui::MenuItem("OBJ (.obj)"))   exportObjDialog();
+            if (ImGui::MenuItem("STEP (.step)")) perform(UiAction::ExportStep);
+            if (ImGui::MenuItem("IGES (.igs)"))  perform(UiAction::ExportIges);
+            if (ImGui::MenuItem("STL (.stl)"))   perform(UiAction::ExportStl);
+            if (ImGui::MenuItem("OBJ (.obj)"))   perform(UiAction::ExportObj);
             ImGui::EndPopup();
         }
-        ImGui::SameLine();
-        ImGui::TextDisabled("|");
-        ImGui::SameLine();
+        sep();
         ImGui::TextUnformatted("Navigate");
-        ImGui::SameLine();
-        ImGui::TextDisabled("|");
-        ImGui::SameLine();
+        sep();
         {
-            bool on = sectionWindowOpen_ || section_.enabled;
-            if (on) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.25f, 0.45f, 0.75f, 1.0f));
-            if (ImGui::Button("Section")) sectionWindowOpen_ = !sectionWindowOpen_;
-            if (on) ImGui::PopStyleColor();
+            if (m.sectionOn) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.25f, 0.45f, 0.75f, 1.0f));
+            if (ImGui::Button("Section")) perform(UiAction::ToggleSection);
+            if (m.sectionOn) ImGui::PopStyleColor();
         }
         ImGui::SameLine();
         ImGui::TextDisabled("Click a plane or face to sketch");
-        ImGui::SameLine();
-        ImGui::TextDisabled("|");
-        ImGui::SameLine();
+        sep();
 
         char bodyText[64];
-        snprintf(bodyText, sizeof(bodyText), "Bodies: %zu", scene_.bodyCount());
+        snprintf(bodyText, sizeof(bodyText), "Bodies: %zu", m.bodyCount);
         ImGui::TextUnformatted(bodyText);
 
+        sep();
+        toolButton("[E]xtrude", false, kBrown, UiAction::Extrude);
         ImGui::SameLine();
-        ImGui::TextDisabled("|");
+        toolButton("Re[v]olve", false, kBrown, UiAction::Revolve);
         ImGui::SameLine();
-        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.5f, 0.3f, 0.1f, 1.0f));
-        if (ImGui::Button("[E]xtrude")) {
-            enterExtrudeMode();
-        }
-        ImGui::PopStyleColor();
+        toolButton("Loft", false, kBrown, UiAction::Loft);
 
+        sep();
+        toolButton("Union", m.unionActive, kTeal, UiAction::Union);
         ImGui::SameLine();
-        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.5f, 0.3f, 0.1f, 1.0f));
-        if (ImGui::Button("Re[v]olve")) {
-            enterRevolveMode();
-        }
-        ImGui::PopStyleColor();
+        toolButton("Subtract", m.subtractActive, kTeal, UiAction::Subtract);
 
+        sep();
+        orthoButton();
         ImGui::SameLine();
-        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.5f, 0.3f, 0.1f, 1.0f));
-        if (ImGui::Button("Loft")) {
-            enterLoftMode();
-        }
-        ImGui::PopStyleColor();
-
-        ImGui::SameLine();
-        ImGui::TextDisabled("|");
-        ImGui::SameLine();
-        {
-            bool unionActive = (tool_.type == ToolType::BooleanUnion);
-            if (unionActive)
-                ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.3f, 0.5f, 0.8f, 1.0f));
-            else
-                ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.1f, 0.4f, 0.5f, 1.0f));
-            if (ImGui::Button("Union")) {
-                if (unionActive) cancelBoolean();
-                else enterBooleanMode(BooleanOperation::Union);
-            }
-            ImGui::PopStyleColor();
-
-            ImGui::SameLine();
-            bool subActive = (tool_.type == ToolType::BooleanSubtract);
-            if (subActive)
-                ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.3f, 0.5f, 0.8f, 1.0f));
-            else
-                ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.1f, 0.4f, 0.5f, 1.0f));
-            if (ImGui::Button("Subtract")) {
-                if (subActive) cancelBoolean();
-                else enterBooleanMode(BooleanOperation::Subtract);
-            }
-            ImGui::PopStyleColor();
-        }
-
-        ImGui::SameLine();
-        ImGui::TextDisabled("|");
-        ImGui::SameLine();
-        {
-            bool& ortho = viewport3D_.camera().orthographic;
-            if (ImGui::Button(ortho ? "[O]rtho" : "[O] Persp")) ortho = !ortho;
-        }
-        ImGui::SameLine();
-        if (ImGui::Button("Prefs")) prefsOpen_ = !prefsOpen_;
+        if (ImGui::Button("Prefs")) perform(UiAction::TogglePrefs);
     }
 
     ImGui::PopStyleVar(2);

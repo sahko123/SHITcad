@@ -205,6 +205,11 @@ void App::post(std::function<void()> fn) {
     if (host_) host_->requestRedraw();
 }
 
+float App::imguiToolbarHeight() const {
+    if (hostToolbar_) return 0.0f;
+    return ImGui::GetFrameHeight() + ImGui::GetStyle().WindowPadding.y * 2.0f;
+}
+
 double App::nowSeconds() const {
     using namespace std::chrono;
     return duration<double>(steady_clock::now().time_since_epoch()).count();
@@ -428,7 +433,7 @@ void App::renderFrame() {
     float vpH = io.DisplaySize.y;
 
     // Toolbar height, needed for the input rect before the toolbar is drawn
-    float toolbarH = ImGui::GetFrameHeight() + ImGui::GetStyle().WindowPadding.y * 2.0f;
+    float toolbarH = imguiToolbarHeight();
     fillInputFromImGui(in_, toolbarH);
 
     // Sync user-adjustable dimension colors into active theme (before renderDimensions)
@@ -453,16 +458,18 @@ void App::renderFrame() {
         viewport3D_.camera().orthographic = !viewport3D_.camera().orthographic;
     }
 
-    // Toolbar — auto-fit height
-    ImGui::SetNextWindowPos({0, 0});
-    ImGui::SetNextWindowSize({vpW, toolbarH});
-    ImGui::Begin("##toolbar", nullptr,
-        ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
-        ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse |
-        ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse |
-        ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoFocusOnAppearing);
-    drawToolbar();
-    ImGui::End();
+    // Toolbar — auto-fit height (unless the host draws its own)
+    if (!hostToolbar_) {
+        ImGui::SetNextWindowPos({0, 0});
+        ImGui::SetNextWindowSize({vpW, toolbarH});
+        ImGui::Begin("##toolbar", nullptr,
+            ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
+            ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse |
+            ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse |
+            ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoFocusOnAppearing);
+        drawToolbar();
+        ImGui::End();
+    }
 
     // Object tree sidebar (positioned below toolbar)
     float panelW = 0.0f;

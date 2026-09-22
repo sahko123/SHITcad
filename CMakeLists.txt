@@ -75,6 +75,7 @@ if(SHITCAD_QT)
         src/qt/main_qt.cpp
         src/qt/ViewportWidget.cpp
         src/qt/ImGuiQt.cpp
+        src/qt/Toolbar.cpp
     )
     set_target_properties(SHITcadQt PROPERTIES AUTOMOC ON)
     target_include_directories(SHITcadQt PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/src/qt)

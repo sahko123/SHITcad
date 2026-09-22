@@ -21,9 +21,15 @@ public:
     explicit ViewportWidget(QWidget* parent = nullptr);
     ~ViewportWidget() override;
 
+    App& app() { return app_; }
+
     // AppHost
     void setWindowTitle(const std::string& utf8Title) override;
     void requestRedraw() override { update(); }
+
+signals:
+    // After App::frame(): widgets outside the viewport refresh from App here.
+    void frameBuilt();
 
 protected:
     void initializeGL() override;

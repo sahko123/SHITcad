@@ -90,6 +90,7 @@ void ViewportWidget::paintGL() {
     profiler.begin("UI+Input");
     app_.frame(dt, w, h);
     profiler.end();
+    emit frameBuilt();
 
     profiler.begin("Render3D");
     app_.paint();

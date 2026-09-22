@@ -376,6 +376,18 @@ ratio and picking near the edges.
 
 **Done when:** no `ImGui::` widget calls remain.
 
+**Progress.**
+- 5.1 toolbar: done. `ToolbarModel` + `UiAction` / `App::perform` (in `AppUI.cpp`) hold what
+  the toolbar shows and does; the ImGui toolbar was rewritten onto them and stayed
+  pixel-identical to the pre-migration build (a scenario clicking buttons in all three
+  variants), and `src/qt/Toolbar.cpp` is the Qt front end (rebuilt when the variant
+  changes, states re-applied every frame, clicks posted). The Qt host calls
+  `App::setHostToolbar(true)`, so the ImGui toolbar is skipped there and the input rect
+  starts at the top of the viewport. Toolbar buttons are `Qt::NoFocus`, so the viewport
+  keeps the keyboard and the shortcut work in 5.1 is not needed yet: it moves to the
+  first dock that can take focus (the object tree, 5.5). The ImGui tool panels are
+  still placed 30 px down, a small gap in the Qt build until they move (5.6).
+
 ## Phase 6: remove ImGui and GLFW
 
 1. `QtOverlay` draws the recorded `Overlay2D` list with `QPainter` on the viewport

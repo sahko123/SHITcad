@@ -41,6 +41,40 @@ enum class Workspace : uint8_t {
     Simulation,
 };
 
+// ---- Front-end model -------------------------------------------------------
+// What a panel shows and what its controls do, independent of the toolkit that
+// draws it. The ImGui toolbar and the Qt toolbar both read ToolbarModel and
+// call App::perform, so the two cannot drift apart. (Phase 5 of
+// docs/qt-migration-plan.md: each panel gets this as it moves to Qt.)
+enum class UiAction : uint8_t {
+    // sketch toolbar
+    FinishSketch, SelectTool /* arg: ToolType */, Extrude, Revolve, Loft, SnapView,
+    ApplyConstraint /* arg: index into App::kToolbarConstraints */, ExportDxf,
+    // model / simulation toolbar
+    SetWorkspace /* arg: Workspace */, Save, Open, ImportStep, ImportIges, ImportStl,
+    ExportStep, ExportIges, ExportStl, ExportObj, ToggleSection, Union, Subtract,
+    // everywhere
+    ToggleOrtho, TogglePrefs,
+};
+
+struct ToolbarModel {
+    enum class Variant : uint8_t { Sketch, Model, Simulation };
+    Variant variant = Variant::Model;
+    ToolType tool = ToolType::None;
+    Workspace workspace = Workspace::Model;
+    bool canSwitchWorkspace = false;
+    bool extrudeActive = false, revolveActive = false, loftActive = false;
+    bool unionActive = false, subtractActive = false;
+    bool ortho = false;
+    bool sectionOn = false;
+    size_t bodyCount = 0;
+    std::string sketchPlaneName;
+    bool constraintValid[9] = {};   // parallel to App::kToolbarConstraints
+
+    bool operator==(const ToolbarModel& o) const;
+    bool operator!=(const ToolbarModel& o) const { return !(*this == o); }
+};
+
 class App {
 public:
     // Called by the host once a GL context is current and an ImGui context
@@ -61,6 +95,19 @@ public:
     void post(std::function<void()> fn);
 
     FrameProfiler& profiler() { return profiler_; }
+
+    // Front-end model (see UiAction above).
+    struct ToolbarConstraint { const char* label; ConstraintType type; };
+    static constexpr int kToolbarConstraintCount = 9;
+    static const ToolbarConstraint kToolbarConstraints[kToolbarConstraintCount];
+    static constexpr int kSketchToolCount = 10;
+    static const ToolType kSketchTools[kSketchToolCount];
+    static const char* const kSketchToolLabels[kSketchToolCount];
+
+    ToolbarModel toolbarModel() const;
+    void perform(UiAction action, int arg = 0);
+    // The host draws the toolbar itself (Qt); App then skips the ImGui one.
+    void setHostToolbar(bool on) { hostToolbar_ = on; }
 
     InteractionMode mode() const { return mode_; }
     Scene3D& scene() { return scene_; }
@@ -88,6 +135,8 @@ public:
 
 private:
     AppHost* host_ = nullptr;
+    bool hostToolbar_ = false;
+    float imguiToolbarHeight() const;     // 0 when the host provides the toolbar
     int fbW_ = 0, fbH_ = 0;               // framebuffer size for this frame
     std::vector<std::function<void()>> posted_;
     void framebufferSize(int& w, int& h) const { w = fbW_; h = fbH_; }

@@ -38,6 +38,7 @@ public:
     void drawGroundGrid(const float* view, const float* proj);
 
     OrbitCamera& camera() { return camera_; }
+    const OrbitCamera& camera() const { return camera_; }
     ShaderProgram& meshShader() { return meshShader_; }
     ShaderProgram& gridShader() { return gridShader_; }
 
