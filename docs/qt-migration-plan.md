@@ -174,6 +174,21 @@ mesh hover readout.
 
 **Done when:** no viewport drawing includes `imgui.h`, and the checklist passes.
 
+**Status (done).** `Overlay2D.h` holds the recorded command list and `Color32`
+(IM_COL32's byte layout, so theme values are unchanged). `App::overlay_` is cleared
+before `renderFrame` and flushed by `flushOverlayToImGui` after `render3DScene` and
+before `ImGui::Render()`. That also fixes a latent ordering hazard: the extrude
+handle, box select and simulation overlays used to append to ImGui's foreground
+list after `ImGui::Render()` had already built the draw data. `measureWithImGui`
+keeps the two measuring calls the old code used (`CalcTextSize`, and
+`CalcTextSizeA` for the 0.85-scale constraint icons), because they round
+differently. `InputFrame` gained `screenW/screenH` for projection in overlays.
+Old and new builds were pixel-identical across a scenario covering constraint
+icons, dimension and diameter labels, the H snap label, a box select mid-drag,
+the ruler and the extrude handle. Left for later: the FPS readout still reads
+`ImGui::GetIO().Framerate` (host code, replaced in Phase 4), and the results
+legend and timeline draw into their own panels (`GetWindowDrawList`, Phase 5).
+
 ## Phase 3: panel boundaries (still ImGui)
 
 Each `draw*Panel` / `draw*Dialog` should contain only widget code plus calls to

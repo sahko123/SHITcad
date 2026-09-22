@@ -1,5 +1,5 @@
 #pragma once
-#include <imgui.h>
+#include "Overlay2D.h" // Color32
 #include <cstdint>
 
 namespace shitcad {
@@ -27,11 +27,11 @@ struct Theme {
     float sketchProjected[3];
 
     // Dimensions
-    ImU32 dimLineColor;
-    ImU32 dimTextColor;
-    ImU32 dimBgColor;
-    ImU32 dimDrivenLineColor;
-    ImU32 dimDrivenTextColor;
+    Color32 dimLineColor;
+    Color32 dimTextColor;
+    Color32 dimBgColor;
+    Color32 dimDrivenLineColor;
+    Color32 dimDrivenTextColor;
 
     // Bodies
     float bodyColor[3];

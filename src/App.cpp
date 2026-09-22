@@ -31,6 +31,39 @@ namespace shitcad {
 
 static float lerp(float a, float b, float t) { return a + (b - a) * t; }
 
+// Overlay text is measured with the calls the overlay code used before it was
+// recorded: CalcTextSize at the UI font size, CalcTextSizeA when scaled. They
+// round differently, and label layout and hit rectangles depend on the result.
+static OvVec2 measureWithImGui(const char* text, float scale) {
+    ImVec2 s = (scale == 1.0f)
+        ? ImGui::CalcTextSize(text)
+        : ImGui::GetFont()->CalcTextSizeA(ImGui::GetFontSize() * scale, FLT_MAX, 0.0f, text);
+    return {s.x, s.y};
+}
+
+// Draws the recorded overlay into ImGui's foreground list, which renders above
+// every window. Must run before ImGui::Render().
+static void flushOverlayToImGui(const Overlay2D& ov) {
+    ImDrawList* dl = ImGui::GetForegroundDrawList();
+    auto v = [](OvVec2 p) { return ImVec2(p.x, p.y); };
+    for (const auto& c : ov.commands()) {
+        switch (c.kind) {
+            case Overlay2D::Kind::Line: dl->AddLine(v(c.a), v(c.b), c.col, c.thickness); break;
+            case Overlay2D::Kind::Rect: dl->AddRect(v(c.a), v(c.b), c.col, c.rounding, 0, c.thickness); break;
+            case Overlay2D::Kind::RectFilled: dl->AddRectFilled(v(c.a), v(c.b), c.col, c.rounding); break;
+            case Overlay2D::Kind::TriangleFilled: dl->AddTriangleFilled(v(c.a), v(c.b), v(c.c), c.col); break;
+            case Overlay2D::Kind::Circle: dl->AddCircle(v(c.a), c.rounding, c.col, c.segments, c.thickness); break;
+            case Overlay2D::Kind::CircleFilled: dl->AddCircleFilled(v(c.a), c.rounding, c.col, c.segments); break;
+            case Overlay2D::Kind::Text:
+                if (c.textScale == 1.0f)
+                    dl->AddText(v(c.a), c.col, c.text.c_str());
+                else
+                    dl->AddText(ImGui::GetFont(), ImGui::GetFontSize() * c.textScale, v(c.a), c.col, c.text.c_str());
+                break;
+        }
+    }
+}
+
 // The only place viewport input is read from ImGui. Called after
 // ImGui::NewFrame(), so every value is the one the handlers used to query.
 static void fillInputFromImGui(InputFrame& in, float viewY) {
@@ -45,6 +78,8 @@ static void fillInputFromImGui(InputFrame& in, float viewY) {
         ImGuiKey_Escape, ImGuiKey_Delete, ImGuiKey_Backspace,
     };
     static_assert(sizeof(kKeys) / sizeof(kKeys[0]) == (size_t)Key::Count, "every Key needs an ImGuiKey");
+    static_assert((int)Key::A == 0 && (int)Key::Num0 == 15 && (int)Key::Keypad0 == 25 &&
+                  (int)Key::Backspace == (int)Key::Count - 1, "kKeys must follow the Key order");
 
     const ImGuiIO& io = ImGui::GetIO();
     in.mouseX = io.MousePos.x;
@@ -57,6 +92,8 @@ static void fillInputFromImGui(InputFrame& in, float viewY) {
     in.viewY = viewY;
     in.viewW = io.DisplaySize.x;
     in.viewH = io.DisplaySize.y - viewY;
+    in.screenW = io.DisplaySize.x;
+    in.screenH = io.DisplaySize.y;
     in.shift = io.KeyShift;
     in.ctrl = io.KeyCtrl;
     in.alt = io.KeyAlt;
@@ -143,6 +180,7 @@ bool App::init() {
     ImGui::GetStyle().ScaleAllSizes(dpiScale_);
 
     ImGui_ImplGlfw_InitForOpenGL(window_, true);
+    overlay_.setMeasure(measureWithImGui);
     ImGui_ImplOpenGL3_Init("#version 330");
 
     if (!viewport3D_.init()) {
@@ -216,10 +254,9 @@ void App::run() {
         ImGui::NewFrame();
 
         profiler_.begin("UI+Input");
+        overlay_.clear();
         renderFrame();
         profiler_.end();
-
-        ImGui::Render();
 
         int w, h;
         glfwGetFramebufferSize(window_, &w, &h);
@@ -227,6 +264,11 @@ void App::run() {
         profiler_.begin("Render3D");
         render3DScene(w, h);
         profiler_.end();
+
+        // After the 3D pass, which records overlays too (extrude handle, box
+        // select, simulation labels), and before ImGui builds its draw data.
+        flushOverlayToImGui(overlay_);
+        ImGui::Render();
 
         profiler_.begin("ImGuiDraw");
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
@@ -436,13 +478,13 @@ void App::render3DScene(int w, int h) {
         // Selection overlay
         if (selection_.dragMode == SelectionDragMode::BoxSelect) {
             // Draw box in screen space using ImGui
-            ImDrawList* dl = ImGui::GetForegroundDrawList();
-            ImVec2 a(f(selection_.dragAnchorScreen.x), f(selection_.dragAnchorScreen.y));
-            ImVec2 b(in_.mouseX, in_.mouseY);
-            ImVec2 mn(std::min(a.x, b.x), std::min(a.y, b.y));
-            ImVec2 mx(std::max(a.x, b.x), std::max(a.y, b.y));
-            dl->AddRectFilled(mn, mx, IM_COL32(0, 230, 230, 38));
-            dl->AddRect(mn, mx, IM_COL32(0, 230, 230, 200), 0.0f, 0, 1.5f);
+            Overlay2D& ov = overlay_;
+            OvVec2 a(f(selection_.dragAnchorScreen.x), f(selection_.dragAnchorScreen.y));
+            OvVec2 b(in_.mouseX, in_.mouseY);
+            OvVec2 mn(std::min(a.x, b.x), std::min(a.y, b.y));
+            OvVec2 mx(std::max(a.x, b.x), std::max(a.y, b.y));
+            ov.addRectFilled(mn, mx, rgba32(0, 230, 230, 38));
+            ov.addRect(mn, mx, rgba32(0, 230, 230, 200), 0.0f, 0, 1.5f);
         } else if (selection_.dragMode == SelectionDragMode::LassoSelect) {
             sketchRenderer_.renderSelectionOverlay(sp, view, proj, selection_, cursorLocal_);
         }
@@ -465,8 +507,8 @@ void App::renderFrame() {
     // Sync user-adjustable dimension colors into active theme (before renderDimensions)
     {
         auto& tm = activeThemeMut();
-        auto toU32 = [](const float c[4]) -> ImU32 {
-            return IM_COL32((int)(c[0]*255), (int)(c[1]*255), (int)(c[2]*255), (int)(c[3]*255));
+        auto toU32 = [](const float c[4]) -> Color32 {
+            return rgba32((int)(c[0]*255), (int)(c[1]*255), (int)(c[2]*255), (int)(c[3]*255));
         };
         tm.dimLineColor = toU32(prefs_.dimLineCol);
         tm.dimTextColor = toU32(prefs_.dimTextCol);
@@ -622,12 +664,12 @@ void App::renderFrame() {
         ImGuiIO& fpsIo = ImGui::GetIO();
         char fpsText[64];
         snprintf(fpsText, sizeof(fpsText), "%.1f FPS  (%.2f ms)", fpsIo.Framerate, 1000.0f / fpsIo.Framerate);
-        ImVec2 textSize = ImGui::CalcTextSize(fpsText);
-        ImVec2 pos(vpW - textSize.x - 8.0f, vpH - textSize.y - 8.0f - timelineH);
-        ImDrawList* dl = ImGui::GetForegroundDrawList();
-        dl->AddRectFilled(ImVec2(pos.x - 4, pos.y - 2), ImVec2(pos.x + textSize.x + 4, pos.y + textSize.y + 2),
-                          IM_COL32(0, 0, 0, 140), 4.0f);
-        dl->AddText(pos, IM_COL32(200, 200, 200, 255), fpsText);
+        Overlay2D& ov = overlay_;
+        OvVec2 textSize = ov.textSize(fpsText);
+        OvVec2 pos(vpW - textSize.x - 8.0f, vpH - textSize.y - 8.0f - timelineH);
+        ov.addRectFilled(OvVec2(pos.x - 4, pos.y - 2), OvVec2(pos.x + textSize.x + 4, pos.y + textSize.y + 2),
+                          rgba32(0, 0, 0, 140), 4.0f);
+        ov.addText(pos, rgba32(200, 200, 200, 255), fpsText);
     }
 
     // Dimension annotations (must be in ImGui frame, before ImGui::Render())
@@ -674,16 +716,16 @@ void App::renderFrame() {
         float rulerX  = panelW + margin;
         float rulerY  = vpH - margin - 24.0f;
 
-        ImDrawList* dl = ImGui::GetForegroundDrawList();
-        ImU32 col = IM_COL32(160, 160, 160, 220);
+        Overlay2D& ov = overlay_;
+        Color32 col = rgba32(160, 160, 160, 220);
         float capH = 5.0f;
 
-        dl->AddLine(ImVec2(rulerX,           rulerY), ImVec2(rulerX + rulerPx, rulerY), col, 1.5f);
-        dl->AddLine(ImVec2(rulerX,           rulerY - capH), ImVec2(rulerX,           rulerY + capH), col, 1.5f);
-        dl->AddLine(ImVec2(rulerX + rulerPx, rulerY - capH), ImVec2(rulerX + rulerPx, rulerY + capH), col, 1.5f);
+        ov.addLine(OvVec2(rulerX,           rulerY), OvVec2(rulerX + rulerPx, rulerY), col, 1.5f);
+        ov.addLine(OvVec2(rulerX,           rulerY - capH), OvVec2(rulerX,           rulerY + capH), col, 1.5f);
+        ov.addLine(OvVec2(rulerX + rulerPx, rulerY - capH), OvVec2(rulerX + rulerPx, rulerY + capH), col, 1.5f);
 
-        ImVec2 ts = ImGui::CalcTextSize(label);
-        dl->AddText(ImVec2(rulerX + rulerPx * 0.5f - ts.x * 0.5f, rulerY - ts.y - 3.0f), col, label);
+        OvVec2 ts = ov.textSize(label);
+        ov.addText(OvVec2(rulerX + rulerPx * 0.5f - ts.x * 0.5f, rulerY - ts.y - 3.0f), col, label);
     }
 }
 

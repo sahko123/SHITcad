@@ -39,6 +39,9 @@ struct InputFrame {
     // Where the 3D view takes input: below the toolbar, the full window width.
     // Panels drawn over it are excluded through uiWantsMouse, not this rect.
     float viewX = 0, viewY = 0, viewW = 0, viewH = 0;
+    // Size of the whole space the coordinates are in (the window), which is
+    // what projection and picking are computed against.
+    float screenW = 0, screenH = 0;
 
     bool shift = false, ctrl = false, alt = false;
     bool uiWantsMouse = false;     // a panel or widget has the mouse

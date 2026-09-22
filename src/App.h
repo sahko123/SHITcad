@@ -22,6 +22,7 @@
 #include "SimProcess.h"
 #include "SimResults.h"
 #include "ViewportInput.h"
+#include "Overlay2D.h"
 
 struct GLFWwindow;
 
@@ -77,6 +78,9 @@ private:
     // This frame's input for the 3D view, filled once at the top of
     // renderFrame(). Viewport handlers read this, never the GUI toolkit.
     InputFrame in_;
+    // Screen-space drawing over the 3D view for this frame, recorded by the
+    // overlay code and drawn once after the scene (see Overlay2D.h).
+    Overlay2D overlay_;
 
     // 3D
     Viewport3D viewport3D_;

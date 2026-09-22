@@ -444,16 +444,16 @@ void App::drawSimulationPanel() {
     glfwGetFramebufferSize(window_, &w, &h);
     float view[16], proj[16];
     getViewProj(w, h, view, proj);
-    ImDrawList* dl = ImGui::GetForegroundDrawList();
+    Overlay2D& ov = overlay_;
     for (const auto& nz : simulation_.nozzles) {
         double p[3], a[3];
         if (!nozzleWorld(nz, featureHistory_, p, a)) continue;
         const float pf[3] = {(float)p[0], (float)p[1], (float)p[2]};
         float sx, sy;
-        if (!worldToScreen(pf, view, proj, io.DisplaySize.x, io.DisplaySize.y, sx, sy)) continue;
-        ImU32 col = nz.id == simUi_.selectedNozzle ? IM_COL32(255, 150, 40, 255) : IM_COL32(40, 180, 240, 255);
-        dl->AddCircleFilled({sx, sy}, 4.0f, col);
-        dl->AddText({sx + 7, sy - 7}, col, nz.name.c_str());
+        if (!worldToScreen(pf, view, proj, in_.screenW, in_.screenH, sx, sy)) continue;
+        Color32 col = nz.id == simUi_.selectedNozzle ? rgba32(255, 150, 40, 255) : rgba32(40, 180, 240, 255);
+        ov.addCircleFilled({sx, sy}, 4.0f, col);
+        ov.addText({sx + 7, sy - 7}, col, nz.name.c_str());
     }
 }
 

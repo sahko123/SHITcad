@@ -810,10 +810,10 @@ void App::handleSketchInput(float vpW, float vpH) {
         plane.localToWorld(f(currentSnap_.position.x), f(currentSnap_.position.y), w3[0], w3[1], w3[2]);
         float sx, sy;
         if (worldToScreen(w3, view, proj, vpW, vpH, sx, sy)) {
-            ImDrawList* dl = ImGui::GetForegroundDrawList();
+            Overlay2D& ov = overlay_;
             const auto& sc = activeTheme().snapColor;
-            ImU32 col = IM_COL32((int)(sc[0]*255), (int)(sc[1]*255), (int)(sc[2]*255), 255);
-            dl->AddText(ImVec2(sx + 8, sy - 16), col, "T");
+            Color32 col = rgba32((int)(sc[0]*255), (int)(sc[1]*255), (int)(sc[2]*255), 255);
+            ov.addText(OvVec2(sx + 8, sy - 16), col, "T");
         }
     }
 
@@ -980,10 +980,10 @@ void App::handleSketchInput(float vpW, float vpH) {
                 plane.localToWorld((float)hvPos.x, (float)hvPos.y, wb[0], wb[1], wb[2]);
                 float sbx, sby;
                 if (worldToScreen(wb, view, proj, vpW, vpH, sbx, sby)) {
-                    ImDrawList* dl = ImGui::GetForegroundDrawList();
+                    Overlay2D& ov = overlay_;
                     const auto& sc = activeTheme().snapColor;
-                    ImU32 col = IM_COL32((int)(sc[0]*255), (int)(sc[1]*255), (int)(sc[2]*255), 200);
-                    dl->AddText(ImVec2(sbx + 7.0f, sby - 9.0f), col, nearH ? "H" : "V");
+                    Color32 col = rgba32((int)(sc[0]*255), (int)(sc[1]*255), (int)(sc[2]*255), 200);
+                    ov.addText(OvVec2(sbx + 7.0f, sby - 9.0f), col, nearH ? "H" : "V");
                 }
             }
         }

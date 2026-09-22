@@ -1,4 +1,5 @@
 #include "Preferences.h"
+#include <imgui.h>
 
 namespace shitcad {
 
@@ -25,11 +26,11 @@ Theme Theme::dark() {
     t.toolPreview[0] = 0.39f; t.toolPreview[1] = 0.71f; t.toolPreview[2] = 1.0f; t.toolPreview[3] = 0.8f;
     t.snapColor[0] = 1.0f; t.snapColor[1] = 0.78f; t.snapColor[2] = 0.0f; t.snapColor[3] = 1.0f;
 
-    t.dimLineColor = IM_COL32(0, 206, 209, 220);
-    t.dimTextColor = IM_COL32(255, 255, 255, 240);
-    t.dimBgColor   = IM_COL32(30, 30, 35, 200);
-    t.dimDrivenLineColor = IM_COL32(140, 140, 140, 180);
-    t.dimDrivenTextColor = IM_COL32(180, 180, 180, 200);
+    t.dimLineColor = rgba32(0, 206, 209, 220);
+    t.dimTextColor = rgba32(255, 255, 255, 240);
+    t.dimBgColor   = rgba32(30, 30, 35, 200);
+    t.dimDrivenLineColor = rgba32(140, 140, 140, 180);
+    t.dimDrivenTextColor = rgba32(180, 180, 180, 200);
 
     t.sketchProjected[0] = 0.6f; t.sketchProjected[1] = 0.2f; t.sketchProjected[2] = 0.9f;
 
@@ -52,11 +53,11 @@ Theme Theme::light() {
     t.toolPreview[0] = 0.2f; t.toolPreview[1] = 0.5f; t.toolPreview[2] = 0.9f; t.toolPreview[3] = 0.8f;
     t.snapColor[0] = 0.9f; t.snapColor[1] = 0.6f; t.snapColor[2] = 0.0f; t.snapColor[3] = 1.0f;
 
-    t.dimLineColor = IM_COL32(0, 140, 160, 220);
-    t.dimTextColor = IM_COL32(20, 20, 20, 240);
-    t.dimBgColor   = IM_COL32(240, 240, 245, 200);
-    t.dimDrivenLineColor = IM_COL32(140, 140, 145, 180);
-    t.dimDrivenTextColor = IM_COL32(100, 100, 105, 200);
+    t.dimLineColor = rgba32(0, 140, 160, 220);
+    t.dimTextColor = rgba32(20, 20, 20, 240);
+    t.dimBgColor   = rgba32(240, 240, 245, 200);
+    t.dimDrivenLineColor = rgba32(140, 140, 145, 180);
+    t.dimDrivenTextColor = rgba32(100, 100, 105, 200);
 
     t.sketchProjected[0] = 0.5f; t.sketchProjected[1] = 0.1f; t.sketchProjected[2] = 0.8f;
 
@@ -77,13 +78,13 @@ void Preferences::applyTheme() {
     sketchLineColor[2] = s_activeTheme.sketchLine[2];
 
     // Dimension label colors from theme
-    ImU32 dl = s_activeTheme.dimLineColor;
+    Color32 dl = s_activeTheme.dimLineColor;
     dimLineCol[0] = ((dl>>0)&0xFF)/255.0f; dimLineCol[1] = ((dl>>8)&0xFF)/255.0f;
     dimLineCol[2] = ((dl>>16)&0xFF)/255.0f; dimLineCol[3] = ((dl>>24)&0xFF)/255.0f;
-    ImU32 dt = s_activeTheme.dimTextColor;
+    Color32 dt = s_activeTheme.dimTextColor;
     dimTextCol[0] = ((dt>>0)&0xFF)/255.0f; dimTextCol[1] = ((dt>>8)&0xFF)/255.0f;
     dimTextCol[2] = ((dt>>16)&0xFF)/255.0f; dimTextCol[3] = ((dt>>24)&0xFF)/255.0f;
-    ImU32 db = s_activeTheme.dimBgColor;
+    Color32 db = s_activeTheme.dimBgColor;
     dimBgCol[0] = ((db>>0)&0xFF)/255.0f; dimBgCol[1] = ((db>>8)&0xFF)/255.0f;
     dimBgCol[2] = ((db>>16)&0xFF)/255.0f; dimBgCol[3] = ((db>>24)&0xFF)/255.0f;
 

@@ -61,8 +61,8 @@ void App::drawPreferencesWindow() {
     dimChanged |= ImGui::ColorEdit4("Dim Text", prefs_.dimTextCol, ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_AlphaBar);
     dimChanged |= ImGui::ColorEdit4("Dim Bg", prefs_.dimBgCol, ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_AlphaBar);
     if (dimChanged) {
-        auto toU32 = [](const float c[4]) -> ImU32 {
-            return IM_COL32((int)(c[0]*255), (int)(c[1]*255), (int)(c[2]*255), (int)(c[3]*255));
+        auto toU32 = [](const float c[4]) -> Color32 {
+            return rgba32((int)(c[0]*255), (int)(c[1]*255), (int)(c[2]*255), (int)(c[3]*255));
         };
         auto& tm = activeThemeMut();
         tm.dimLineColor = toU32(prefs_.dimLineCol);
@@ -625,7 +625,6 @@ void App::updateMeshHover(float vpW, float vpH) {
 void App::drawMeshHoverReadout() {
     if (!meshHover_.hit || meshHover_.bodyIndex >= (int)scene_.bodyCount()) return;
 
-    ImGuiIO& io = ImGui::GetIO();
     const Body3D& body = scene_.getBody(meshHover_.bodyIndex);
     const Feature* feat = featureHistory_.findFeature(body.sourceFeature);
 
@@ -636,18 +635,18 @@ void App::drawMeshHoverReadout() {
 
     // Normal as a short line from the hit point, so the file's winding - which
     // decides which way a nozzle placed here would point by default - is visible.
-    ImDrawList* dl = ImGui::GetForegroundDrawList();
+    Overlay2D& ov = overlay_;
     const float* p = meshHover_.hitWorld;
     const float len = std::max(meshHover_.t * 0.08f, 1.0f);
     const float tip[3] = {p[0] + meshHover_.normal[0] * len,
                           p[1] + meshHover_.normal[1] * len,
                           p[2] + meshHover_.normal[2] * len};
     float sx0, sy0, sx1, sy1;
-    if (worldToScreen(p, view, proj, io.DisplaySize.x, io.DisplaySize.y, sx0, sy0) &&
-        worldToScreen(tip, view, proj, io.DisplaySize.x, io.DisplaySize.y, sx1, sy1)) {
-        ImU32 col = meshHover_.frontFacing ? IM_COL32(80, 220, 120, 255) : IM_COL32(230, 120, 60, 255);
-        dl->AddLine({sx0, sy0}, {sx1, sy1}, col, 2.0f);
-        dl->AddCircleFilled({sx0, sy0}, 3.0f, col);
+    if (worldToScreen(p, view, proj, in_.screenW, in_.screenH, sx0, sy0) &&
+        worldToScreen(tip, view, proj, in_.screenW, in_.screenH, sx1, sy1)) {
+        Color32 col = meshHover_.frontFacing ? rgba32(80, 220, 120, 255) : rgba32(230, 120, 60, 255);
+        ov.addLine({sx0, sy0}, {sx1, sy1}, col, 2.0f);
+        ov.addCircleFilled({sx0, sy0}, 3.0f, col);
     }
 
     char text[256];
@@ -656,10 +655,10 @@ void App::drawMeshHoverReadout() {
              p[0], p[1], p[2],
              meshHover_.normal[0], meshHover_.normal[1], meshHover_.normal[2],
              meshHover_.frontFacing ? "front" : "back");
-    ImVec2 pos(io.MousePos.x + 16.0f, io.MousePos.y + 16.0f);
-    ImVec2 ts = ImGui::CalcTextSize(text);
-    dl->AddRectFilled({pos.x - 4, pos.y - 2}, {pos.x + ts.x + 4, pos.y + ts.y + 2}, IM_COL32(0, 0, 0, 170), 4.0f);
-    dl->AddText(pos, IM_COL32(220, 220, 220, 255), text);
+    OvVec2 pos(in_.mouseX + 16.0f, in_.mouseY + 16.0f);
+    OvVec2 ts = ov.textSize(text);
+    ov.addRectFilled({pos.x - 4, pos.y - 2}, {pos.x + ts.x + 4, pos.y + ts.y + 2}, rgba32(0, 0, 0, 170), 4.0f);
+    ov.addText(pos, rgba32(220, 220, 220, 255), text);
 }
 
 void App::exportStepDialog() {

@@ -486,12 +486,12 @@ void App::renderExtrudeHandle(const float* view, const float* proj, float vpW, f
     float tipSx, tipSy;
     if (!worldToScreen(tipWorld, view, proj, vpW, vpH, tipSx, tipSy)) return;
 
-    ImDrawList* dl = ImGui::GetForegroundDrawList();
-    ImU32 handleColor = IM_COL32(255, 180, 0, 220);
-    ImU32 tipColor = IM_COL32(255, 200, 50, 255);
+    Overlay2D& ov = overlay_;
+    Color32 handleColor = rgba32(255, 180, 0, 220);
+    Color32 tipColor = rgba32(255, 200, 50, 255);
 
     // Line from base to tip
-    dl->AddLine({baseSx, baseSy}, {tipSx, tipSy}, handleColor, 2.5f);
+    ov.addLine({baseSx, baseSy}, {tipSx, tipSy}, handleColor, 2.5f);
 
     // Arrowhead at tip
     float dx = tipSx - baseSx, dy = tipSy - baseSy;
@@ -500,23 +500,23 @@ void App::renderExtrudeHandle(const float* view, const float* proj, float vpW, f
         float ux = dx / len, uy = dy / len;
         float arrowLen = 12.0f;
         float arrowW = 6.0f;
-        ImVec2 p1 = {tipSx - ux * arrowLen + uy * arrowW, tipSy - uy * arrowLen - ux * arrowW};
-        ImVec2 p2 = {tipSx - ux * arrowLen - uy * arrowW, tipSy - uy * arrowLen + ux * arrowW};
-        dl->AddTriangleFilled({tipSx, tipSy}, p1, p2, handleColor);
+        OvVec2 p1 = {tipSx - ux * arrowLen + uy * arrowW, tipSy - uy * arrowLen - ux * arrowW};
+        OvVec2 p2 = {tipSx - ux * arrowLen - uy * arrowW, tipSy - uy * arrowLen + ux * arrowW};
+        ov.addTriangleFilled({tipSx, tipSy}, p1, p2, handleColor);
     }
 
     // Drag handle circle at tip
     float handleRadius = 8.0f;
-    dl->AddCircleFilled({tipSx, tipSy}, handleRadius, tipColor);
-    dl->AddCircle({tipSx, tipSy}, handleRadius, handleColor, 0, 2.0f);
+    ov.addCircleFilled({tipSx, tipSy}, handleRadius, tipColor);
+    ov.addCircle({tipSx, tipSy}, handleRadius, handleColor, 0, 2.0f);
 
     // Small circle at base
-    dl->AddCircleFilled({baseSx, baseSy}, 4.0f, handleColor);
+    ov.addCircleFilled({baseSx, baseSy}, 4.0f, handleColor);
 
     // Height label near tip
     char label[32];
     snprintf(label, sizeof(label), "%.2f", extrudeTool_.height);
-    dl->AddText({tipSx + 14.0f, tipSy - 8.0f}, IM_COL32(255, 220, 100, 255), label);
+    ov.addText({tipSx + 14.0f, tipSy - 8.0f}, rgba32(255, 220, 100, 255), label);
 }
 
 void App::editExtrudeFeature(FeatureID id) {
