@@ -4,6 +4,7 @@
 #include "CrashLogger.h"
 #include "ViewportWidget.h"
 #include "Toolbar.h"
+#include "PreferencesDialog.h"
 
 #include <QApplication>
 #include <QMainWindow>
@@ -32,10 +33,14 @@ int main(int argc, char** argv) {
     window.setCentralWidget(viewport);
 
     // Panels that have moved to Qt; App skips their ImGui versions.
-    viewport->app().setHostToolbar(true);
+    viewport->app().setHostPanel(shitcad::App::HostToolbar);
     auto* toolbar = new shitcad::Toolbar(viewport->app(), &window);
     window.addToolBar(Qt::TopToolBarArea, toolbar);
     QObject::connect(viewport, &shitcad::ViewportWidget::frameBuilt, toolbar, &shitcad::Toolbar::refresh);
+
+    viewport->app().setHostPanel(shitcad::App::HostPreferences);
+    auto* prefs = new shitcad::PreferencesDialog(viewport->app(), &window);
+    QObject::connect(viewport, &shitcad::ViewportWidget::frameBuilt, prefs, &shitcad::PreferencesDialog::refresh);
     window.resize(1280, 720);
     window.showMaximized();
     viewport->setFocus();

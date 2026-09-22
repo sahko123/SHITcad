@@ -206,7 +206,7 @@ void App::post(std::function<void()> fn) {
 }
 
 float App::imguiToolbarHeight() const {
-    if (hostToolbar_) return 0.0f;
+    if (hostHas(HostToolbar)) return 0.0f;
     return ImGui::GetFrameHeight() + ImGui::GetStyle().WindowPadding.y * 2.0f;
 }
 
@@ -459,7 +459,7 @@ void App::renderFrame() {
     }
 
     // Toolbar — auto-fit height (unless the host draws its own)
-    if (!hostToolbar_) {
+    if (!hostHas(HostToolbar)) {
         ImGui::SetNextWindowPos({0, 0});
         ImGui::SetNextWindowSize({vpW, toolbarH});
         ImGui::Begin("##toolbar", nullptr,
@@ -525,7 +525,7 @@ void App::renderFrame() {
     if (tool_.type == ToolType::Dimension && activeSketchPlane_ >= 0) drawDimensionPanel(activeSketch());
 
     // Preferences window
-    if (prefsOpen_) drawPreferencesWindow();
+    if (prefsOpen_ && !hostHas(HostPreferences)) drawPreferencesWindow();
 
     // Cylinder tangent plane dialog
     if (cylPlaneDialogOpen_) {

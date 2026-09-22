@@ -387,6 +387,12 @@ ratio and picking near the edges.
   keeps the keyboard and the shortcut work in 5.1 is not needed yet: it moves to the
   first dock that can take focus (the object tree, 5.5). The ImGui tool panels are
   still placed 30 px down, a small gap in the Qt build until they move (5.6).
+- 5.2 preferences: done. The `Preferences` struct is the model; `App::setPreferences`
+  applies the side effects the ImGui window used to apply inline (the ImGui window now
+  edits a copy and hands it over, pixel-identical to before). `src/qt/PreferencesDialog`
+  is a non-modal dialog shown while `preferencesOpen()`; it pushes edits through
+  `post` and pulls App values back when they differ (light mode resets the colours).
+  Host panels are now a bit set (`App::setHostPanel`).
 
 ## Phase 6: remove ImGui and GLFW
 

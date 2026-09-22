@@ -26,64 +26,68 @@
 
 namespace shitcad {
 
+void App::setPreferences(const Preferences& p) {
+    const bool themeChanged = p.lightMode != prefs_.lightMode;
+    const bool backendChanged = p.profileBackend != prefs_.profileBackend;
+    prefs_ = p;
+    if (themeChanged) {
+        // Resets the user-adjustable colours to the new theme's defaults.
+        prefs_.applyTheme();
+        viewport3D_.rebuildGrid();
+    }
+    auto toU32 = [](const float c[4]) -> Color32 {
+        return rgba32((int)(c[0]*255), (int)(c[1]*255), (int)(c[2]*255), (int)(c[3]*255));
+    };
+    auto& tm = activeThemeMut();
+    tm.dimLineColor = toU32(prefs_.dimLineCol);
+    tm.dimTextColor = toU32(prefs_.dimTextCol);
+    tm.dimBgColor = toU32(prefs_.dimBgCol);
+    if (backendChanged) setActiveProfileBackend(prefs_.profileBackend);
+}
+
+// ImGui front end for Preferences (the Qt one is src/qt/PreferencesDialog.cpp).
 void App::drawPreferencesWindow() {
     ImGui::SetNextWindowSize({220, 0}, ImGuiCond_FirstUseEver);
     ImGui::Begin("Preferences", &prefsOpen_);
 
-    bool changed = false;
-    if (ImGui::Checkbox("Light Mode", &prefs_.lightMode)) {
-        changed = true;
-    }
-    ImGui::Checkbox("Show Edges", &prefs_.showWireframe);
-
-    if (changed) {
-        prefs_.applyTheme();
-        viewport3D_.rebuildGrid();
-    }
+    Preferences p = prefs_;
+    ImGui::Checkbox("Light Mode", &p.lightMode);
+    ImGui::Checkbox("Show Edges", &p.showWireframe);
 
     ImGui::Separator();
     ImGui::Text("Sketch Lines");
-    ImGui::ColorEdit3("Line Color", prefs_.sketchLineColor, ImGuiColorEditFlags_NoInputs);
-    ImGui::SliderFloat("Line Width", &prefs_.sketchLineThickness, 0.5f, 5.0f, "%.1f");
+    ImGui::ColorEdit3("Line Color", p.sketchLineColor, ImGuiColorEditFlags_NoInputs);
+    ImGui::SliderFloat("Line Width", &p.sketchLineThickness, 0.5f, 5.0f, "%.1f");
 
     ImGui::Separator();
     ImGui::Text("Body Edges");
-    ImGui::ColorEdit3("Edge Color", prefs_.edgeColor, ImGuiColorEditFlags_NoInputs);
-    ImGui::SliderFloat("Edge Width", &prefs_.edgeThickness, 0.5f, 5.0f, "%.1f");
+    ImGui::ColorEdit3("Edge Color", p.edgeColor, ImGuiColorEditFlags_NoInputs);
+    ImGui::SliderFloat("Edge Width", &p.edgeThickness, 0.5f, 5.0f, "%.1f");
 
     ImGui::Separator();
     ImGui::Text("Dimension Labels");
-    bool dimChanged = false;
-    dimChanged |= ImGui::ColorEdit4("Dim Line", prefs_.dimLineCol, ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_AlphaBar);
-    dimChanged |= ImGui::ColorEdit4("Dim Text", prefs_.dimTextCol, ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_AlphaBar);
-    dimChanged |= ImGui::ColorEdit4("Dim Bg", prefs_.dimBgCol, ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_AlphaBar);
-    if (dimChanged) {
-        auto toU32 = [](const float c[4]) -> Color32 {
-            return rgba32((int)(c[0]*255), (int)(c[1]*255), (int)(c[2]*255), (int)(c[3]*255));
-        };
-        auto& tm = activeThemeMut();
-        tm.dimLineColor = toU32(prefs_.dimLineCol);
-        tm.dimTextColor = toU32(prefs_.dimTextCol);
-        tm.dimBgColor = toU32(prefs_.dimBgCol);
-    }
+    ImGui::ColorEdit4("Dim Line", p.dimLineCol, ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_AlphaBar);
+    ImGui::ColorEdit4("Dim Text", p.dimTextCol, ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_AlphaBar);
+    ImGui::ColorEdit4("Dim Bg", p.dimBgCol, ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_AlphaBar);
 
     ImGui::Separator();
     ImGui::Text("Constraint Labels");
-    ImGui::ColorEdit4("Con Text", prefs_.conTextCol, ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_AlphaBar);
-    ImGui::ColorEdit4("Con Bg", prefs_.conBgCol, ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_AlphaBar);
+    ImGui::ColorEdit4("Con Text", p.conTextCol, ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_AlphaBar);
+    ImGui::ColorEdit4("Con Bg", p.conBgCol, ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_AlphaBar);
 
     ImGui::Separator();
     ImGui::Text("Snapping");
-    ImGui::SliderFloat("Tangent Snap (px)", &prefs_.tangentSnapPx, 5.0f, 40.0f, "%.0f");
+    ImGui::SliderFloat("Tangent Snap (px)", &p.tangentSnapPx, 5.0f, 40.0f, "%.0f");
 
     ImGui::Separator();
     ImGui::Text("Profile Detection");
     const char* backendNames[] = { "Custom (half-edge tracer)", "OCCT (exact geometry)" };
-    int backendIdx = (int)prefs_.profileBackend;
-    if (ImGui::Combo("Backend", &backendIdx, backendNames, 2)) {
-        prefs_.profileBackend = (ProfileDetectorBackend)backendIdx;
-        setActiveProfileBackend(prefs_.profileBackend);
-    }
+    int backendIdx = (int)p.profileBackend;
+    if (ImGui::Combo("Backend", &backendIdx, backendNames, 2))
+        p.profileBackend = (ProfileDetectorBackend)backendIdx;
+
+    if (p != prefs_) setPreferences(p);
+
     if (prefs_.profileBackend == ProfileDetectorBackend::OCCT) {
         ImGui::TextWrapped("Uses OCCT's BOPAlgo_BuilderFace for exact curve intersections. "
                            "Ellipses and splines produce smooth edges instead of polyline approximations.");

@@ -93,6 +93,7 @@ public:
     // context is current and no frame is half-built. Panels that live outside
     // the ImGui frame (Qt, later) must change App state only through this.
     void post(std::function<void()> fn);
+    bool hasPosted() const { return !posted_.empty(); }
 
     FrameProfiler& profiler() { return profiler_; }
 
@@ -106,8 +107,22 @@ public:
 
     ToolbarModel toolbarModel() const;
     void perform(UiAction action, int arg = 0);
-    // The host draws the toolbar itself (Qt); App then skips the ImGui one.
-    void setHostToolbar(bool on) { hostToolbar_ = on; }
+
+    // Preferences: the struct is the model. setPreferences applies the side
+    // effects of a change (theme reset and grid rebuild for light mode, the
+    // profile detector backend).
+    const Preferences& preferences() const { return prefs_; }
+    void setPreferences(const Preferences& p);
+    bool preferencesOpen() const { return prefsOpen_; }
+    void setPreferencesOpen(bool open) { prefsOpen_ = open; }
+
+    // Panels the host draws itself (Qt); App then skips their ImGui versions.
+    enum HostPanel : uint32_t {
+        HostToolbar     = 1u << 0,
+        HostPreferences = 1u << 1,
+    };
+    void setHostPanel(HostPanel p, bool on = true) { hostPanels_ = on ? (hostPanels_ | p) : (hostPanels_ & ~p); }
+    bool hostHas(HostPanel p) const { return (hostPanels_ & p) != 0; }
 
     InteractionMode mode() const { return mode_; }
     Scene3D& scene() { return scene_; }
@@ -135,7 +150,7 @@ public:
 
 private:
     AppHost* host_ = nullptr;
-    bool hostToolbar_ = false;
+    uint32_t hostPanels_ = 0;             // HostPanel bits
     float imguiToolbarHeight() const;     // 0 when the host provides the toolbar
     int fbW_ = 0, fbH_ = 0;               // framebuffer size for this frame
     std::vector<std::function<void()>> posted_;

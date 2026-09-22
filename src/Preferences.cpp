@@ -7,6 +7,20 @@ static Theme s_activeTheme = Theme::light();
 static ProfileDetectorBackend s_profileBackend = ProfileDetectorBackend::Custom;
 
 const Theme& activeTheme() { return s_activeTheme; }
+
+bool operator==(const Preferences& a, const Preferences& b) {
+    auto eq = [](const float* x, const float* y, int n) {
+        for (int i = 0; i < n; i++) if (x[i] != y[i]) return false;
+        return true;
+    };
+    return a.lightMode == b.lightMode && a.showWireframe == b.showWireframe &&
+           eq(a.edgeColor, b.edgeColor, 3) && a.edgeThickness == b.edgeThickness &&
+           eq(a.sketchLineColor, b.sketchLineColor, 3) && a.sketchLineThickness == b.sketchLineThickness &&
+           a.tangentSnapPx == b.tangentSnapPx && a.profileBackend == b.profileBackend &&
+           eq(a.dimLineCol, b.dimLineCol, 4) && eq(a.dimTextCol, b.dimTextCol, 4) &&
+           eq(a.dimBgCol, b.dimBgCol, 4) && eq(a.conTextCol, b.conTextCol, 4) &&
+           eq(a.conBgCol, b.conBgCol, 4);
+}
 Theme& activeThemeMut() { return s_activeTheme; }
 
 ProfileDetectorBackend activeProfileBackend() { return s_profileBackend; }

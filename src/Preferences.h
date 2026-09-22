@@ -75,4 +75,7 @@ struct Preferences {
     void applyTheme();
 };
 
+bool operator==(const Preferences& a, const Preferences& b);
+inline bool operator!=(const Preferences& a, const Preferences& b) { return !(a == b); }
+
 } // namespace shitcad
