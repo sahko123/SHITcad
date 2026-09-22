@@ -297,6 +297,22 @@ each is checked by a real consumer rather than written speculatively.
 **Done when:** `SHITcadQt` passes the full checklist and matches the GLFW build.
 From then on the Qt build is the default.
 
+**Status (done, except the manual checklist and a 150% DPI check).** `-DSHITCAD_QT=ON`
+builds `SHITcadQt` from `src/qt/` (`main_qt.cpp`, `ViewportWidget`, `ImGuiQt`) with the
+same App sources; vcpkg installs a trimmed qtbase 6.11 (the manifest's `qt` feature,
+about 26 minutes the first time, cached after that). ImGui is fed in device pixels,
+so it sees the coordinates GLFW gave it; the three input scenarios matched the
+pre-migration build to within a few anti-aliasing pixels (+-1 colour steps from
+blending into the widget's FBO). Checked by hand: modal file dialog mid-frame
+(the `inFrame_` guard), window restore/resize, clean exit. Fixes this phase needed:
+the native dialogs had no owner window, so under Qt they opened *behind* the main
+window; they now take `GetActiveWindow()` as owner (also right under GLFW). Qt
+compiles consumers with `/permissive-`, which rejected a `goto` that jumped over an
+initialisation in `AppSketch.cpp`. vcpkg copies the Qt DLLs but not plugins, so a
+post-build step copies the Windows platform and style plugins. The option stays
+**off by default** for now so the plain build does not need Qt; Phase 5 needs it on.
+Not yet checked: 150% display scaling, and a full walk of the smoke checklist.
+
 ## Phase 5: move panels to Qt, one per commit
 
 Each commit adds the Qt panel, deletes its ImGui version, and runs the checklist

@@ -777,9 +777,16 @@ bool loadProject(const std::string& filepath,
 
 // ─── Native file dialogs ────────────────────────────────────────────
 
+// Owner for the native dialogs: the window the user is working in. Without an
+// owner a dialog is not modal to it, and a Qt main window stays in front of it.
+static HWND dialogOwner() {
+    return GetActiveWindow();
+}
+
 std::string openNativeOpenDialog() {
     char filename[MAX_PATH] = {};
     OPENFILENAMEA ofn = {};
+    ofn.hwndOwner = dialogOwner();
     ofn.lStructSize = sizeof(ofn);
     ofn.lpstrFilter = "SHITcad Files (*.shitcad)\0*.shitcad\0All Files\0*.*\0";
     ofn.lpstrFile = filename;
@@ -792,6 +799,7 @@ std::string openNativeOpenDialog() {
 std::string openNativeSaveDialog() {
     char filename[MAX_PATH] = {};
     OPENFILENAMEA ofn = {};
+    ofn.hwndOwner = dialogOwner();
     ofn.lStructSize = sizeof(ofn);
     ofn.lpstrFilter = "SHITcad Files (*.shitcad)\0*.shitcad\0All Files\0*.*\0";
     ofn.lpstrFile = filename;
@@ -805,6 +813,7 @@ std::string openNativeSaveDialog() {
 std::string openNativeStlSaveDialog() {
     char filename[MAX_PATH] = {};
     OPENFILENAMEA ofn = {};
+    ofn.hwndOwner = dialogOwner();
     ofn.lStructSize = sizeof(ofn);
     ofn.lpstrFilter = "STL Files (*.stl)\0*.stl\0All Files\0*.*\0";
     ofn.lpstrFile = filename;
@@ -1094,6 +1103,7 @@ bool exportDXF(const std::string& filepath, const Sketch& sketch) {
 std::string openNativeStepSaveDialog() {
     char filename[MAX_PATH] = {};
     OPENFILENAMEA ofn = {};
+    ofn.hwndOwner = dialogOwner();
     ofn.lStructSize = sizeof(ofn);
     ofn.lpstrFilter = "STEP Files (*.step;*.stp)\0*.step;*.stp\0All Files\0*.*\0";
     ofn.lpstrFile = filename;
@@ -1107,6 +1117,7 @@ std::string openNativeStepSaveDialog() {
 std::string openNativeStepOpenDialog() {
     char filename[MAX_PATH] = {};
     OPENFILENAMEA ofn = {};
+    ofn.hwndOwner = dialogOwner();
     ofn.lStructSize = sizeof(ofn);
     ofn.lpstrFilter = "STEP Files (*.step;*.stp)\0*.step;*.stp\0All Files\0*.*\0";
     ofn.lpstrFile = filename;
@@ -1119,6 +1130,7 @@ std::string openNativeStepOpenDialog() {
 std::string openNativeIgesSaveDialog() {
     char filename[MAX_PATH] = {};
     OPENFILENAMEA ofn = {};
+    ofn.hwndOwner = dialogOwner();
     ofn.lStructSize = sizeof(ofn);
     ofn.lpstrFilter = "IGES Files (*.igs;*.iges)\0*.igs;*.iges\0All Files\0*.*\0";
     ofn.lpstrFile = filename;
@@ -1132,6 +1144,7 @@ std::string openNativeIgesSaveDialog() {
 std::string openNativeIgesOpenDialog() {
     char filename[MAX_PATH] = {};
     OPENFILENAMEA ofn = {};
+    ofn.hwndOwner = dialogOwner();
     ofn.lStructSize = sizeof(ofn);
     ofn.lpstrFilter = "IGES Files (*.igs;*.iges)\0*.igs;*.iges\0All Files\0*.*\0";
     ofn.lpstrFile = filename;
@@ -1144,6 +1157,7 @@ std::string openNativeIgesOpenDialog() {
 std::string openNativeObjSaveDialog() {
     char filename[MAX_PATH] = {};
     OPENFILENAMEA ofn = {};
+    ofn.hwndOwner = dialogOwner();
     ofn.lStructSize = sizeof(ofn);
     ofn.lpstrFilter = "OBJ Files (*.obj)\0*.obj\0All Files\0*.*\0";
     ofn.lpstrFile = filename;
@@ -1170,6 +1184,7 @@ std::string ansiToUtf8(const std::string& ansi) {
 std::string openNativeFolderDialog(const char* title) {
     char path[MAX_PATH] = {};
     BROWSEINFOA bi = {};
+    bi.hwndOwner = dialogOwner();
     bi.lpszTitle = title;
     bi.ulFlags = BIF_RETURNONLYFSDIRS | BIF_NEWDIALOGSTYLE;
     LPITEMIDLIST pidl = SHBrowseForFolderA(&bi);
@@ -1183,6 +1198,7 @@ std::string openNativeFolderDialog(const char* title) {
 std::string openNativeJsonSaveDialog() {
     char filename[MAX_PATH] = {};
     OPENFILENAMEA ofn = {};
+    ofn.hwndOwner = dialogOwner();
     ofn.lStructSize = sizeof(ofn);
     ofn.lpstrFilter = "JSON Files (*.json)\0*.json\0All Files\0*.*\0";
     ofn.lpstrFile = filename;
@@ -1196,6 +1212,7 @@ std::string openNativeJsonSaveDialog() {
 std::string openNativeDxfSaveDialog() {
     char filename[MAX_PATH] = {};
     OPENFILENAMEA ofn = {};
+    ofn.hwndOwner = dialogOwner();
     ofn.lStructSize = sizeof(ofn);
     ofn.lpstrFilter = "DXF Files (*.dxf)\0*.dxf\0All Files\0*.*\0";
     ofn.lpstrFile = filename;
@@ -1209,6 +1226,7 @@ std::string openNativeDxfSaveDialog() {
 std::string openNativeStlOpenDialog() {
     char filename[MAX_PATH] = {};
     OPENFILENAMEA ofn = {};
+    ofn.hwndOwner = dialogOwner();
     ofn.lStructSize = sizeof(ofn);
     ofn.lpstrFilter = "STL Files (*.stl)\0*.stl\0All Files\0*.*\0";
     ofn.lpstrFile = filename;
@@ -1221,6 +1239,7 @@ std::string openNativeStlOpenDialog() {
 std::string openNativeImportDialog() {
     char filename[MAX_PATH] = {};
     OPENFILENAMEA ofn = {};
+    ofn.hwndOwner = dialogOwner();
     ofn.lStructSize = sizeof(ofn);
     ofn.lpstrFilter = "All Supported (*.step;*.stp;*.igs;*.iges;*.stl)\0*.step;*.stp;*.igs;*.iges;*.stl\0"
                       "STEP Files (*.step;*.stp)\0*.step;*.stp\0"

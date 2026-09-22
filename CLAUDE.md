@@ -13,6 +13,8 @@ cmake --build build --config Release
 Tests are opt-in (`-DSHITCAD_BUILD_TESTS=ON`), then run `build/Release/MeshImportTest.exe`, `SimulationTest.exe` and `ReplayTest.exe`. `ReplayTest` builds one history per feature type in code and checks volumes, bounds, every constraint type and save/load round trips; it is the regression net for the Qt migration (`docs/qt-migration-plan.md`, manual part in `docs/smoke-checklist.md`).
 Run the build from PowerShell or cmd: Git Bash rewrites MSBuild's `/m` switch into a path.
 
+The Qt host is opt-in while the migration is under way: configure with `-DSHITCAD_QT=ON` to also build `SHITcadQt` (vcpkg then installs a trimmed `qtbase`, the manifest's `qt` feature; the first build takes a while). It runs the same App and, for now, the same ImGui UI inside a `QOpenGLWidget` (`src/qt/`). Qt code lives only in `src/qt/` and only in that target.
+
 Dependencies are auto-fetched via FetchContent (GLFW 3.4, GLAD, ImGui 1.91.9, nlohmann/json 3.11.3). OpenCASCADE comes from vcpkg.
 
 ## Architecture

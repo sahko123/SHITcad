@@ -2,6 +2,7 @@
 // and the event loop, and drives App through AppHost (see AppHost.h).
 #include "CrashLogger.h"
 #include "App.h"
+#include "ImGuiFonts.h"
 
 #include <glad/gl.h>
 #include <GLFW/glfw3.h>
@@ -49,28 +50,7 @@ public:
         dpiScale_ = xscale > yscale ? xscale : yscale;
         if (dpiScale_ < 1.0f) dpiScale_ = 1.0f;
 
-        // Load a crisp TTF font at native DPI size (no blurry bitmap scaling)
-        ImGuiIO& io = ImGui::GetIO();
-        float fontSize = 15.0f * dpiScale_;
-        const char* fontPaths[] = {
-            "C:/Windows/Fonts/segoeui.ttf",   // Segoe UI (Windows 10/11)
-            "C:/Windows/Fonts/calibri.ttf",    // Calibri fallback
-            "C:/Windows/Fonts/arial.ttf",      // Arial fallback
-        };
-        bool fontLoaded = false;
-        for (const char* path : fontPaths) {
-            FILE* f = fopen(path, "rb");
-            if (f) {
-                fclose(f);
-                io.Fonts->AddFontFromFileTTF(path, fontSize);
-                fontLoaded = true;
-                break;
-            }
-        }
-        if (!fontLoaded) {
-            // Fall back to default bitmap font with scaling
-            io.FontGlobalScale = dpiScale_;
-        }
+        shitcad::loadImGuiFonts(dpiScale_);
         return true;
     }
 

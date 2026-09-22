@@ -278,7 +278,6 @@ void App::exportSimulationSpecDialog() {
 
 void App::drawSimulationPanel() {
     if (workspace_ != Workspace::Simulation) return;
-    ImGuiIO& io = ImGui::GetIO();
     ImGuiViewport* vp = ImGui::GetMainViewport();
 
     if (simUi_.selectedNozzle && !simulation_.findNozzle(simUi_.selectedNozzle))

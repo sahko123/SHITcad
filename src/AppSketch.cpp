@@ -720,8 +720,7 @@ void App::handleSketchInput(float vpW, float vpH) {
                 // Apply the constraint value and solve before finalizing.
                 // For PointLineDistance, pin the reference line (entityB) so only
                 // the point side moves to satisfy the constraint.
-                Constraint* fc = sketch.findConstraint(dimTool_.constraintID);
-                if (fc && !fc->driven) {
+                if (Constraint* fc = sketch.findConstraint(dimTool_.constraintID); fc && !fc->driven) {
                     auto geoBak = sketch.captureGeometry();
                     PointEntity* pinA = nullptr, *pinB = nullptr;
                     bool wasA = false, wasB = false;

@@ -5,5 +5,33 @@
   "dependencies": [
     "opencascade"
   ],
+  "features": {
+    "qt": {
+      "description": "Qt 6 Widgets host (the SHITcadQt target). Enabled by -DSHITCAD_QT=ON.",
+      "dependencies": [
+        {
+          "name": "qtbase",
+          "default-features": false,
+          "features": [
+            "gui",
+            "widgets",
+            "opengl",
+            "png",
+            "freetype",
+            "harfbuzz",
+            "doubleconversion",
+            "pcre2",
+            "thread",
+            "concurrent",
+            { "name": "windeployqt", "platform": "windows" },
+            { "name": "xcb", "platform": "linux" },
+            { "name": "xkb", "platform": "linux" },
+            { "name": "fontconfig", "platform": "linux" },
+            { "name": "egl", "platform": "linux" }
+          ]
+        }
+      ]
+    }
+  },
   "builtin-baseline": "5b698638c97b4610044a254347d571f823e56557"
 }
