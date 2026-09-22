@@ -1010,6 +1010,7 @@ void App::updateCameraAnimation(float dt) {
 
 void App::shutdown() {
     scene_.clear();
+    scene_.syncGpu(); // free the buffers clear() queued, while the context is current
     sketchRenderer_.shutdown();
     viewport3D_.shutdown();
     if (simLineVAO_) { glDeleteVertexArrays(1, &simLineVAO_); simLineVAO_ = 0; }
