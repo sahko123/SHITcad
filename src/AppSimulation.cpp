@@ -261,7 +261,7 @@ void App::exportSimulationSpecDialog() {
         simUi_.messageIsError = true;
         return;
     }
-    std::string path = openNativeJsonSaveDialog();
+    std::string path = chooseFile(FileDialog::SaveJson);
     if (path.empty()) return;
     std::ofstream out(fsPath(path), std::ios::binary);
     out << json << "\n";

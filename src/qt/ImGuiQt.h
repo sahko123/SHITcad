@@ -26,6 +26,11 @@ public:
     void key(QKeyEvent* e, bool down);
     void focus(bool in);
     void leave();
+    // Release every key, modifier and mouse button ImGui thinks is held, as
+    // GLFW does when its window loses focus. Needed before a modal dialog:
+    // the releases go to the dialog, and a key ImGui still thinks is down
+    // auto-repeats once the dialog closes (Ctrl+O reopened Open).
+    void releaseAll();
 
 private:
     float scale() const;

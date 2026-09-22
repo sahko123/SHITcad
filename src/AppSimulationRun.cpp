@@ -401,7 +401,7 @@ void App::drawSimulationRunSection() {
             if (ImGui::IsItemDeactivatedAfterEdit()) { simEngine_.cipSimPath = pathBuf; saveEngineSettings(); }
             ImGui::SameLine();
             if (ImGui::Button("Browse")) {
-                std::string p = openNativeFolderDialog("Select the cip-sim folder (contains cipsim\\cli.py)");
+                std::string p = chooseFile(FileDialog::PickFolder, "Select the cip-sim folder (contains cipsim\\cli.py)");
                 if (!p.empty()) { simEngine_.cipSimPath = p; saveEngineSettings(); }
             }
             ImGui::TextUnformatted("Python");

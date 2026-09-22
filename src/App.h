@@ -156,6 +156,9 @@ private:
     std::vector<std::function<void()>> posted_;
     void framebufferSize(int& w, int& h) const { w = fbW_; h = fbH_; }
     double nowSeconds() const;            // monotonic, for durations
+    // A file or folder from the user, UTF-8, empty if cancelled. `title`
+    // overrides the dialog's title (folder pickers say what to pick).
+    std::string chooseFile(FileDialog kind, const char* title = nullptr);
     InteractionMode mode_ = InteractionMode::Navigate;
 
     // This frame's input for the 3D view, filled once at the top of

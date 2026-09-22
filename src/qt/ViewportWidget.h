@@ -26,6 +26,7 @@ public:
     // AppHost
     void setWindowTitle(const std::string& utf8Title) override;
     void requestRedraw() override { update(); }
+    bool chooseFile(FileDialog kind, const char* title, std::string& utf8Path) override;
 
 signals:
     // After App::frame(): widgets outside the viewport refresh from App here.
@@ -45,6 +46,7 @@ protected:
     void focusInEvent(QFocusEvent* e) override;
     void focusOutEvent(QFocusEvent* e) override;
     void leaveEvent(QEvent* e) override;
+    void changeEvent(QEvent* e) override;
     bool focusNextPrevChild(bool) override { return false; } // Tab belongs to ImGui
 
 private:
@@ -58,6 +60,7 @@ private:
     // own message loop, which can deliver another repaint while the first
     // frame is still being built. That nested paint is skipped.
     bool inFrame_ = false;
+    QString lastDir_;  // where the last file dialog ended up
 };
 
 } // namespace shitcad

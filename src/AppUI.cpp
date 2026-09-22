@@ -206,7 +206,7 @@ void App::globalRedo() {
 
 void App::saveProjectDialog() {
     if (currentFilePath_.empty()) {
-        std::string path = openNativeSaveDialog();
+        std::string path = chooseFile(FileDialog::SaveProject);
         if (path.empty()) return;
         currentFilePath_ = path;
     }
@@ -219,7 +219,7 @@ void App::saveProjectDialog() {
 }
 
 void App::openProjectDialog() {
-    std::string path = openNativeOpenDialog();
+    std::string path = chooseFile(FileDialog::OpenProject);
     if (path.empty()) return;
 
     FeatureHistory newHistory;
@@ -272,7 +272,7 @@ void App::openProjectDialog() {
 
 void App::exportStlDialog() {
     if (scene_.empty()) return;
-    std::string path = openNativeStlSaveDialog();
+    std::string path = chooseFile(FileDialog::SaveStl);
     if (path.empty()) return;
     if (!exportSTL(path, scene_)) {
         fprintf(stderr, "STL export failed: %s\n", lastLoadError().c_str());
@@ -280,7 +280,7 @@ void App::exportStlDialog() {
 }
 
 void App::importStlDialog() {
-    std::string path = openNativeStlOpenDialog();
+    std::string path = chooseFile(FileDialog::OpenStl);
     if (path.empty()) return;
     beginMeshImport(path);
 }
@@ -664,7 +664,7 @@ void App::drawMeshHoverReadout() {
 
 void App::exportStepDialog() {
     if (scene_.empty()) return;
-    std::string path = openNativeStepSaveDialog();
+    std::string path = chooseFile(FileDialog::SaveStep);
     if (path.empty()) return;
     if (!exportSTEP(path, scene_)) {
         fprintf(stderr, "STEP export failed: %s\n", lastLoadError().c_str());
@@ -672,7 +672,7 @@ void App::exportStepDialog() {
 }
 
 void App::importStepDialog() {
-    std::string path = openNativeStepOpenDialog();
+    std::string path = chooseFile(FileDialog::OpenStep);
     if (path.empty()) return;
     if (!importSTEP(path, scene_)) {
         fprintf(stderr, "STEP import failed: %s\n", lastLoadError().c_str());
@@ -681,7 +681,7 @@ void App::importStepDialog() {
 
 void App::exportIgesDialog() {
     if (scene_.empty()) return;
-    std::string path = openNativeIgesSaveDialog();
+    std::string path = chooseFile(FileDialog::SaveIges);
     if (path.empty()) return;
     if (!exportIGES(path, scene_)) {
         fprintf(stderr, "IGES export failed: %s\n", lastLoadError().c_str());
@@ -689,7 +689,7 @@ void App::exportIgesDialog() {
 }
 
 void App::importIgesDialog() {
-    std::string path = openNativeIgesOpenDialog();
+    std::string path = chooseFile(FileDialog::OpenIges);
     if (path.empty()) return;
     if (!importIGES(path, scene_)) {
         fprintf(stderr, "IGES import failed: %s\n", lastLoadError().c_str());
@@ -698,7 +698,7 @@ void App::importIgesDialog() {
 
 void App::exportObjDialog() {
     if (scene_.empty()) return;
-    std::string path = openNativeObjSaveDialog();
+    std::string path = chooseFile(FileDialog::SaveObj);
     if (path.empty()) return;
     if (!exportOBJ(path, scene_)) {
         fprintf(stderr, "OBJ export failed: %s\n", lastLoadError().c_str());
@@ -707,7 +707,7 @@ void App::exportObjDialog() {
 
 void App::exportDxfDialog() {
     if (!hasActiveSketch()) return;
-    std::string path = openNativeDxfSaveDialog();
+    std::string path = chooseFile(FileDialog::SaveDxf);
     if (path.empty()) return;
     if (!exportDXF(path, activeSketch())) {
         fprintf(stderr, "DXF export failed: %s\n", lastLoadError().c_str());
@@ -715,7 +715,7 @@ void App::exportDxfDialog() {
 }
 
 void App::importModelDialog() {
-    std::string path = openNativeImportDialog();
+    std::string path = chooseFile(FileDialog::OpenImport);
     if (path.empty()) return;
 
     // Determine format from extension

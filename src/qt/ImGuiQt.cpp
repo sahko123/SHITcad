@@ -210,13 +210,16 @@ void ImGuiQt::key(QKeyEvent* e, bool down) {
 }
 
 void ImGuiQt::focus(bool in) {
+    ImGui::GetIO().AddFocusEvent(in);
+    if (!in) releaseAll(); // releases made while another window has focus never arrive here
+}
+
+void ImGuiQt::releaseAll() {
     ImGuiIO& io = ImGui::GetIO();
-    io.AddFocusEvent(in);
-    if (!in) {
-        // Keys released while another window had focus never arrive here.
-        for (const auto& kv : pressedKeys_) io.AddKeyEvent((ImGuiKey)kv.second, false);
-        pressedKeys_.clear();
-    }
+    for (const auto& kv : pressedKeys_) io.AddKeyEvent((ImGuiKey)kv.second, false);
+    pressedKeys_.clear();
+    for (ImGuiKey m : {ImGuiMod_Ctrl, ImGuiMod_Shift, ImGuiMod_Alt, ImGuiMod_Super}) io.AddKeyEvent(m, false);
+    for (int b = 0; b < ImGuiMouseButton_COUNT; b++) io.AddMouseButtonEvent(b, false);
 }
 
 void ImGuiQt::leave() {

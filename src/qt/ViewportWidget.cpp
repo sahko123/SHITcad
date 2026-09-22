@@ -4,7 +4,10 @@
 #include <imgui.h>
 #include <imgui_impl_opengl3.h>
 
+#include <QFileDialog>
+#include <QFileInfo>
 #include <QKeyEvent>
+#include <QStandardPaths>
 #include <QMouseEvent>
 #include <QOpenGLContext>
 #include <QWheelEvent>
@@ -37,6 +40,39 @@ void ViewportWidget::teardown() {
     imgui_.shutdown();
     ImGui::DestroyContext();
     doneCurrent();
+}
+
+// QFileDialog: native on Windows, and it returns Unicode paths, so nothing
+// goes through the ANSI code page. It runs a nested event loop; a repaint
+// during it is skipped by the inFrame_ guard in paintGL.
+bool ViewportWidget::chooseFile(FileDialog kind, const char* title, std::string& utf8Path) {
+    const FileDialogSpec& spec = fileDialogSpec(kind);
+    if (lastDir_.isEmpty()) lastDir_ = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
+
+    QFileDialog dlg(window(), QString::fromUtf8(title ? title : spec.title), lastDir_);
+    if (spec.folder) {
+        dlg.setFileMode(QFileDialog::Directory);
+        dlg.setOption(QFileDialog::ShowDirsOnly, true);
+    } else {
+        dlg.setNameFilter(QString::fromUtf8(spec.filter));
+        if (spec.save) {
+            dlg.setAcceptMode(QFileDialog::AcceptSave);
+            dlg.setFileMode(QFileDialog::AnyFile);
+            dlg.setDefaultSuffix(QString::fromUtf8(spec.defaultSuffix));
+        } else {
+            dlg.setAcceptMode(QFileDialog::AcceptOpen);
+            dlg.setFileMode(QFileDialog::ExistingFile);
+        }
+    }
+
+    utf8Path.clear();
+    imgui_.releaseAll();
+    if (dlg.exec() == QDialog::Accepted && !dlg.selectedFiles().isEmpty()) {
+        const QString chosen = dlg.selectedFiles().first();
+        lastDir_ = spec.folder ? chosen : QFileInfo(chosen).absolutePath();
+        utf8Path = QDir::toNativeSeparators(chosen).toUtf8().toStdString();
+    }
+    return true;
 }
 
 void ViewportWidget::setWindowTitle(const std::string& utf8Title) {
@@ -118,5 +154,11 @@ void ViewportWidget::keyReleaseEvent(QKeyEvent* e) { imgui_.key(e, false); }
 void ViewportWidget::focusInEvent(QFocusEvent*) { imgui_.focus(true); }
 void ViewportWidget::focusOutEvent(QFocusEvent*) { imgui_.focus(false); }
 void ViewportWidget::leaveEvent(QEvent*) { imgui_.leave(); }
+
+void ViewportWidget::changeEvent(QEvent* e) {
+    // Another window (a native dialog, another app) became active.
+    if (e->type() == QEvent::ActivationChange && !isActiveWindow() && ready_) imgui_.releaseAll();
+    QOpenGLWidget::changeEvent(e);
+}
 
 } // namespace shitcad

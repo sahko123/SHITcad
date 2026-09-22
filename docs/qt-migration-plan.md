@@ -393,6 +393,14 @@ ratio and picking near the edges.
   is a non-modal dialog shown while `preferencesOpen()`; it pushes edits through
   `post` and pulls App values back when they differ (light mode resets the colours).
   Host panels are now a bit set (`App::setHostPanel`).
+- 5.3 file dialogs: done. `FileDialogs.h` lists every chooser portably; App asks the
+  host (`AppHost::chooseFile`) and falls back to the Win32 dialogs, so the GLFW build
+  is unchanged. The Qt host uses `QFileDialog` (native on Windows, Unicode paths, no
+  ANSI step): saving to and opening from `...\Größe\` worked. Found while testing: keys
+  held when a modal dialog opens never see their release, and ImGui auto-repeated them
+  once it closed (Ctrl+O reopened Open). `ImGuiQt::releaseAll` now runs before a dialog
+  and whenever the window deactivates, as GLFW does on focus loss. Pre-existing and
+  left alone: `O` toggles the projection even with Ctrl held, so Ctrl+O also flips it.
 
 ## Phase 6: remove ImGui and GLFW
 

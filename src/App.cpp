@@ -210,6 +210,27 @@ float App::imguiToolbarHeight() const {
     return ImGui::GetFrameHeight() + ImGui::GetStyle().WindowPadding.y * 2.0f;
 }
 
+std::string App::chooseFile(FileDialog kind, const char* title) {
+    std::string path;
+    if (host_ && host_->chooseFile(kind, title, path)) return path;
+    switch (kind) {
+        case FileDialog::OpenProject: return openNativeOpenDialog();
+        case FileDialog::SaveProject: return openNativeSaveDialog();
+        case FileDialog::OpenImport:  return openNativeImportDialog();
+        case FileDialog::OpenStl:     return openNativeStlOpenDialog();
+        case FileDialog::SaveStl:     return openNativeStlSaveDialog();
+        case FileDialog::OpenStep:    return openNativeStepOpenDialog();
+        case FileDialog::SaveStep:    return openNativeStepSaveDialog();
+        case FileDialog::OpenIges:    return openNativeIgesOpenDialog();
+        case FileDialog::SaveIges:    return openNativeIgesSaveDialog();
+        case FileDialog::SaveObj:     return openNativeObjSaveDialog();
+        case FileDialog::SaveDxf:     return openNativeDxfSaveDialog();
+        case FileDialog::SaveJson:    return openNativeJsonSaveDialog();
+        case FileDialog::PickFolder:  return openNativeFolderDialog(title ? title : "Select a folder");
+    }
+    return {};
+}
+
 double App::nowSeconds() const {
     using namespace std::chrono;
     return duration<double>(steady_clock::now().time_since_epoch()).count();

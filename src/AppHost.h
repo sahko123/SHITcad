@@ -1,4 +1,5 @@
 #pragma once
+#include "FileDialogs.h"
 #include <string>
 
 namespace shitcad {
@@ -18,6 +19,9 @@ public:
     // Ask for another frame. A no-op while the host renders continuously;
     // an on-demand host must honour it (see App::post).
     virtual void requestRedraw() {}
+    // Show a file or folder chooser. Return false to let App use the Win32
+    // dialogs; otherwise `utf8Path` is the choice, empty if cancelled.
+    virtual bool chooseFile(FileDialog /*kind*/, const char* /*title*/, std::string& /*utf8Path*/) { return false; }
 };
 
 } // namespace shitcad
