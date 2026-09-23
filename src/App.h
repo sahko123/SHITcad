@@ -183,6 +183,28 @@ public:
     void createTangentPlane();         // creates it and starts a sketch on it
     void cancelTangentPlane();
 
+    // ---- Object tree: reference planes, sketches and bodies, each with a
+    // visibility check. Double-clicking a plane or sketch edits its sketch.
+    struct ObjectTreeModel {
+        bool open = false;
+        struct Row {
+            uint64_t key;              // stable while the row means the same thing
+            int index;                 // plane index, or body index for bodies
+            std::string label;
+            bool visible;
+        };
+        std::vector<Row> planes;       // reference planes
+        std::vector<Row> sketches;     // planes that have sketch geometry
+        std::vector<Row> bodies;
+    };
+    ObjectTreeModel objectTreeModel() const;
+    bool objectTreeOpen() const { return objectTreeOpen_; }
+    void setObjectTreeOpen(bool open) { objectTreeOpen_ = open; }
+    void setPlaneVisible(int planeIndex, bool visible);
+    void setSketchVisible(int planeIndex, bool visible);
+    void setBodyVisible(int bodyIndex, bool visible);
+    void editPlaneSketch(int planeIndex); // enterSketchMode, ignoring a stale index
+
     // Panels the host draws itself (Qt); App then skips their ImGui versions.
     enum HostPanel : uint32_t {
         HostToolbar     = 1u << 0,
@@ -191,6 +213,7 @@ public:
         HostMeshPlace   = 1u << 3,
         HostAddPlane    = 1u << 4,
         HostTangentPlane = 1u << 5,
+        HostObjectTree  = 1u << 6,
     };
     void setHostPanel(HostPanel p, bool on = true) { hostPanels_ = on ? (hostPanels_ | p) : (hostPanels_ & ~p); }
     bool hostHas(HostPanel p) const { return (hostPanels_ & p) != 0; }

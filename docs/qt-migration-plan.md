@@ -415,6 +415,25 @@ ratio and picking near the edges.
   source switching, a typed offset, Create and Cancel). `src/qt/PlaneDialogs.cpp` is
   the Qt front end; its source list rebuilds when planes are added. Not yet exercised
   live: the tangent-plane dialog, which needs a cylindrical face to open.
+- 5.5 object tree: done. `ObjectTreeModel` (rows keyed by plane ID + index, or body
+  index) and operations (plane/sketch/body visibility, `editPlaneSketch`,
+  `setObjectTreeOpen`) back both trees. The ImGui tree was rewritten onto them and
+  stayed pixel-identical (checks on a plane, a sketch and a body, double-click into a
+  sketch, T twice); the Add Plane dialog call moved from inside the tree to
+  `renderFrame`, same draw order. `src/qt/ObjectTree.cpp` is a dock whose rows are
+  diffed by key, so the current item and expansion survive changes. There is no
+  selection to sync: the tree never had one (single click does nothing, double click
+  edits the sketch). Window geometry and dock layout persist through `QSettings`.
+  **Keyboard routing changed approach**: instead of `QAction`s re-implementing the
+  mode rules, `src/qt/KeyRouting.cpp` forwards key events from the main window and its
+  docks to the viewport, so the existing handlers keep deciding (sketch vs global undo,
+  E vs Ctrl+E, and so on) and nothing can fire twice. Not forwarded: keys while a text
+  field has focus, navigation keys the focused widget uses (unless an ImGui text field
+  wants them), anything under a modal dialog or in other windows. The release of a
+  forwarded press is always forwarded, so ImGui never sees a key stuck down. Checked
+  with the tree focused: O, Ctrl+Z, Ctrl+Y, L in a sketch, Escape, T, plus the dock's
+  close button and T bringing it back. `QAction`s can come with a menu bar; they are not
+  needed for the shortcuts to work.
 
 ## Phase 6: remove ImGui and GLFW
 

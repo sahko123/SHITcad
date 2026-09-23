@@ -494,10 +494,12 @@ void App::renderFrame() {
 
     // Object tree sidebar (positioned below toolbar)
     float panelW = 0.0f;
-    if (objectTreeOpen_) {
+    if (objectTreeOpen_ && !hostHas(HostObjectTree)) {
         panelW = 200.0f;
         drawObjectTree();
     }
+    // Opened from the tree; the ImGui build only shows it while the tree is.
+    if ((objectTreeOpen_ || hostHas(HostObjectTree)) && !hostHas(HostAddPlane)) drawAddPlaneDialog();
 
     // Handle input (below toolbar, right of object tree)
     float inputY = toolbarH;

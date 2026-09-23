@@ -79,6 +79,8 @@ if(SHITCAD_QT)
         src/qt/PreferencesDialog.cpp
         src/qt/MeshDialogs.cpp
         src/qt/PlaneDialogs.cpp
+        src/qt/ObjectTree.cpp
+        src/qt/KeyRouting.cpp
     )
     set_target_properties(SHITcadQt PROPERTIES AUTOMOC ON)
     target_include_directories(SHITcadQt PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/src/qt)

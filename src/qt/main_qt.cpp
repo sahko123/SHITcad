@@ -7,9 +7,12 @@
 #include "PreferencesDialog.h"
 #include "MeshDialogs.h"
 #include "PlaneDialogs.h"
+#include "ObjectTree.h"
+#include "KeyRouting.h"
 
 #include <QApplication>
 #include <QMainWindow>
+#include <QSettings>
 #include <QSurfaceFormat>
 
 int main(int argc, char** argv) {
@@ -37,6 +40,7 @@ int main(int argc, char** argv) {
     // Panels that have moved to Qt; App skips their ImGui versions.
     viewport->app().setHostPanel(shitcad::App::HostToolbar);
     auto* toolbar = new shitcad::Toolbar(viewport->app(), &window);
+    toolbar->setObjectName("toolbar");   // saveState() keys toolbars by name
     window.addToolBar(Qt::TopToolBarArea, toolbar);
     QObject::connect(viewport, &shitcad::ViewportWidget::frameBuilt, toolbar, &shitcad::Toolbar::refresh);
 
@@ -59,8 +63,30 @@ int main(int argc, char** argv) {
     viewport->app().setHostPanel(shitcad::App::HostTangentPlane);
     auto* tangentPlane = new shitcad::TangentPlaneDialog(viewport->app(), &window);
     QObject::connect(viewport, &shitcad::ViewportWidget::frameBuilt, tangentPlane, &shitcad::TangentPlaneDialog::refresh);
+
+    viewport->app().setHostPanel(shitcad::App::HostObjectTree);
+    auto* tree = new shitcad::ObjectTree(viewport->app(), &window);
+    window.addDockWidget(Qt::LeftDockWidgetArea, tree);
+    window.resizeDocks({tree}, {200}, Qt::Horizontal);
+    QObject::connect(viewport, &shitcad::ViewportWidget::frameBuilt, tree, &shitcad::ObjectTree::refresh);
+
+    // Docks can take the keyboard; shortcuts still reach the viewport.
+    qapp.installEventFilter(new shitcad::KeyRouting(&window, viewport));
+
+    // Window geometry and dock layout persist between runs. What is open
+    // (the tree's T toggle) is App state and is re-applied every frame.
+    QSettings settings("SHITcad", "SHITcad");
     window.resize(1280, 720);
-    window.showMaximized();
+    window.restoreState(settings.value("window/state").toByteArray());
+    if (window.restoreGeometry(settings.value("window/geometry").toByteArray()))
+        window.show();
+    else
+        window.showMaximized();
+    QObject::connect(&qapp, &QApplication::aboutToQuit, &window, [&window] {
+        QSettings s("SHITcad", "SHITcad");
+        s.setValue("window/geometry", window.saveGeometry());
+        s.setValue("window/state", window.saveState());
+    });
     viewport->setFocus();
 
     return qapp.exec();

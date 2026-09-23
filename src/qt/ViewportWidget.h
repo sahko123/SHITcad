@@ -22,6 +22,8 @@ public:
     ~ViewportWidget() override;
 
     App& app() { return app_; }
+    // An ImGui text field in the viewport is taking typed text.
+    bool wantsTextInput() const;
 
     // AppHost
     void setWindowTitle(const std::string& utf8Title) override;

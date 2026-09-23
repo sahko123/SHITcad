@@ -31,6 +31,10 @@ ViewportWidget::~ViewportWidget() {
     teardown();
 }
 
+bool ViewportWidget::wantsTextInput() const {
+    return ready_ && ImGui::GetIO().WantTextInput;
+}
+
 void ViewportWidget::teardown() {
     if (!ready_) return;
     ready_ = false;

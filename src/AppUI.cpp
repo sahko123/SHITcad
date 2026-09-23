@@ -1201,6 +1201,58 @@ timeline_end:
     ImGui::End();
 }
 
+static bool planeHasSketch(const SketchPlane& sp) {
+    return !sp.sketch.points.empty() || !sp.sketch.lines.empty() || !sp.sketch.circles.empty();
+}
+
+App::ObjectTreeModel App::objectTreeModel() const {
+    ObjectTreeModel m;
+    m.open = objectTreeOpen_;
+    auto planeKey = [&](int i) { return ((uint64_t)sketchPlanes_[i].planeID << 32) | (uint32_t)i; };
+    for (int i = 0; i < (int)sketchPlanes_.size(); i++) {
+        const SketchPlane& sp = sketchPlanes_[i];
+        if (sp.isReferencePlane) m.planes.push_back({planeKey(i), i, sp.name, sp.visible});
+    }
+    for (int i = 0; i < (int)sketchPlanes_.size(); i++) {
+        const SketchPlane& sp = sketchPlanes_[i];
+        if (!planeHasSketch(sp)) continue;
+        char label[64];
+        if (i < kRefPlaneCount)
+            snprintf(label, sizeof(label), "Sketch on %s", sp.name.c_str());
+        else
+            snprintf(label, sizeof(label), "%s", sp.name.c_str());
+        m.sketches.push_back({planeKey(i), i, label, sp.sketchVisible});
+    }
+    for (int i = 0; i < (int)scene_.bodyCount(); i++) {
+        const Body3D& body = scene_.getBody(i);
+        const Feature* src = body.isMeshOnly() ? featureHistory_.findFeature(body.sourceFeature) : nullptr;
+        char label[160];
+        if (src)
+            snprintf(label, sizeof(label), "%s (mesh)", src->name.c_str());
+        else
+            snprintf(label, sizeof(label), "Body %d", i + 1);
+        m.bodies.push_back({(uint64_t)i, i, label, body.visible});
+    }
+    return m;
+}
+
+void App::setPlaneVisible(int planeIndex, bool visible) {
+    if (planeIndex >= 0 && planeIndex < (int)sketchPlanes_.size()) sketchPlanes_[planeIndex].visible = visible;
+}
+
+void App::setSketchVisible(int planeIndex, bool visible) {
+    if (planeIndex >= 0 && planeIndex < (int)sketchPlanes_.size()) sketchPlanes_[planeIndex].sketchVisible = visible;
+}
+
+void App::setBodyVisible(int bodyIndex, bool visible) {
+    if (bodyIndex >= 0 && bodyIndex < (int)scene_.bodyCount()) scene_.getBodyMut(bodyIndex).visible = visible;
+}
+
+void App::editPlaneSketch(int planeIndex) {
+    if (planeIndex >= 0 && planeIndex < (int)sketchPlanes_.size()) enterSketchMode(planeIndex);
+}
+
+// ImGui front end for ObjectTreeModel (the Qt one is src/qt/ObjectTree.cpp).
 void App::drawObjectTree() {
     ImGuiIO& io = ImGui::GetIO();
     float panelW = 200.0f;
@@ -1218,88 +1270,44 @@ void App::drawObjectTree() {
     ImGui::TextUnformatted("Object Tree");
     ImGui::Separator();
 
-    // Reference Planes section
+    const ObjectTreeModel m = objectTreeModel();
+
     if (ImGui::TreeNodeEx("Reference Planes", ImGuiTreeNodeFlags_DefaultOpen)) {
-        // Show all reference planes (built-in + user-created)
-        for (int i = 0; i < (int)sketchPlanes_.size(); i++) {
-            if (!sketchPlanes_[i].isReferencePlane) continue;
-            ImGui::PushID(i);
-            ImGui::Checkbox("##vis", &sketchPlanes_[i].visible);
+        for (const auto& row : m.planes) {
+            ImGui::PushID(row.index);
+            bool vis = row.visible;
+            if (ImGui::Checkbox("##vis", &vis)) setPlaneVisible(row.index, vis);
             ImGui::SameLine();
-            if (ImGui::Selectable(sketchPlanes_[i].name.c_str(), false,
-                    ImGuiSelectableFlags_AllowDoubleClick)) {
-                if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
-                    enterSketchMode(i);
-                }
-            }
+            if (ImGui::Selectable(row.label.c_str(), false, ImGuiSelectableFlags_AllowDoubleClick) &&
+                ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
+                editPlaneSketch(row.index);
             ImGui::PopID();
         }
-
-        // Add Offset Plane button
         if (ImGui::SmallButton("+ Add Plane")) openAddPlaneDialog();
-
         ImGui::TreePop();
     }
 
-    // Sketches section (planes with geometry, index >= kRefPlaneCount)
-    bool hasUserSketches = false;
-    for (int i = kRefPlaneCount; i < (int)sketchPlanes_.size(); i++) {
-        const auto& sp = sketchPlanes_[i];
-        if (!sp.sketch.points.empty() || !sp.sketch.lines.empty() || !sp.sketch.circles.empty()) {
-            hasUserSketches = true;
-            break;
-        }
-    }
-    // Also check reference planes that have sketch geometry
-    bool hasAnySketch = hasUserSketches;
-    for (int i = 0; i < kRefPlaneCount && !hasAnySketch; i++) {
-        const auto& sp = sketchPlanes_[i];
-        if (!sp.sketch.points.empty() || !sp.sketch.lines.empty() || !sp.sketch.circles.empty())
-            hasAnySketch = true;
-    }
-
-    if (hasAnySketch && ImGui::TreeNodeEx("Sketches", ImGuiTreeNodeFlags_DefaultOpen)) {
-        for (int i = 0; i < (int)sketchPlanes_.size(); i++) {
-            const auto& sp = sketchPlanes_[i];
-            if (sp.sketch.points.empty() && sp.sketch.lines.empty() && sp.sketch.circles.empty())
-                continue;
-
-            ImGui::PushID(100 + i);
-            ImGui::Checkbox("##vis", &sketchPlanes_[i].sketchVisible);
+    if (!m.sketches.empty() && ImGui::TreeNodeEx("Sketches", ImGuiTreeNodeFlags_DefaultOpen)) {
+        for (const auto& row : m.sketches) {
+            ImGui::PushID(100 + row.index);
+            bool vis = row.visible;
+            if (ImGui::Checkbox("##vis", &vis)) setSketchVisible(row.index, vis);
             ImGui::SameLine();
-
-            char label[64];
-            if (i < kRefPlaneCount)
-                snprintf(label, sizeof(label), "Sketch on %s", sp.name.c_str());
-            else
-                snprintf(label, sizeof(label), "%s", sp.name.c_str());
-
-            if (ImGui::Selectable(label, false,
-                    ImGuiSelectableFlags_AllowDoubleClick)) {
-                if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
-                    enterSketchMode(i);
-                }
-            }
+            if (ImGui::Selectable(row.label.c_str(), false, ImGuiSelectableFlags_AllowDoubleClick) &&
+                ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
+                editPlaneSketch(row.index);
             ImGui::PopID();
         }
         ImGui::TreePop();
     }
 
-    // Bodies section
-    if (!scene_.empty() && ImGui::TreeNodeEx("Bodies", ImGuiTreeNodeFlags_DefaultOpen)) {
-        for (int i = 0; i < (int)scene_.bodyCount(); i++) {
-            ImGui::PushID(200 + i);
-            ImGui::Checkbox("##vis", &scene_.getBodyMut(i).visible);
+    if (!m.bodies.empty() && ImGui::TreeNodeEx("Bodies", ImGuiTreeNodeFlags_DefaultOpen)) {
+        for (const auto& row : m.bodies) {
+            ImGui::PushID(200 + row.index);
+            bool vis = row.visible;
+            if (ImGui::Checkbox("##vis", &vis)) setBodyVisible(row.index, vis);
             ImGui::SameLine();
-
-            char label[160];
-            const Body3D& body = scene_.getBody(i);
-            const Feature* src = body.isMeshOnly() ? featureHistory_.findFeature(body.sourceFeature) : nullptr;
-            if (src)
-                snprintf(label, sizeof(label), "%s (mesh)", src->name.c_str());
-            else
-                snprintf(label, sizeof(label), "Body %d", i + 1);
-            ImGui::TextUnformatted(label);
+            ImGui::TextUnformatted(row.label.c_str());
             ImGui::PopID();
         }
         ImGui::TreePop();
@@ -1307,9 +1315,6 @@ void App::drawObjectTree() {
 
     ImGui::End();
     ImGui::PopStyleVar();
-
-    // Add Plane dialog
-    if (!hostHas(HostAddPlane)) drawAddPlaneDialog();
 }
 
 // ---- Toolbar model ------------------------------------------------------------
