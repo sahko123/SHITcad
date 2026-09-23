@@ -53,46 +53,92 @@ void App::sceneBounds(float lo[3], float hi[3]) {
     for (int k = 0; k < 3; k++) { lo[k] = sceneLo_[k]; hi[k] = sceneHi_[k]; }
 }
 
+App::SectionModel App::sectionModel() {
+    SectionModel m;
+    m.windowOpen = sectionWindowOpen_ && workspace_ == Workspace::Model;
+    float lo[3], hi[3];
+    sceneBounds(lo, hi);
+    m.enabled = section_.enabled;
+    m.axis = section_.axis;
+    m.flip = section_.flip;
+    m.cap = section_.cap;
+    m.lo = lo[section_.axis];
+    m.hi = hi[section_.axis];
+    m.position = std::clamp(section_.position, m.lo, m.hi);
+    m.outOfRange = m.position != section_.position;
+    for (int i = 0; i < (int)scene_.bodyCount(); i++) {
+        if (!scene_.getBody(i).visible) continue;
+        (scene_.getBody(i).closed ? m.closedSurfaces : m.openSurfaces)++;
+    }
+    return m;
+}
+
+void App::setSectionEnabled(bool on) {
+    if (on && !section_.enabled) {
+        section_.enabled = true;
+        centreSection();
+    }
+    section_.enabled = on;
+}
+
+void App::setSectionAxis(int axis) {
+    if (axis < 0 || axis > 2 || axis == section_.axis) return;
+    section_.axis = axis;
+    centreSection();
+}
+
+// Clamped to the model, so the plane cannot be put somewhere that shows
+// nothing at all.
+void App::setSectionPosition(float mm) {
+    float lo[3], hi[3];
+    sceneBounds(lo, hi);
+    section_.position = std::clamp(mm, lo[section_.axis], hi[section_.axis]);
+}
+
+void App::centreSection() {
+    float lo[3], hi[3];
+    sceneBounds(lo, hi);
+    section_.position = (lo[section_.axis] + hi[section_.axis]) * 0.5f;
+}
+
+// ImGui front end for SectionModel (the Qt one is src/qt/SectionControls.cpp),
+// in the Section window and in the Simulation panel's View section.
 void App::drawSectionControls() {
     float lo[3], hi[3];
     sceneBounds(lo, hi);
 
-    const bool was = section_.enabled;
-    ImGui::Checkbox("Section view", &section_.enabled);
-    if (section_.enabled && !was)
-        section_.position = (lo[section_.axis] + hi[section_.axis]) * 0.5f;
+    bool enabled = section_.enabled;
+    if (ImGui::Checkbox("Section view", &enabled)) setSectionEnabled(enabled);
     if (!section_.enabled) {
         ImGui::TextDisabled("Cut the model open to see inside.");
         return;
     }
 
-    const int before = section_.axis;
+    int axis = section_.axis;
     ImGui::AlignTextToFramePadding();
     ImGui::TextUnformatted("Cut along");
     ImGui::SameLine();
-    ImGui::RadioButton("X", &section_.axis, 0); ImGui::SameLine();
-    ImGui::RadioButton("Y", &section_.axis, 1); ImGui::SameLine();
-    ImGui::RadioButton("Z", &section_.axis, 2); ImGui::SameLine();
-    ImGui::Checkbox("Flip", &section_.flip);
-    if (before != section_.axis)
-        section_.position = (lo[section_.axis] + hi[section_.axis]) * 0.5f;
+    ImGui::RadioButton("X", &axis, 0); ImGui::SameLine();
+    ImGui::RadioButton("Y", &axis, 1); ImGui::SameLine();
+    ImGui::RadioButton("Z", &axis, 2); ImGui::SameLine();
+    bool flip = section_.flip;
+    if (ImGui::Checkbox("Flip", &flip)) setSectionFlip(flip);
+    setSectionAxis(axis);
 
-    // Clamped to the model, so the slider cannot be dragged somewhere that
-    // shows nothing at all.
-    section_.position = std::clamp(section_.position, lo[section_.axis], hi[section_.axis]);
+    setSectionPosition(section_.position);   // the scene may have changed size
+    float position = section_.position;
     ImGui::SetNextItemWidth(-60);
-    ImGui::SliderFloat("Position", &section_.position, lo[section_.axis], hi[section_.axis], "%.0f mm");
-    if (ImGui::Button("Centre")) section_.position = (lo[section_.axis] + hi[section_.axis]) * 0.5f;
+    if (ImGui::SliderFloat("Position", &position, lo[section_.axis], hi[section_.axis], "%.0f mm"))
+        setSectionPosition(position);
+    if (ImGui::Button("Centre")) centreSection();
     ImGui::SameLine();
-    ImGui::Checkbox("Cap the cut", &section_.cap);
+    bool cap = section_.cap;
+    if (ImGui::Checkbox("Cap the cut", &cap)) setSectionCap(cap);
     ImGui::TextDisabled("Cuts geometry and results. Spray cones stay whole.");
 
     if (section_.cap) {
-        int open = 0, closed = 0;
-        for (int i = 0; i < (int)scene_.bodyCount(); i++) {
-            if (!scene_.getBody(i).visible) continue;
-            (scene_.getBody(i).closed ? closed : open)++;
-        }
+        const SectionModel m = sectionModel();
+        const int open = m.openSurfaces, closed = m.closedSurfaces;
         if (open > 0)
             ImGui::TextDisabled("%d open surface%s cannot be capped and are left hollow.",
                                 open, open == 1 ? "" : "s");

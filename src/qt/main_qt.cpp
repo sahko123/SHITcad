@@ -9,6 +9,7 @@
 #include "PlaneDialogs.h"
 #include "ObjectTree.h"
 #include "ToolPanel.h"
+#include "SectionControls.h"
 #include "KeyRouting.h"
 
 #include <QApplication>
@@ -74,6 +75,10 @@ int main(int argc, char** argv) {
     viewport->app().setHostPanel(shitcad::App::HostToolPanels);
     auto* toolPanel = new shitcad::ToolPanel(viewport->app(), viewport);
     QObject::connect(viewport, &shitcad::ViewportWidget::frameBuilt, toolPanel, &shitcad::ToolPanel::refresh);
+
+    viewport->app().setHostPanel(shitcad::App::HostSection);
+    auto* section = new shitcad::SectionWindow(viewport->app(), &window);
+    QObject::connect(viewport, &shitcad::ViewportWidget::frameBuilt, section, &shitcad::SectionWindow::refresh);
 
     // Docks can take the keyboard; shortcuts still reach the viewport.
     qapp.installEventFilter(new shitcad::KeyRouting(&window, viewport));

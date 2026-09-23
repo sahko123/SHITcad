@@ -25,7 +25,9 @@ public:
     void refresh();
 
 protected:
-    void closeEvent(QCloseEvent* e) override;
+    // Escape and the window's X both land here; App is told, or the next
+    // refresh would show the dialog again.
+    void reject() override;
 
 private:
     void load(const Preferences& p);   // App -> widgets, without echoing back

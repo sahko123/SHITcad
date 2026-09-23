@@ -272,6 +272,27 @@ public:
     void commitBoolean();
     void cancelBoolean();
 
+    // ---- Section view: one plane cutting the whole scene. A view setting,
+    // not saved and not undone.
+    struct SectionModel {
+        bool windowOpen = false;       // the Model workspace's Section window
+        bool enabled = false;
+        int axis = 1;                  // 0 X, 1 Y, 2 Z
+        bool flip = false, cap = true;
+        float position = 0.0f;         // mm, clamped to lo..hi
+        bool outOfRange = false;       // the plane is outside lo..hi (the scene shrank)
+        float lo = 0.0f, hi = 0.0f;    // the scene's extent along the axis
+        int openSurfaces = 0, closedSurfaces = 0;   // visible bodies, for the cap note
+    };
+    SectionModel sectionModel();       // not const: scene bounds are cached
+    void setSectionWindowOpen(bool open) { sectionWindowOpen_ = open; }
+    void setSectionEnabled(bool on);   // turning it on centres the plane
+    void setSectionAxis(int axis);     // a new axis centres the plane
+    void setSectionFlip(bool flip) { section_.flip = flip; }
+    void setSectionPosition(float mm); // clamped to the scene
+    void centreSection();
+    void setSectionCap(bool cap) { section_.cap = cap; }
+
     // Panels the host draws itself (Qt); App then skips their ImGui versions.
     enum HostPanel : uint32_t {
         HostToolbar     = 1u << 0,
@@ -282,6 +303,7 @@ public:
         HostTangentPlane = 1u << 5,
         HostObjectTree  = 1u << 6,
         HostToolPanels  = 1u << 7,     // extrude, revolve, loft, boolean
+        HostSection     = 1u << 8,     // the Model workspace's Section window
     };
     void setHostPanel(HostPanel p, bool on = true) { hostPanels_ = on ? (hostPanels_ | p) : (hostPanels_ & ~p); }
     bool hostHas(HostPanel p) const { return (hostPanels_ & p) != 0; }

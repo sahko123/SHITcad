@@ -1,7 +1,6 @@
 #include "PreferencesDialog.h"
 
 #include <QCheckBox>
-#include <QCloseEvent>
 #include <QColorDialog>
 #include <QComboBox>
 #include <QDoubleSpinBox>
@@ -169,10 +168,10 @@ void PreferencesDialog::refresh() {
     if (now != shown_ && !app_.hasPosted()) load(now);
 }
 
-void PreferencesDialog::closeEvent(QCloseEvent* e) {
+void PreferencesDialog::reject() {
     App* app = &app_;
     app_.post([app] { app->setPreferencesOpen(false); });
-    QDialog::closeEvent(e);
+    QDialog::reject();
 }
 
 } // namespace shitcad

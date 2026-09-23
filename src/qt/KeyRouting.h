@@ -12,12 +12,13 @@ class ViewportWidget;
 // is handled by the viewport's input handlers, which already know the mode
 // (Ctrl+Z undoes the sketch in a sketch and the history elsewhere, E enters
 // extrude but Ctrl+E exports). Installed on the application, this forwards key
-// events from the main window, its docks and the widgets over the viewport to
-// the viewport, except:
+// events from the main window, its docks, the widgets over the viewport and
+// the tool windows the main window owns to the viewport, except:
 //   - while a text field has focus (ImGui ignores shortcuts while typing too),
 //   - navigation keys the focused widget uses itself (arrows, Home/End,
 //     Page Up/Down, Tab, Space), unless an ImGui text field in the viewport
 //     is taking text,
+//   - Escape and Enter in a tool window, which close it or press its button,
 //   - anything while a modal dialog is open, or in other top-level windows.
 // The release of a forwarded press is always forwarded, wherever the focus
 // has moved since, or ImGui would see the key held and auto-repeat it.

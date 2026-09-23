@@ -22,7 +22,9 @@ public:
     void refresh();
 
 protected:
-    void closeEvent(QCloseEvent* e) override;
+    // Escape and the window's X both land here; App is told, or the next
+    // refresh would show the dialog again.
+    void reject() override;
 
 private:
     App& app_;
@@ -46,7 +48,9 @@ public:
     void refresh();
 
 protected:
-    void closeEvent(QCloseEvent* e) override;
+    // Escape and the window's X both land here; App is told, or the next
+    // refresh would show the dialog again.
+    void reject() override;
 
 private:
     void pushPosition();

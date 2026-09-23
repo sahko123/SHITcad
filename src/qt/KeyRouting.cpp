@@ -4,6 +4,7 @@
 #include <QAbstractSpinBox>
 #include <QApplication>
 #include <QComboBox>
+#include <QDialog>
 #include <QDockWidget>
 #include <QKeyEvent>
 #include <QLineEdit>
@@ -54,11 +55,18 @@ bool KeyRouting::eventFilter(QObject* obj, QEvent* e) {
     }
     if (QApplication::activeModalWidget()) return false;
 
-    // The main window and its docks, floating ones included.
+    // The main window, its docks (floating ones included) and the tool
+    // windows it owns. Escape and Enter in a tool window stay with it: they
+    // close it and press its default button.
     QWidget* top = w->window();
     if (top != window_) {
-        auto* dock = qobject_cast<QDockWidget*>(top);
-        if (!dock || dock->parentWidget() != window_) return false;
+        if (top->parentWidget() != window_) return false;
+        if (qobject_cast<QDialog*>(top)) {
+            const int k = ke->key();
+            if (k == Qt::Key_Escape || k == Qt::Key_Return || k == Qt::Key_Enter) return false;
+        } else if (!qobject_cast<QDockWidget*>(top)) {
+            return false;
+        }
     }
 
     // Route an event once, where it is first delivered (to the focus widget).

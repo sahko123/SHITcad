@@ -1,6 +1,5 @@
 #include "PlaneDialogs.h"
 
-#include <QCloseEvent>
 #include <QDoubleSpinBox>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -115,10 +114,10 @@ void AddPlaneDialog::refresh() {
     adjustSize();
 }
 
-void AddPlaneDialog::closeEvent(QCloseEvent* e) {
+void AddPlaneDialog::reject() {
     App* a = &app_;
     app_.post([a] { a->cancelAddPlane(); });
-    QDialog::closeEvent(e);
+    QDialog::reject();
 }
 
 // ---- Tangent plane -------------------------------------------------------------
@@ -180,10 +179,10 @@ void TangentPlaneDialog::refresh() {
     }
 }
 
-void TangentPlaneDialog::closeEvent(QCloseEvent* e) {
+void TangentPlaneDialog::reject() {
     App* a = &app_;
     app_.post([a] { a->cancelTangentPlane(); });
-    QDialog::closeEvent(e);
+    QDialog::reject();
 }
 
 } // namespace shitcad

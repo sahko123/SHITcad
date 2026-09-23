@@ -554,7 +554,7 @@ void App::renderFrame() {
 
     // Cylinder tangent plane dialog
     if (!hostHas(HostTangentPlane)) drawTangentPlaneDialog();
-    if (sectionWindowOpen_ && workspace_ == Workspace::Model) {
+    if (sectionWindowOpen_ && workspace_ == Workspace::Model && !hostHas(HostSection)) {
         ImGui::SetNextWindowSize({300, 0}, ImGuiCond_Appearing);
         ImGui::SetNextWindowPos({vpW - 320, 60}, ImGuiCond_Appearing);
         ImGui::Begin("Section view", &sectionWindowOpen_, ImGuiWindowFlags_AlwaysAutoResize);

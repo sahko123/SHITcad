@@ -449,6 +449,16 @@ ratio and picking near the edges.
   Found while testing: `QLineEdit` ignores Return after applying it, so the key bubbles
   to its parents after focus has already moved; KeyRouting now routes an event only
   where it is first delivered, or that Return committed the tool.
+- 5.7 section controls: done. `SectionModel` and operations (enable, axis, flip,
+  position clamped to the scene, centre, cap, window open) back both; the ImGui
+  controls, used by the Section window and the Simulation panel, stayed pixel-identical
+  through enable, axis, flip, a slider drag, cap, Centre and disable.
+  `src/qt/SectionControls.cpp` is a reusable widget (the Qt Simulation panel will hold
+  it in 5.9) inside a Section window that opens top right without taking the keyboard.
+  KeyRouting now also forwards from tool windows owned by the main window, as keys
+  reached the viewport while an ImGui window had focus; Escape and Enter stay with the
+  window. Fixed in the earlier Qt dialogs: Escape hid them without telling App, so the
+  next frame showed them again; they now override `reject()`.
 
 ## Phase 6: remove ImGui and GLFW
 

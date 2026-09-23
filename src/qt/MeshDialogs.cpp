@@ -1,7 +1,6 @@
 #include "MeshDialogs.h"
 #include "UnitUtils.h"
 
-#include <QCloseEvent>
 #include <QComboBox>
 #include <QDoubleSpinBox>
 #include <QFormLayout>
@@ -117,10 +116,10 @@ void MeshImportDialog::refresh() {
     adjustSize();
 }
 
-void MeshImportDialog::closeEvent(QCloseEvent* e) {
+void MeshImportDialog::reject() {
     App* a = &app_;
     app_.post([a] { a->cancelMeshImport(); });
-    QDialog::closeEvent(e);
+    QDialog::reject();
 }
 
 // ---- placement ---------------------------------------------------------------
@@ -271,12 +270,12 @@ void MeshPlacePanel::refresh() {
     adjustSize();
 }
 
-void MeshPlacePanel::closeEvent(QCloseEvent* e) {
+void MeshPlacePanel::reject() {
     if (!closing_) { // the window's X, like Cancel in the ImGui panel
         App* a = &app_;
         app_.post([a] { a->finishMeshPlace(false); });
     }
-    QDialog::closeEvent(e);
+    QDialog::reject();
 }
 
 } // namespace shitcad
