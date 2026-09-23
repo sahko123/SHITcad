@@ -24,6 +24,7 @@
 #include "ViewportInput.h"
 #include "Overlay2D.h"
 #include "AppHost.h"
+#include <algorithm>
 #include <functional>
 
 namespace shitcad {
@@ -326,6 +327,91 @@ public:
     // overlays above it (the FPS readout) clear it.
     void setHostTimelineHeight(float px) { hostTimelineH_ = px; }
 
+    // ---- Simulation panel (Simulation workspace). Edits change the set-up
+    // live; commitSimulationEdit() makes them one undo step (on release or
+    // focus loss, or at once for discrete actions, which commit themselves).
+    struct SimSetupModel {
+        bool open = false;             // the Simulation workspace is showing
+        struct Surface {
+            uint32_t feature;          // the MeshImport's FeatureID
+            std::string name;
+            int role;                  // SurfaceRole
+            bool active;               // not suppressed, rolled back or failed
+            bool failed;               // its STL could not be loaded
+            std::string errorMsg;
+        };
+        std::vector<Surface> surfaces;
+        bool placing = false;          // the next surface click places a nozzle
+        float standoffMm = 0.0f;
+        struct Nozzle { uint32_t id; std::string label; };
+        std::vector<Nozzle> nozzles;
+        uint32_t selected = 0;         // 0: none; the fields below describe it
+        std::string name;
+        bool hosted = false;           // its surface still exists (position editable)
+        double pos[3] = {0, 0, 0}, axis[3] = {0, 0, 0};
+        float halfAngleDeg = 0, flowKgS = 0, pressureBar = 0;
+        int rays = 0, bounces = 0;
+        std::string message;           // last export / validation message
+        bool messageIsError = false;
+        std::vector<std::string> warnings;
+    };
+    SimSetupModel simSetupModel() const;
+    void setSurfaceRole(uint32_t meshFeature, int role);   // commits
+    void setNozzlePlacing(bool placing) { simUi_.placing = placing; }
+    void setNozzleStandoff(float mm) { simUi_.standoffMm = std::max(0.0f, mm); }
+    void selectNozzle(uint32_t id) { simUi_.selectedNozzle = id; }
+    void setNozzleName(uint32_t id, const std::string& name);   // commits; empty is ignored
+    void setNozzlePosition(uint32_t id, const double pos[3]);    // live
+    void setNozzleAxis(uint32_t id, const double axis[3]);       // live; zero is ignored
+    void flipNozzle(uint32_t id);                                // commits
+    void pointNozzleDown(uint32_t id);                           // commits
+    void setNozzleHalfAngle(uint32_t id, float deg);             // live
+    void setNozzleFlow(uint32_t id, float kgS);                  // live
+    void setNozzlePressure(uint32_t id, float bar);              // live
+    void deleteNozzle(uint32_t id);                              // commits
+    void setSimulationRays(int rays);                            // live
+    void setSimulationBounces(int bounces);                      // live
+    void commitSimulationEdit();
+    void exportSimulationSpecDialog();
+
+    struct SimRunModel {
+        std::string cipSimPath, python;
+        std::string problem;           // why the engine cannot run, empty if it can
+        bool running = false, done = false, cancelled = false;
+        double seconds = 0;            // elapsed while running, total when done
+        std::string error;
+        std::vector<std::string> log;
+    };
+    SimRunModel simRunModel();         // not const: loads the engine settings on first use
+    void setEnginePaths(const std::string& cipSimPath, const std::string& python);   // saved
+    void browseEngineFolder();
+    void startTier1Run();
+    void cancelSimulationRun();
+
+    struct SimResultsModel {
+        bool loaded = false;
+        bool stale = false;            // what the run depended on has changed
+        bool show = true;
+        int field = 0;
+        std::vector<std::string> fieldLabels;
+        bool categorical = false;
+        struct Swatch { float rgb[3]; std::string label; };
+        std::vector<Swatch> categories;   // categorical legend
+        bool reachNote = false;           // the percentages-of-scored-wall note
+        float hi = 0;                     // continuous: top of the scale
+        std::string unit;
+        bool flux = false, fluxTrustworthy = true;
+        int noData = 0;
+        CoverageRow overall;
+        std::vector<CoverageRow> surfaces;
+        std::string paraviewMessage;
+    };
+    SimResultsModel simResultsModel() const;
+    void setResultsShown(bool show) { simView_.show = show; }
+    void setResultsField(int field);
+    void openResultsInParaView();
+    void openRunFolder();
+
     // Panels the host draws itself (Qt); App then skips their ImGui versions.
     enum HostPanel : uint32_t {
         HostToolbar     = 1u << 0,
@@ -338,6 +424,7 @@ public:
         HostToolPanels  = 1u << 7,     // extrude, revolve, loft, boolean
         HostSection     = 1u << 8,     // the Model workspace's Section window
         HostTimeline    = 1u << 9,
+        HostSimulation  = 1u << 10,
     };
     void setHostPanel(HostPanel p, bool on = true) { hostPanels_ = on ? (hostPanels_ | p) : (hostPanels_ & ~p); }
     bool hostHas(HostPanel p) const { return (hostPanels_ & p) != 0; }
@@ -678,13 +765,10 @@ private:
     void drawSimulationPanel();
     void handleSimulationInput(float vpW, float vpH);
     void renderSimulationOverlay(const float* view, const float* proj);
-    void commitSimulationEdit();
-    void exportSimulationSpecDialog();
     float simulationSceneExtent();
     void loadEngineSettings();
     void saveEngineSettings();
     std::string engineProblem() const; // empty if the engine looks usable
-    void startTier1Run();
     void pollSimulationRun();
     bool loadSimulationResults(const RunSummary& summary, const std::string& inputs,
                                const std::string& runDir, std::string& error);
@@ -697,7 +781,8 @@ private:
     void renderSimulationResults(const float* view, const float* proj, const float* eyePos);
     void drawSimulationRunSection();
     void drawSimulationResultsSection();
-    void openResultsInParaView();
+    void drawNozzleLabels();              // names beside the cone apexes
+    void validateSimulationSelection();   // drop a nozzle selection undo removed
     // Section view (AppSection.cpp)
     void sceneBounds(float lo[3], float hi[3]);
     void drawSectionControls();

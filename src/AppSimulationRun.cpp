@@ -383,12 +383,47 @@ void App::openResultsInParaView() {
 
 // ---- panel sections -------------------------------------------------------------------
 
-void App::drawSimulationRunSection() {
+App::SimRunModel App::simRunModel() {
     if (!simEngine_.loaded) loadEngineSettings();
+    SimRunModel m;
+    m.cipSimPath = simEngine_.cipSimPath;
+    m.python = simEngine_.python;
+    m.problem = engineProblem();
+    m.running = simPhase_ == SimPhase::Running;
+    m.done = simPhase_ == SimPhase::Done;
+    m.cancelled = simPhase_ == SimPhase::Cancelled;
+    m.seconds = m.running ? nowSeconds() - simRunStart_ : simRunEnd_ - simRunStart_;
+    if (!m.running) m.error = simRunError_;
+    m.log = simRunLog_;
+    return m;
+}
+
+void App::setEnginePaths(const std::string& cipSimPath, const std::string& python) {
+    if (cipSimPath == simEngine_.cipSimPath && python == simEngine_.python) return;
+    simEngine_.cipSimPath = cipSimPath;
+    simEngine_.python = python;
+    saveEngineSettings();
+}
+
+void App::browseEngineFolder() {
+    std::string p = chooseFile(FileDialog::PickFolder, "Select the cip-sim folder (contains cipsim\\cli.py)");
+    if (!p.empty()) { simEngine_.cipSimPath = p; saveEngineSettings(); }
+}
+
+void App::cancelSimulationRun() {
+    if (simPhase_ != SimPhase::Running) return;
+    simRunner_.cancel();
+    simPhase_ = SimPhase::Cancelled;
+    // The engine may already have printed its result before the kill landed;
+    // that answer belongs to no run now.
+    simSummary_ = RunSummary{};
+}
+
+void App::drawSimulationRunSection() {
+    const SimRunModel m = simRunModel();
 
     if (ImGui::CollapsingHeader("Run", ImGuiTreeNodeFlags_DefaultOpen)) {
-        std::string problem = engineProblem();
-        if (ImGui::TreeNodeEx("Engine (cip-sim)", problem.empty() ? 0 : ImGuiTreeNodeFlags_DefaultOpen)) {
+        if (ImGui::TreeNodeEx("Engine (cip-sim)", m.problem.empty() ? 0 : ImGuiTreeNodeFlags_DefaultOpen)) {
             static char pathBuf[512];
             static char pyBuf[260];
             if (!ImGui::IsAnyItemActive()) {
@@ -398,39 +433,30 @@ void App::drawSimulationRunSection() {
             ImGui::TextUnformatted("cip-sim folder");
             ImGui::SetNextItemWidth(-70);
             ImGui::InputText("##cipsim", pathBuf, sizeof(pathBuf));
-            if (ImGui::IsItemDeactivatedAfterEdit()) { simEngine_.cipSimPath = pathBuf; saveEngineSettings(); }
+            if (ImGui::IsItemDeactivatedAfterEdit()) setEnginePaths(pathBuf, simEngine_.python);
             ImGui::SameLine();
-            if (ImGui::Button("Browse")) {
-                std::string p = chooseFile(FileDialog::PickFolder, "Select the cip-sim folder (contains cipsim\\cli.py)");
-                if (!p.empty()) { simEngine_.cipSimPath = p; saveEngineSettings(); }
-            }
+            if (ImGui::Button("Browse")) browseEngineFolder();
             ImGui::TextUnformatted("Python");
             ImGui::SetNextItemWidth(-1);
             ImGui::InputText("##python", pyBuf, sizeof(pyBuf));
-            if (ImGui::IsItemDeactivatedAfterEdit()) { simEngine_.python = pyBuf; saveEngineSettings(); }
-            if (!problem.empty()) ImGui::TextColored({1, 0.8f, 0.3f, 1}, "%s", problem.c_str());
+            if (ImGui::IsItemDeactivatedAfterEdit()) setEnginePaths(simEngine_.cipSimPath, pyBuf);
+            if (!m.problem.empty()) ImGui::TextColored({1, 0.8f, 0.3f, 1}, "%s", m.problem.c_str());
             else ImGui::TextDisabled("Saved for this computer, not in the project.");
             ImGui::TreePop();
         }
 
-        if (simPhase_ == SimPhase::Running) {
-            double elapsed = nowSeconds() - simRunStart_;
-            ImGui::Text("Running Tier 1... %.0f s", elapsed);
-            if (!simRunLog_.empty()) ImGui::TextDisabled("%s", simRunLog_.back().c_str());
-            if (ImGui::Button("Cancel", {-1, 0})) {
-                simRunner_.cancel();
-                simPhase_ = SimPhase::Cancelled;
-                // The engine may already have printed its result before the
-                // kill landed; that answer belongs to no run now.
-                simSummary_ = RunSummary{};
-            }
+        if (m.running) {
+            ImGui::Text("Running Tier 1... %.0f s", m.seconds);
+            if (!m.log.empty()) ImGui::TextDisabled("%s", m.log.back().c_str());
+            if (ImGui::Button("Cancel", {-1, 0})) cancelSimulationRun();
         } else {
-            bool ready = problem.empty();
+            bool ready = m.problem.empty();
             if (!ready) ImGui::BeginDisabled();
             ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.20f, 0.50f, 0.25f, 1.0f));
             if (ImGui::Button("Run Tier 1 coverage", {-1, 0})) startTier1Run();
             ImGui::PopStyleColor();
             if (!ready) ImGui::EndDisabled();
+            // Read live: Run may have just started or failed to.
             if (simPhase_ == SimPhase::Done)
                 ImGui::TextColored({0.4f, 0.9f, 0.5f, 1}, "Finished in %.0f s", simRunEnd_ - simRunStart_);
             if (simPhase_ == SimPhase::Cancelled) ImGui::TextDisabled("Cancelled.");
@@ -457,29 +483,77 @@ static const char* fieldLabel(const std::string& name) {
     return name.c_str();
 }
 
+App::SimResultsModel App::simResultsModel() const {
+    SimResultsModel m;
+    m.loaded = simView_.loaded;
+    if (!m.loaded) return m;
+    // Stale: anything the run depended on has changed - the spec, the run
+    // settings, or an STL on disk.
+    std::string now, err;
+    m.stale = !(runInputs(now, err) && now == simView_.inputs);
+    m.show = simView_.show;
+    m.field = simView_.field;
+    const ResultMesh& mesh = simView_.mesh;
+    for (const auto& f : mesh.fields) m.fieldLabels.push_back(fieldLabel(f.name));
+    if (simView_.field < (int)mesh.fields.size()) {
+        const ResultField& f = mesh.fields[simView_.field];
+        m.categorical = f.categorical;
+        if (f.categorical) {
+            for (int k = 0; k < (int)std::max(f.labels.size(), f.colours.size()); k++) {
+                SimResultsModel::Swatch s;
+                categoryColour(f, k, s.rgb);
+                s.label = k < (int)f.labels.size() ? f.labels[k] : std::to_string(k);
+                if (f.name == "reach") {
+                    const auto& o = simView_.summary.overall;
+                    const double pct = k == 0 ? o.dryPct : k == 1 ? o.splashPct : o.directPct;
+                    char buf[64];
+                    snprintf(buf, sizeof(buf), "  %.1f%%", pct);
+                    s.label += buf;
+                }
+                m.categories.push_back(std::move(s));
+            }
+            m.reachNote = f.name == "reach" && (int)m.categories.size() > 2;
+        } else {
+            m.hi = f.p95 > 0 ? f.p95 : f.maxValue;
+            m.unit = f.unit;
+            m.flux = f.name.find("flux") != std::string::npos;
+            m.fluxTrustworthy = simView_.summary.fluxTrustworthy;
+            m.noData = f.noData;
+        }
+    }
+    m.overall = simView_.summary.overall;
+    m.surfaces = simView_.summary.surfaces;
+    m.paraviewMessage = paraviewMessage_;
+    return m;
+}
+
+void App::setResultsField(int field) {
+    if (field < 0 || field >= (int)simView_.mesh.fields.size()) return;
+    simView_.field = field;
+    simView_.colourDirty = true;
+}
+
+void App::openRunFolder() {
+    if (simView_.runDir.empty()) return;
+    ShellExecuteW(nullptr, L"open", fsPath(simView_.runDir).c_str(), nullptr, nullptr, 1 /* SW_SHOWNORMAL */);
+}
+
 void App::drawSimulationResultsSection() {
     if (!simView_.loaded) return;
     if (!ImGui::CollapsingHeader("Results", ImGuiTreeNodeFlags_DefaultOpen)) return;
+    const SimResultsModel rm = simResultsModel();
 
-    // Stale: anything the run depended on has changed - the spec, the run
-    // settings, or an STL on disk.
-    {
-        std::string now, err;
-        const bool same = runInputs(now, err) && now == simView_.inputs;
-        if (!same)
-            ImGui::TextColored({1, 0.8f, 0.3f, 1},
-                               "Set-up, settings or geometry changed since this run - run again.");
-    }
+    if (rm.stale)
+        ImGui::TextColored({1, 0.8f, 0.3f, 1},
+                           "Set-up, settings or geometry changed since this run - run again.");
 
-    ImGui::Checkbox("Show on geometry", &simView_.show);
+    bool show = simView_.show;
+    if (ImGui::Checkbox("Show on geometry", &show)) setResultsShown(show);
     const ResultMesh& m = simView_.mesh;
     ImGui::SetNextItemWidth(-1);
     if (ImGui::BeginCombo("##field", simView_.field < (int)m.fields.size() ? fieldLabel(m.fields[simView_.field].name) : "")) {
         for (int i = 0; i < (int)m.fields.size(); i++) {
-            if (ImGui::Selectable(fieldLabel(m.fields[i].name), i == simView_.field)) {
-                simView_.field = i;
-                simView_.colourDirty = true;
-            }
+            if (ImGui::Selectable(fieldLabel(m.fields[i].name), i == simView_.field)) setResultsField(i);
         }
         ImGui::EndCombo();
     }
@@ -580,8 +654,7 @@ void App::drawSimulationResultsSection() {
 
     if (ImGui::Button("Open in ParaView")) openResultsInParaView();
     ImGui::SameLine();
-    if (ImGui::Button("Open run folder"))
-        ShellExecuteW(nullptr, L"open", fsPath(simView_.runDir).c_str(), nullptr, nullptr, 1 /* SW_SHOWNORMAL */);
+    if (ImGui::Button("Open run folder")) openRunFolder();
     if (!paraviewMessage_.empty()) {
         ImGui::PushTextWrapPos(0.0f);
         ImGui::TextDisabled("%s", paraviewMessage_.c_str());

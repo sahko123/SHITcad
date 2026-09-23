@@ -276,12 +276,123 @@ void App::exportSimulationSpecDialog() {
 
 // ---- panel ----------------------------------------------------------------------
 
+App::SimSetupModel App::simSetupModel() const {
+    SimSetupModel m;
+    m.open = workspace_ == Workspace::Simulation;
+    if (!m.open) return m;
+    const auto& feats = featureHistory_.features();
+    for (int i = 0; i < (int)feats.size(); i++) {
+        const Feature& f = feats[i];
+        if (f.type != FeatureType::MeshImport) continue;
+        SimSetupModel::Surface s;
+        s.feature = f.id;
+        s.name = f.name;
+        s.role = (int)simulation_.roleFor(f.id);
+        s.active = !f.suppressed && !featureHistory_.isRolledBack(i) && !f.hasError;
+        s.failed = f.hasError;
+        s.errorMsg = f.errorMsg;
+        m.surfaces.push_back(std::move(s));
+    }
+    m.placing = simUi_.placing;
+    m.standoffMm = simUi_.standoffMm;
+    for (const auto& n : simulation_.nozzles) {
+        double p[3], a[3];
+        const bool ok = nozzleWorld(n, featureHistory_, p, a);
+        m.nozzles.push_back({n.id, n.name + (ok ? "" : "  (surface deleted)")});
+    }
+    if (const SimNozzle* n = simulation_.findNozzle(simUi_.selectedNozzle)) {
+        m.selected = n->id;
+        m.name = n->name;
+        m.hosted = nozzleWorld(*n, featureHistory_, m.pos, m.axis);
+        m.halfAngleDeg = n->halfAngleDeg;
+        m.flowKgS = n->mdotKgS;
+        m.pressureBar = n->pressureBar;
+    }
+    m.rays = simulation_.rays;
+    m.bounces = simulation_.bounces;
+    m.message = simUi_.message;
+    m.messageIsError = simUi_.messageIsError;
+    m.warnings = simUi_.warnings;
+    return m;
+}
+
+void App::setSurfaceRole(uint32_t meshFeature, int role) {
+    if (role < 0 || role >= kSurfaceRoleCount) return;
+    simulation_.setRole(meshFeature, (SurfaceRole)role);
+    commitSimulationEdit();
+}
+
+void App::setNozzleName(uint32_t id, const std::string& name) {
+    SimNozzle* n = simulation_.findNozzle(id);
+    if (!n || name.empty()) return;
+    n->name = name;
+    commitSimulationEdit();
+}
+
+void App::setNozzlePosition(uint32_t id, const double pos[3]) {
+    SimNozzle* n = simulation_.findNozzle(id);
+    double p[3], a[3];
+    if (n && nozzleWorld(*n, featureHistory_, p, a)) setNozzleWorld(*n, featureHistory_, pos, a);
+}
+
+void App::setNozzleAxis(uint32_t id, const double axis[3]) {
+    SimNozzle* n = simulation_.findNozzle(id);
+    double p[3], a[3];
+    if (!n || !nozzleWorld(*n, featureHistory_, p, a)) return;
+    if (std::sqrt(axis[0] * axis[0] + axis[1] * axis[1] + axis[2] * axis[2]) > 1e-9)
+        setNozzleWorld(*n, featureHistory_, p, axis);
+}
+
+void App::flipNozzle(uint32_t id) {
+    SimNozzle* n = simulation_.findNozzle(id);
+    double p[3], a[3];
+    if (!n || !nozzleWorld(*n, featureHistory_, p, a)) return;
+    const double f[3] = {-a[0], -a[1], -a[2]};
+    setNozzleWorld(*n, featureHistory_, p, f);
+    commitSimulationEdit();
+}
+
+void App::pointNozzleDown(uint32_t id) {
+    SimNozzle* n = simulation_.findNozzle(id);
+    double p[3], a[3];
+    if (!n || !nozzleWorld(*n, featureHistory_, p, a)) return;
+    const double d[3] = {0, -1, 0};
+    setNozzleWorld(*n, featureHistory_, p, d);
+    commitSimulationEdit();
+}
+
+void App::setNozzleHalfAngle(uint32_t id, float deg) {
+    if (SimNozzle* n = simulation_.findNozzle(id)) n->halfAngleDeg = std::clamp(deg, 1.0f, 180.0f);
+}
+
+void App::setNozzleFlow(uint32_t id, float kgS) {
+    if (SimNozzle* n = simulation_.findNozzle(id)) n->mdotKgS = std::max(0.001f, kgS);
+}
+
+void App::setNozzlePressure(uint32_t id, float bar) {
+    if (SimNozzle* n = simulation_.findNozzle(id)) n->pressureBar = bar;
+}
+
+void App::deleteNozzle(uint32_t id) {
+    if (!simulation_.findNozzle(id)) return;
+    simulation_.removeNozzle(id);
+    if (simUi_.selectedNozzle == id) simUi_.selectedNozzle = 0;
+    commitSimulationEdit();
+}
+
+void App::setSimulationRays(int rays) { simulation_.rays = std::clamp(rays, 1000, 5000000); }
+void App::setSimulationBounces(int bounces) { simulation_.bounces = std::clamp(bounces, 0, 4); }
+
+void App::validateSimulationSelection() {
+    if (simUi_.selectedNozzle && !simulation_.findNozzle(simUi_.selectedNozzle))
+        simUi_.selectedNozzle = 0; // removed by undo
+}
+
+// ImGui front end for the Simulation panel models (the Qt one is
+// src/qt/SimulationPanel.cpp).
 void App::drawSimulationPanel() {
     if (workspace_ != Workspace::Simulation) return;
     ImGuiViewport* vp = ImGui::GetMainViewport();
-
-    if (simUi_.selectedNozzle && !simulation_.findNozzle(simUi_.selectedNozzle))
-        simUi_.selectedNozzle = 0; // removed by undo
 
     const float panelW = 330.0f;
     ImGui::SetNextWindowPos({vp->WorkPos.x + vp->WorkSize.x - panelW - 10, vp->WorkPos.y + 45}, ImGuiCond_Appearing);
@@ -289,33 +400,26 @@ void App::drawSimulationPanel() {
     ImGui::Begin("Simulation###simpanel", nullptr, ImGuiWindowFlags_NoCollapse);
 
     ImGui::TextDisabled("Tier 1: spray line of sight + splash");
+    const SimSetupModel m = simSetupModel();
 
     // ---- surfaces
     if (ImGui::CollapsingHeader("Surfaces", ImGuiTreeNodeFlags_DefaultOpen)) {
-        int count = 0;
-        const auto& feats = featureHistory_.features();
-        for (int i = 0; i < (int)feats.size(); i++) {
-            const Feature& f = feats[i];
-            if (f.type != FeatureType::MeshImport) continue;
-            count++;
-            ImGui::PushID((int)f.id);
-            bool active = !f.suppressed && !featureHistory_.isRolledBack(i) && !f.hasError;
+        for (const auto& s : m.surfaces) {
+            ImGui::PushID((int)s.feature);
             ImGui::AlignTextToFramePadding();
-            if (active) ImGui::TextUnformatted(f.name.c_str());
-            else ImGui::TextDisabled("%s", f.name.c_str());
+            if (s.active) ImGui::TextUnformatted(s.name.c_str());
+            else ImGui::TextDisabled("%s", s.name.c_str());
             ImGui::SameLine(130);
             ImGui::SetNextItemWidth(-1);
-            int role = (int)simulation_.roleFor(f.id);
+            int role = s.role;
             if (ImGui::Combo("##role", &role,
-                    [](void*, int r) { return surfaceRoleLabel((SurfaceRole)r); }, nullptr, kSurfaceRoleCount)) {
-                simulation_.setRole(f.id, (SurfaceRole)role);
-                commitSimulationEdit();
-            }
-            if (f.hasError) ImGui::TextColored({1, 0.45f, 0.45f, 1}, "  left out: %s", f.errorMsg.c_str());
-            else if (!active) ImGui::TextDisabled("  left out: suppressed or rolled back");
+                    [](void*, int r) { return surfaceRoleLabel((SurfaceRole)r); }, nullptr, kSurfaceRoleCount))
+                setSurfaceRole(s.feature, role);
+            if (s.failed) ImGui::TextColored({1, 0.45f, 0.45f, 1}, "  left out: %s", s.errorMsg.c_str());
+            else if (!s.active) ImGui::TextDisabled("  left out: suppressed or rolled back");
             ImGui::PopID();
         }
-        if (count == 0)
+        if (m.surfaces.empty())
             ImGui::TextWrapped("No surfaces yet. Import the vessel with Import > STL, one file per surface "
                                "(wall, inlet cap, drain cap...).");
         else
@@ -326,28 +430,26 @@ void App::drawSimulationPanel() {
     if (ImGui::CollapsingHeader("Nozzles", ImGuiTreeNodeFlags_DefaultOpen)) {
         if (simUi_.placing) {
             ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.2f, 0.6f, 0.3f, 1.0f));
-            if (ImGui::Button("Click a surface to place... (Esc)", {-1, 0})) simUi_.placing = false;
+            if (ImGui::Button("Click a surface to place... (Esc)", {-1, 0})) setNozzlePlacing(false);
             ImGui::PopStyleColor();
         } else if (ImGui::Button("+ Place nozzle", {-1, 0})) {
-            simUi_.placing = true;
+            setNozzlePlacing(true);
         }
         ImGui::SetNextItemWidth(90);
-        ImGui::InputFloat("Standoff from surface (mm)", &simUi_.standoffMm, 0, 0, "%.1f");
-        simUi_.standoffMm = std::max(0.0f, simUi_.standoffMm);
+        float standoff = simUi_.standoffMm;
+        if (ImGui::InputFloat("Standoff from surface (mm)", &standoff, 0, 0, "%.1f")) setNozzleStandoff(standoff);
         ImGui::TextDisabled("Shift-click places several. Click a cone's apex to select.");
 
-        for (const auto& n : simulation_.nozzles) {
+        for (const auto& n : m.nozzles) {
             ImGui::PushID((int)n.id);
-            double p[3], a[3];
-            bool ok = nozzleWorld(n, featureHistory_, p, a);
-            char label[128];
-            snprintf(label, sizeof(label), "%s%s", n.name.c_str(), ok ? "" : "  (surface deleted)");
-            if (ImGui::Selectable(label, simUi_.selectedNozzle == n.id)) simUi_.selectedNozzle = n.id;
+            if (ImGui::Selectable(n.label.c_str(), simUi_.selectedNozzle == n.id)) selectNozzle(n.id);
             ImGui::PopID();
         }
 
+        // Read live: the selection may have changed just above.
         SimNozzle* n = simulation_.findNozzle(simUi_.selectedNozzle);
         if (n) {
+            const uint32_t id = n->id;
             ImGui::Separator();
             // Mirror the name into the edit buffer except while it is being
             // typed in, so undo and selection changes show up.
@@ -356,64 +458,53 @@ void App::drawSimulationPanel() {
                 snprintf(nameBuf, sizeof(nameBuf), "%s", n->name.c_str());
             ImGui::SetNextItemWidth(-60);
             ImGui::InputText("Name", nameBuf, sizeof(nameBuf));
-            if (ImGui::IsItemDeactivatedAfterEdit() && nameBuf[0]) { n->name = nameBuf; commitSimulationEdit(); }
+            if (ImGui::IsItemDeactivatedAfterEdit()) setNozzleName(id, nameBuf);
 
             double p[3], a[3];
             if (nozzleWorld(*n, featureHistory_, p, a)) {
                 ImGui::SetNextItemWidth(-60);
                 if (ImGui::InputScalarN("Pos mm", ImGuiDataType_Double, p, 3, nullptr, nullptr, "%.1f"))
-                    setNozzleWorld(*n, featureHistory_, p, a);
+                    setNozzlePosition(id, p);
                 if (ImGui::IsItemDeactivatedAfterEdit()) commitSimulationEdit();
                 ImGui::SetNextItemWidth(-60);
                 double aEdit[3] = {a[0], a[1], a[2]};
-                if (ImGui::InputScalarN("Axis", ImGuiDataType_Double, aEdit, 3, nullptr, nullptr, "%.3f")) {
-                    if (std::sqrt(aEdit[0] * aEdit[0] + aEdit[1] * aEdit[1] + aEdit[2] * aEdit[2]) > 1e-9)
-                        setNozzleWorld(*n, featureHistory_, p, aEdit);
-                }
+                if (ImGui::InputScalarN("Axis", ImGuiDataType_Double, aEdit, 3, nullptr, nullptr, "%.3f"))
+                    setNozzleAxis(id, aEdit);
                 if (ImGui::IsItemDeactivatedAfterEdit()) commitSimulationEdit();
-                if (ImGui::Button("Flip")) {
-                    const double f[3] = {-a[0], -a[1], -a[2]};
-                    setNozzleWorld(*n, featureHistory_, p, f);
-                    commitSimulationEdit();
-                }
+                if (ImGui::Button("Flip")) flipNozzle(id);
                 ImGui::SameLine();
-                if (ImGui::Button("Point down (-Y)")) {
-                    const double d[3] = {0, -1, 0};
-                    setNozzleWorld(*n, featureHistory_, p, d);
-                    commitSimulationEdit();
-                }
+                if (ImGui::Button("Point down (-Y)")) pointNozzleDown(id);
             } else {
                 ImGui::TextColored({1, 0.45f, 0.45f, 1}, "Its surface was deleted.");
             }
 
             ImGui::SetNextItemWidth(-60);
-            ImGui::SliderFloat("Half-angle", &n->halfAngleDeg, 1.0f, 180.0f, "%.0f deg");
+            float half = n->halfAngleDeg;
+            if (ImGui::SliderFloat("Half-angle", &half, 1.0f, 180.0f, "%.0f deg")) setNozzleHalfAngle(id, half);
             if (ImGui::IsItemDeactivatedAfterEdit()) commitSimulationEdit();
             ImGui::SetNextItemWidth(-60);
-            ImGui::InputFloat("Flow kg/s", &n->mdotKgS, 0, 0, "%.3f");
-            n->mdotKgS = std::max(0.001f, n->mdotKgS);
+            float flow = n->mdotKgS;
+            if (ImGui::InputFloat("Flow kg/s", &flow, 0, 0, "%.3f")) setNozzleFlow(id, flow);
             if (ImGui::IsItemDeactivatedAfterEdit()) commitSimulationEdit();
             ImGui::SetNextItemWidth(-60);
-            ImGui::InputFloat("Press. bar", &n->pressureBar, 0, 0, "%.2f");
+            float pressure = n->pressureBar;
+            if (ImGui::InputFloat("Press. bar", &pressure, 0, 0, "%.2f")) setNozzlePressure(id, pressure);
             if (ImGui::IsItemDeactivatedAfterEdit()) commitSimulationEdit();
             ImGui::TextDisabled("Half-angle 180 = full spray ball. Pressure is for CFD; Tier 1 uses flow.");
 
-            if (ImGui::Button("Delete nozzle", {-1, 0})) {
-                simulation_.removeNozzle(n->id);
-                simUi_.selectedNozzle = 0;
-                commitSimulationEdit();
-            }
+            if (ImGui::Button("Delete nozzle", {-1, 0})) deleteNozzle(id);
         }
     }
 
     // ---- run settings
     if (ImGui::CollapsingHeader("Run settings")) {
         ImGui::SetNextItemWidth(120);
-        ImGui::InputInt("Rays per nozzle", &simulation_.rays, 10000, 100000);
-        simulation_.rays = std::clamp(simulation_.rays, 1000, 5000000);
+        int rays = simulation_.rays;
+        if (ImGui::InputInt("Rays per nozzle", &rays, 10000, 100000)) setSimulationRays(rays);
         if (ImGui::IsItemDeactivatedAfterEdit()) commitSimulationEdit();
         ImGui::SetNextItemWidth(120);
-        ImGui::SliderInt("Splash bounces", &simulation_.bounces, 0, 4);
+        int bounces = simulation_.bounces;
+        if (ImGui::SliderInt("Splash bounces", &bounces, 0, 4)) setSimulationBounces(bounces);
         if (ImGui::IsItemDeactivatedAfterEdit()) commitSimulationEdit();
         ImGui::TextDisabled("Coverage is exact at any ray count; rays only sharpen the flux map.");
     }
@@ -435,9 +526,11 @@ void App::drawSimulationPanel() {
         ImGui::PopTextWrapPos();
     }
     ImGui::End();
+}
 
-    // Nozzle names beside their apexes (drawn here: labels must be emitted
-    // during the ImGui frame, and the 3D overlay renders after it).
+// Nozzle names beside their apexes, in the Simulation workspace.
+void App::drawNozzleLabels() {
+    if (workspace_ != Workspace::Simulation) return;
     int w, h;
     framebufferSize(w, h);
     float view[16], proj[16];

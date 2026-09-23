@@ -470,6 +470,19 @@ ratio and picking near the edges.
   the ImGui one (a dock would resize the view when the first feature appears); the same
   scenario gives the same results there. It tells App its height so the FPS readout
   clears it. Not yet exercised live: the error tooltip (needs a failing feature).
+- **Verification from here on** (2026-09-23): the pattern is proven, so later steps are
+  checked by building, the three test programs and a brief launch, not per-panel pixel
+  runs. Matching the ImGui look is no longer a goal (the design will change); matching
+  behaviour still is.
+- 5.9 simulation panel: done. `SimSetupModel`, `SimRunModel`, `SimResultsModel` and
+  their operations (surface roles, nozzle placing and every nozzle field, run settings,
+  engine paths, run / cancel, results field, ParaView, run folder) back both panels.
+  Discrete actions commit their own undo step; live edits commit on release or when a
+  field is finished. The selection fix-up and the nozzle labels moved out of the ImGui
+  panel so they run under either host. `src/qt/SimulationPanel.cpp` is a right-hand dock
+  shown in the Simulation workspace (a workspace switch is a deliberate mode change, so
+  the view may resize there); it holds the Section controls from 5.7. Checked by a
+  launch into the workspace; nozzle editing and a real run not exercised in Qt.
 
 ## Phase 6: remove ImGui and GLFW
 

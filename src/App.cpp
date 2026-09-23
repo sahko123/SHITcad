@@ -563,7 +563,9 @@ void App::renderFrame() {
     }
     if (!hostHas(HostMeshImport)) drawMeshImportDialog();
     pollSimulationRun(); // every frame, whichever workspace is showing
-    drawSimulationPanel();
+    validateSimulationSelection();
+    if (!hostHas(HostSimulation)) drawSimulationPanel();
+    drawNozzleLabels();
     validateMeshPlace();
     if (!hostHas(HostMeshPlace)) drawMeshPlacePanel();
     drawMeshHoverReadout();
