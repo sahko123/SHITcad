@@ -159,9 +159,52 @@ void App::handleRevolveInput(float vpW, float vpH) {
     }
 }
 
+App::RevolvePanelModel App::revolvePanelModel() const {
+    RevolvePanelModel m;
+    m.open = tool_.type == ToolType::Revolve && hasRevolveSketch();
+    if (!m.open) return m;
+    m.operation = (int)revolveTool_.operation;
+    m.angleText = revolveTool_.angleBuf;
+    m.axisLine = revolveTool_.axisLineID;
+    m.selectingAxis = revolveTool_.phase == RevolvePhase::SelectingAxis;
+    m.selectedProfiles = (int)revolveTool_.selectedProfileIndices.size();
+    m.totalProfiles = (int)revolveTool_.allProfiles.size();
+    m.canCommit = revolveTool_.hasSelectedProfiles() && revolveTool_.axisLineID != NullID;
+    return m;
+}
+
+void App::setRevolveOperation(int op) {
+    if (op == (int)ExtrudeOperation::Cut && scene_.empty()) return;   // nothing to cut
+    revolveTool_.operation = (ExtrudeOperation)op;
+    revolveTool_.previewDirty = true;
+}
+
+void App::setRevolveAngleText(const std::string& text) {
+    snprintf(revolveTool_.angleBuf, sizeof(revolveTool_.angleBuf), "%s", text.c_str());
+    float val = (float)atof(revolveTool_.angleBuf);
+    if (std::fabs(val) > 0.01f) {
+        revolveTool_.angleDeg = val;
+        revolveTool_.previewDirty = true;
+    } else {
+        snprintf(revolveTool_.angleBuf, sizeof(revolveTool_.angleBuf), "%.1f", revolveTool_.angleDeg);
+    }
+}
+
+void App::pickRevolveAxis(bool clearCurrent) {
+    revolveTool_.phase = RevolvePhase::SelectingAxis;
+    if (clearCurrent) {
+        revolveTool_.axisLineID = NullID;
+        revolveTool_.previewDirty = true;
+    }
+}
+
+void App::pickRevolveProfiles() { revolveTool_.phase = RevolvePhase::SelectingProfiles; }
+
+// ImGui front end for RevolvePanelModel (the Qt one is src/qt/ToolPanel.cpp).
 void App::drawRevolvePanel() {
     ImGuiIO& io = ImGui::GetIO();
     float panelW = 220.0f;
+    const RevolvePanelModel m = revolvePanelModel();
 
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, {10, 10});
     ImGui::SetNextWindowPos({io.DisplaySize.x - panelW, 30});
@@ -173,67 +216,33 @@ void App::drawRevolvePanel() {
     // Operation
     ImGui::Text("Operation:");
     const char* opNames[] = {"New Body", "Cut"};
-    int opIdx = (int)revolveTool_.operation;
-    if (ImGui::Combo("##revOp", &opIdx, opNames, 2)) {
-        if (opIdx == (int)ExtrudeOperation::Cut && scene_.empty()) {
-            // Don't allow
-        } else {
-            revolveTool_.operation = (ExtrudeOperation)opIdx;
-            revolveTool_.previewDirty = true;
-        }
-    }
+    int opIdx = m.operation;
+    if (ImGui::Combo("##revOp", &opIdx, opNames, 2)) setRevolveOperation(opIdx);
 
-    // Angle
+    // Angle: applied on Enter, or when the field loses focus after an edit
     ImGui::Text("Angle (deg):");
     if (ImGui::InputText("##revAngle", revolveTool_.angleBuf, sizeof(revolveTool_.angleBuf),
-            ImGuiInputTextFlags_EnterReturnsTrue)) {
-        float val = (float)atof(revolveTool_.angleBuf);
-        if (std::fabs(val) > 0.01f) {
-            revolveTool_.angleDeg = val;
-            revolveTool_.previewDirty = true;
-        } else {
-            snprintf(revolveTool_.angleBuf, sizeof(revolveTool_.angleBuf), "%.1f", revolveTool_.angleDeg);
-        }
-    }
-    if (ImGui::IsItemDeactivatedAfterEdit()) {
-        float val = (float)atof(revolveTool_.angleBuf);
-        if (std::fabs(val) > 0.01f) {
-            revolveTool_.angleDeg = val;
-            revolveTool_.previewDirty = true;
-        } else {
-            snprintf(revolveTool_.angleBuf, sizeof(revolveTool_.angleBuf), "%.1f", revolveTool_.angleDeg);
-        }
-    }
+            ImGuiInputTextFlags_EnterReturnsTrue))
+        setRevolveAngleText(revolveTool_.angleBuf);
+    if (ImGui::IsItemDeactivatedAfterEdit()) setRevolveAngleText(revolveTool_.angleBuf);
 
     // Axis info
     ImGui::Separator();
-    if (revolveTool_.axisLineID != NullID) {
-        ImGui::Text("Axis: Line %u", revolveTool_.axisLineID);
-        if (ImGui::Button("Change Axis")) {
-            revolveTool_.phase = RevolvePhase::SelectingAxis;
-            revolveTool_.axisLineID = NullID;
-            revolveTool_.previewDirty = true;
-        }
-    } else {
-        if (revolveTool_.phase == RevolvePhase::SelectingAxis) {
-            ImGui::TextColored(ImVec4(1,0.8f,0,1), "Click a line for axis");
-        } else {
-            if (ImGui::Button("Select Axis")) {
-                revolveTool_.phase = RevolvePhase::SelectingAxis;
-            }
-        }
+    if (m.axisLine != NullID) {
+        ImGui::Text("Axis: Line %u", m.axisLine);
+        if (ImGui::Button("Change Axis")) pickRevolveAxis(true);
+    } else if (m.selectingAxis) {
+        ImGui::TextColored(ImVec4(1,0.8f,0,1), "Click a line for axis");
+    } else if (ImGui::Button("Select Axis")) {
+        pickRevolveAxis(false);
     }
 
-    // Profile info
+    // Profile info. The phase is read again: the axis buttons above change it.
     ImGui::Separator();
-    ImGui::Text("Profiles: %d / %d",
-                (int)revolveTool_.selectedProfileIndices.size(),
-                (int)revolveTool_.allProfiles.size());
+    ImGui::Text("Profiles: %d / %d", m.selectedProfiles, m.totalProfiles);
 
     if (revolveTool_.phase != RevolvePhase::SelectingAxis) {
-        if (ImGui::Button("Select Profiles")) {
-            revolveTool_.phase = RevolvePhase::SelectingProfiles;
-        }
+        if (ImGui::Button("Select Profiles")) pickRevolveProfiles();
     }
 
     // OK / Cancel

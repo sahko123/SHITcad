@@ -246,9 +246,55 @@ void App::handleExtrudeInput(float vpW, float vpH) {
     }
 }
 
+App::ExtrudePanelModel App::extrudePanelModel() const {
+    ExtrudePanelModel m;
+    m.open = tool_.type == ToolType::Extrude && hasExtrudeSketch();
+    if (!m.open) return m;
+    m.operation = (int)extrudeTool_.operation;
+    m.cutAllowed = !scene_.empty();
+    m.distanceText = extrudeTool_.heightBuf;
+    m.offsetText = extrudeTool_.offsetBuf;
+    m.direction = (int)extrudeTool_.direction;
+    m.selectedProfiles = (int)extrudeTool_.selectedProfileIndices.size();
+    m.totalProfiles = (int)extrudeTool_.allProfiles.size();
+    m.canCommit = extrudeTool_.hasSelectedProfiles();
+    return m;
+}
+
+void App::setExtrudeOperation(int op) {
+    if (op == (int)ExtrudeOperation::Cut && scene_.empty()) return;   // nothing to cut
+    extrudeTool_.operation = (ExtrudeOperation)op;
+    extrudeTool_.previewDirty = true;
+}
+
+void App::setExtrudeDistanceText(const std::string& text) {
+    snprintf(extrudeTool_.heightBuf, sizeof(extrudeTool_.heightBuf), "%s", text.c_str());
+    float val = (float)atof(extrudeTool_.heightBuf);
+    if (val > 0.001f) {
+        extrudeTool_.height = val;
+        extrudeTool_.previewDirty = true;
+    } else {
+        // Revert to last valid value
+        snprintf(extrudeTool_.heightBuf, sizeof(extrudeTool_.heightBuf), "%.3f", extrudeTool_.height);
+    }
+}
+
+void App::setExtrudeDirection(int dir) {
+    extrudeTool_.direction = (ExtrudeDirection)dir;
+    extrudeTool_.previewDirty = true;
+}
+
+void App::setExtrudeOffsetText(const std::string& text) {
+    snprintf(extrudeTool_.offsetBuf, sizeof(extrudeTool_.offsetBuf), "%s", text.c_str());
+    extrudeTool_.offset = (float)atof(extrudeTool_.offsetBuf);
+    extrudeTool_.previewDirty = true;
+}
+
+// ImGui front end for ExtrudePanelModel (the Qt one is src/qt/ToolPanel.cpp).
 void App::drawExtrudePanel() {
     ImGuiIO& io = ImGui::GetIO();
     float panelW = 220.0f;
+    const ExtrudePanelModel m = extrudePanelModel();
 
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, {10, 10});
     ImGui::SetNextWindowPos({io.DisplaySize.x - panelW, 30});
@@ -260,79 +306,40 @@ void App::drawExtrudePanel() {
     // Operation
     ImGui::Text("Operation:");
     const char* opNames[] = {"New Body", "Cut"};
-    int opIdx = (int)extrudeTool_.operation;
-    bool cutDisabled = (extrudeTool_.operation != ExtrudeOperation::Cut && scene_.empty());
-    if (cutDisabled) {
-        // Can't switch to Cut if no bodies exist — but allow if already Cut
-    }
-    if (ImGui::Combo("##op", &opIdx, opNames, 2)) {
-        if (opIdx == (int)ExtrudeOperation::Cut && scene_.empty()) {
-            // Don't allow Cut when no bodies
-        } else {
-            extrudeTool_.operation = (ExtrudeOperation)opIdx;
-            extrudeTool_.previewDirty = true;
-        }
-    }
+    int opIdx = m.operation;
+    if (ImGui::Combo("##op", &opIdx, opNames, 2)) setExtrudeOperation(opIdx);
 
-    // Distance
+    // Distance: applied on Enter, or when the field loses focus after an edit
     ImGui::Text("Distance:");
     if (ImGui::InputText("##dist", extrudeTool_.heightBuf, sizeof(extrudeTool_.heightBuf),
-            ImGuiInputTextFlags_EnterReturnsTrue)) {
-        float val = (float)atof(extrudeTool_.heightBuf);
-        if (val > 0.001f) {
-            extrudeTool_.height = val;
-            extrudeTool_.previewDirty = true;
-        } else {
-            // Revert to last valid value
-            snprintf(extrudeTool_.heightBuf, sizeof(extrudeTool_.heightBuf), "%.3f", extrudeTool_.height);
-        }
-    }
-    // Also sync on deactivation (user tabs away or clicks elsewhere)
-    if (ImGui::IsItemDeactivatedAfterEdit()) {
-        float val = (float)atof(extrudeTool_.heightBuf);
-        if (val > 0.001f) {
-            extrudeTool_.height = val;
-            extrudeTool_.previewDirty = true;
-        } else {
-            snprintf(extrudeTool_.heightBuf, sizeof(extrudeTool_.heightBuf), "%.3f", extrudeTool_.height);
-        }
-    }
+            ImGuiInputTextFlags_EnterReturnsTrue))
+        setExtrudeDistanceText(extrudeTool_.heightBuf);
+    if (ImGui::IsItemDeactivatedAfterEdit()) setExtrudeDistanceText(extrudeTool_.heightBuf);
 
     // Direction
     ImGui::Text("Direction:");
     const char* dirNames[] = {"One Side", "Other Side", "Both Sides", "Symmetric"};
-    int dirIdx = (int)extrudeTool_.direction;
-    if (ImGui::Combo("##dir", &dirIdx, dirNames, 4)) {
-        extrudeTool_.direction = (ExtrudeDirection)dirIdx;
-        extrudeTool_.previewDirty = true;
-    }
+    int dirIdx = m.direction;
+    if (ImGui::Combo("##dir", &dirIdx, dirNames, 4)) setExtrudeDirection(dirIdx);
 
     // Offset
     ImGui::Text("Offset:");
     if (ImGui::InputText("##offset", extrudeTool_.offsetBuf, sizeof(extrudeTool_.offsetBuf),
-            ImGuiInputTextFlags_EnterReturnsTrue)) {
-        extrudeTool_.offset = (float)atof(extrudeTool_.offsetBuf);
-        extrudeTool_.previewDirty = true;
-    }
-    if (ImGui::IsItemDeactivatedAfterEdit()) {
-        extrudeTool_.offset = (float)atof(extrudeTool_.offsetBuf);
-        extrudeTool_.previewDirty = true;
-    }
+            ImGuiInputTextFlags_EnterReturnsTrue))
+        setExtrudeOffsetText(extrudeTool_.offsetBuf);
+    if (ImGui::IsItemDeactivatedAfterEdit()) setExtrudeOffsetText(extrudeTool_.offsetBuf);
 
     // Profile info
     ImGui::Separator();
-    ImGui::Text("Profiles: %d / %d",
-                (int)extrudeTool_.selectedProfileIndices.size(),
-                (int)extrudeTool_.allProfiles.size());
+    ImGui::Text("Profiles: %d / %d", m.selectedProfiles, m.totalProfiles);
 
     // OK / Cancel
     ImGui::Separator();
-    bool canCommit = extrudeTool_.hasSelectedProfiles();
-    if (!canCommit) ImGui::BeginDisabled();
+    if (!m.canCommit) ImGui::BeginDisabled();
     if (ImGui::Button("OK [Enter]", {95, 0})) {
         commitExtrude();
     }
-    if (!canCommit) ImGui::EndDisabled();
+    if (!m.canCommit) ImGui::EndDisabled();
     ImGui::SameLine();
     if (ImGui::Button("Cancel [Esc]", {95, 0})) {
         cancelExtrude();

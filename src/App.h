@@ -205,6 +205,73 @@ public:
     void setBodyVisible(int bodyIndex, bool visible);
     void editPlaneSketch(int planeIndex); // enterSketchMode, ignoring a stale index
 
+    // ---- Tool panels. Typed values are applied as the ImGui fields apply
+    // them, on Enter or when the field loses focus; an invalid value puts
+    // back the last good one.
+    struct ExtrudePanelModel {
+        bool open = false;
+        int operation = 0;             // ExtrudeOperation
+        bool cutAllowed = false;       // Cut needs a body to cut
+        std::string distanceText, offsetText;
+        int direction = 0;             // ExtrudeDirection
+        int selectedProfiles = 0, totalProfiles = 0;
+        bool canCommit = false;
+    };
+    ExtrudePanelModel extrudePanelModel() const;
+    void setExtrudeOperation(int op);
+    void setExtrudeDistanceText(const std::string& text);
+    void setExtrudeDirection(int dir);
+    void setExtrudeOffsetText(const std::string& text);
+    void commitExtrude();
+    void cancelExtrude();
+
+    struct RevolvePanelModel {
+        bool open = false;
+        int operation = 0;             // ExtrudeOperation
+        std::string angleText;
+        uint32_t axisLine = 0;         // EntityID, 0 while none is picked
+        bool selectingAxis = false;
+        int selectedProfiles = 0, totalProfiles = 0;
+        bool canCommit = false;
+    };
+    RevolvePanelModel revolvePanelModel() const;
+    void setRevolveOperation(int op);
+    void setRevolveAngleText(const std::string& text);
+    void pickRevolveAxis(bool clearCurrent);   // next line clicked becomes the axis
+    void pickRevolveProfiles();
+    void commitRevolve();
+    void cancelRevolve();
+
+    struct LoftPanelModel {
+        bool open = false;
+        struct Section { int plane, profile, profileCount; };
+        std::vector<Section> sections;
+        struct Candidate { int plane; std::string label; };
+        std::vector<Candidate> candidates;   // sketch planes with profiles, not yet used
+        bool solid = true;
+        bool canCommit = false;
+    };
+    LoftPanelModel loftPanelModel() const;
+    void addLoftSection(int planeIndex);
+    void removeLoftSection(int section);
+    void setLoftSectionProfile(int section, int profile);
+    void setLoftSolid(bool solid);
+    void commitLoft();
+    void cancelLoft();
+
+    struct BooleanPanelModel {
+        bool open = false;
+        bool isUnion = true;
+        int target = -1, tool = -1;    // body indices, -1 until picked
+        bool previewValid = false;
+        bool canCommit = false;
+    };
+    BooleanPanelModel booleanPanelModel() const;
+    void clearBooleanTarget();         // clears the tool body too
+    void clearBooleanTool();
+    void commitBoolean();
+    void cancelBoolean();
+
     // Panels the host draws itself (Qt); App then skips their ImGui versions.
     enum HostPanel : uint32_t {
         HostToolbar     = 1u << 0,
@@ -214,6 +281,7 @@ public:
         HostAddPlane    = 1u << 4,
         HostTangentPlane = 1u << 5,
         HostObjectTree  = 1u << 6,
+        HostToolPanels  = 1u << 7,     // extrude, revolve, loft, boolean
     };
     void setHostPanel(HostPanel p, bool on = true) { hostPanels_ = on ? (hostPanels_ | p) : (hostPanels_ & ~p); }
     bool hostHas(HostPanel p) const { return (hostPanels_ & p) != 0; }
@@ -510,29 +578,21 @@ private:
     void renderExtrudePreview(const float* view, const float* proj, const float* eyePos);
     void renderExtrudeHandle(const float* view, const float* proj, float vpW, float vpH);
     void renderDimensions(const float view[16], const float proj[16], float vpW, float vpH);
-    void commitExtrude();
-    void cancelExtrude();
     void editExtrudeFeature(FeatureID id);
     void handleRevolveInput(float vpW, float vpH);
     void drawRevolvePanel();
     void updateRevolvePreview();
     void renderRevolvePreview(const float* view, const float* proj, const float* eyePos);
-    void commitRevolve();
-    void cancelRevolve();
     void editRevolveFeature(FeatureID id);
     void handleLoftInput(float vpW, float vpH);
     void drawLoftPanel();
     void updateLoftPreview();
     void renderLoftPreview(const float* view, const float* proj, const float* eyePos);
-    void commitLoft();
-    void cancelLoft();
     void editLoftFeature(FeatureID id);
     void handleBooleanInput(float vpW, float vpH);
     void drawBooleanPanel();
     void updateBooleanPreview();
     void renderBooleanPreview(const float* view, const float* proj, const float* eyePos);
-    void commitBoolean();
-    void cancelBoolean();
     void saveProjectDialog();
     void openProjectDialog();
     void exportStlDialog();

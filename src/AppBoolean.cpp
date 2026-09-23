@@ -61,6 +61,31 @@ void App::handleBooleanInput(float vpW, float vpH) {
     }
 }
 
+App::BooleanPanelModel App::booleanPanelModel() const {
+    BooleanPanelModel m;
+    m.open = isBooleanActive();
+    if (!m.open) return m;
+    m.isUnion = booleanTool_.operation == BooleanOperation::Union;
+    m.target = booleanTool_.targetBodyIndex;
+    m.tool = booleanTool_.toolBodyIndex;
+    m.previewValid = booleanTool_.previewValid;
+    m.canCommit = booleanTool_.canCommit();
+    return m;
+}
+
+void App::clearBooleanTarget() {
+    booleanTool_.targetBodyIndex = -1;
+    booleanTool_.toolBodyIndex = -1;
+    booleanTool_.previewValid = false;
+}
+
+void App::clearBooleanTool() {
+    booleanTool_.toolBodyIndex = -1;
+    booleanTool_.previewValid = false;
+}
+
+// ImGui front end for BooleanPanelModel (the Qt one is src/qt/ToolPanel.cpp).
+// Widgets read the tool live, as before: a Clear changes what follows it.
 void App::drawBooleanPanel() {
     ImGui::SetNextWindowPos({ImGui::GetMainViewport()->WorkPos.x + ImGui::GetMainViewport()->WorkSize.x - 250,
                              ImGui::GetMainViewport()->WorkPos.y + 60}, ImGuiCond_Always);
@@ -81,11 +106,7 @@ void App::drawBooleanPanel() {
     if (booleanTool_.hasTarget()) {
         ImGui::Text("Target: Body %d", booleanTool_.targetBodyIndex);
         ImGui::SameLine();
-        if (ImGui::SmallButton("Clear##target")) {
-            booleanTool_.targetBodyIndex = -1;
-            booleanTool_.toolBodyIndex = -1;
-            booleanTool_.previewValid = false;
-        }
+        if (ImGui::SmallButton("Clear##target")) clearBooleanTarget();
     } else {
         ImGui::TextColored({1, 1, 0, 1}, "Click to select target body");
     }
@@ -97,10 +118,7 @@ void App::drawBooleanPanel() {
         else
             ImGui::Text("Tool:  Body %d", booleanTool_.toolBodyIndex);
         ImGui::SameLine();
-        if (ImGui::SmallButton("Clear##tool")) {
-            booleanTool_.toolBodyIndex = -1;
-            booleanTool_.previewValid = false;
-        }
+        if (ImGui::SmallButton("Clear##tool")) clearBooleanTool();
     } else if (booleanTool_.hasTarget()) {
         if (booleanTool_.operation == BooleanOperation::Union)
             ImGui::TextColored({1, 1, 0, 1}, "Click another body to combine");

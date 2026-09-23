@@ -434,6 +434,21 @@ ratio and picking near the edges.
   with the tree focused: O, Ctrl+Z, Ctrl+Y, L in a sketch, Escape, T, plus the dock's
   close button and T bringing it back. `QAction`s can come with a menu bar; they are not
   needed for the shortcuts to work.
+- 5.6 tool panels: done for Extrude, Revolve, Loft and Boolean. Each has a panel model
+  and named operations (typed values applied on Enter or focus loss with the old
+  revert-on-invalid rule, combos, axis picking, loft sections, boolean clears), and the
+  four ImGui panels were rewritten onto them without a pixel changing (typed distance,
+  offset and angle, both combos, the refused Cut, OK, axis picking, union pick and
+  clear, loft add/profile/solid/remove). Two changes from the plan: the Qt panel
+  (`src/qt/ToolPanel.cpp`) is a frame floating over the viewport's top-right corner,
+  not a dock, because a dock appearing with every tool would resize and shift the 3D
+  view; and the **dimension panel moves in 5.10**, since its value field stays focused
+  while the label is placed with the mouse, the same problem as the inline input.
+  In the Qt panel Enter applies a field and hands the keyboard back (a second Enter
+  commits, as in ImGui), Escape leaves a field unapplied without cancelling the tool.
+  Found while testing: `QLineEdit` ignores Return after applying it, so the key bubbles
+  to its parents after focus has already moved; KeyRouting now routes an event only
+  where it is first delivered, or that Return committed the tool.
 
 ## Phase 6: remove ImGui and GLFW
 

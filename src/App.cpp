@@ -539,10 +539,12 @@ void App::renderFrame() {
     profiler_.end();
 
     // Extrude panel
-    if (tool_.type == ToolType::Extrude && hasExtrudeSketch()) drawExtrudePanel();
-    if (tool_.type == ToolType::Revolve && hasRevolveSketch()) drawRevolvePanel();
-    if (tool_.type == ToolType::Loft) drawLoftPanel();
-    if (isBooleanActive()) drawBooleanPanel();
+    if (!hostHas(HostToolPanels)) {
+        if (tool_.type == ToolType::Extrude && hasExtrudeSketch()) drawExtrudePanel();
+        if (tool_.type == ToolType::Revolve && hasRevolveSketch()) drawRevolvePanel();
+        if (tool_.type == ToolType::Loft) drawLoftPanel();
+        if (isBooleanActive()) drawBooleanPanel();
+    }
 
     // Dimension panel
     if (tool_.type == ToolType::Dimension && activeSketchPlane_ >= 0) drawDimensionPanel(activeSketch());

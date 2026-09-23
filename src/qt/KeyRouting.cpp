@@ -43,7 +43,8 @@ bool KeyRouting::eventFilter(QObject* obj, QEvent* e) {
     auto* ke = static_cast<QKeyEvent*>(e);
     const quint32 scan = ke->nativeScanCode();
 
-    if (w == viewport_ || viewport_->isAncestorOf(w)) {
+    // Widgets inside the viewport (the tool panel) are routed like the docks.
+    if (w == viewport_) {
         if (e->type() == QEvent::KeyRelease && !ke->isAutoRepeat()) held_.remove(scan);
         return false;
     }
@@ -60,7 +61,13 @@ bool KeyRouting::eventFilter(QObject* obj, QEvent* e) {
         if (!dock || dock->parentWidget() != window_) return false;
     }
 
-    if (isTextInput(QApplication::focusWidget())) return false;
+    // Route an event once, where it is first delivered (to the focus widget).
+    // An event a widget ignored then travels up its parents, and the focus
+    // may have moved meanwhile: QLineEdit applies a value on Return, then
+    // ignores the key, and that Return must not also commit the tool.
+    QWidget* focus = QApplication::focusWidget();
+    if (focus && w != focus) return false;
+    if (isTextInput(focus)) return false;
     if (isNavigationKey(ke->key()) && !(ke->modifiers() & Qt::ControlModifier) &&
         !viewport_->wantsTextInput())
         return false;
