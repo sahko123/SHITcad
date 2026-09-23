@@ -1,9 +1,9 @@
 # Qt Widgets migration plan
 
 Goal: replace GLFW + Dear ImGui with Qt 6 Widgets, and leave the CAD core and the
-3D viewport as layers that do not know which GUI toolkit hosts them. Cross-platform
-is a goal, but for now nothing is built, run or debugged on Linux: the code stays
-portable where it is cheap to (Phase 7), and a Linux build comes later.
+3D viewport as layers that do not know which GUI toolkit hosts them. Phases 0-6 are
+done. The app stays **Windows-only for now**: Phase 7 (portable replacements and a
+Linux build) is deferred until cross-platform is wanted.
 
 ## Rules for every phase
 
@@ -543,7 +543,11 @@ ratio and picking near the edges.
   (the overlay uses Qt's font). Checked: build and the three test programs (same check
   counts; the GL checks run on the offscreen context).
 
-## Phase 7: platform layer and cross-platform build (can start after Phase 4)
+## Phase 7: platform layer and cross-platform build (deferred)
+
+**Deferred (2026-09-23): Windows only for now.** Nothing below is to be done until a
+non-Windows build is wanted. The Windows-specific code stays as it is. The table
+records what would need replacing then.
 
 | Today (Windows-only) | Replacement |
 |---|---|
