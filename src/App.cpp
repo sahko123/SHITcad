@@ -571,8 +571,15 @@ void App::renderFrame() {
     // Timeline
     float timelineH = 0.0f;
     if (timelineOpen_ && !featureHistory_.empty()) {
-        timelineH = ImGui::GetFrameHeight() + ImGui::GetStyle().WindowPadding.y * 2.0f;
-        drawTimeline(panelW);
+        if (!hostHas(HostTimeline)) {
+            timelineH = ImGui::GetFrameHeight() + ImGui::GetStyle().WindowPadding.y * 2.0f;
+            drawTimeline(panelW);
+        } else {
+            // What the ImGui timeline does besides drawing itself
+            timelineH = hostTimelineH_;
+            if (playheadDragging_) tickPlayhead();
+            if (in_.keyPressed(Key::Delete) && !in_.uiWantsKeyboard) deleteSelectedFeature();
+        }
     }
 
     // FPS / frametime overlay

@@ -293,6 +293,39 @@ public:
     void centreSection();
     void setSectionCap(bool cap) { section_.cap = cap; }
 
+    // ---- Timeline: one button per feature, and a playhead that rolls the
+    // model back. Right-clicking a feature renames, suppresses or deletes it.
+    struct TimelineModel {
+        bool visible = false;
+        struct Item {
+            uint32_t id;               // FeatureID
+            std::string name;
+            float rgb[3];              // button colour (grey when suppressed or rolled back)
+            bool grayed, error, selected, suppressed;
+            bool canPlace;             // a mesh import that can be rotated / moved
+            std::string errorMsg;
+        };
+        std::vector<Item> items;
+        int playhead = -1;             // index of the last feature in effect
+        bool dragging = false;         // the playhead is being dragged
+    };
+    TimelineModel timelineModel() const;
+    void selectFeature(FeatureID id) { selectedFeatureID_ = id; }
+    void editFeature(FeatureID id);    // what double-clicking it does
+    void renameFeature(FeatureID id, const std::string& name);
+    void setFeatureSuppressed(FeatureID id, bool suppressed);
+    void deleteFeature(FeatureID id);  // with its dependents, as one undo step
+    // Playhead drag: positions are feature indices, -1 for the end. The
+    // replay waits until the playhead has rested for 150 ms, or the drag ends;
+    // the drag is one undo step.
+    void beginPlayheadDrag();
+    void movePlayhead(int pos);
+    void tickPlayhead();               // every frame while dragging
+    void endPlayheadDrag();
+    // Height of the host's timeline over the bottom of the view, so the
+    // overlays above it (the FPS readout) clear it.
+    void setHostTimelineHeight(float px) { hostTimelineH_ = px; }
+
     // Panels the host draws itself (Qt); App then skips their ImGui versions.
     enum HostPanel : uint32_t {
         HostToolbar     = 1u << 0,
@@ -304,6 +337,7 @@ public:
         HostObjectTree  = 1u << 6,
         HostToolPanels  = 1u << 7,     // extrude, revolve, loft, boolean
         HostSection     = 1u << 8,     // the Model workspace's Section window
+        HostTimeline    = 1u << 9,
     };
     void setHostPanel(HostPanel p, bool on = true) { hostPanels_ = on ? (hostPanels_ | p) : (hostPanels_ & ~p); }
     bool hostHas(HostPanel p) const { return (hostPanels_ & p) != 0; }
@@ -401,6 +435,8 @@ private:
     bool playheadReplayPending_ = false; // deferred replay during drag
     std::chrono::steady_clock::time_point playheadLastMoveTime_; // for idle detection
     FeatureID selectedFeatureID_ = NullFeatureID; // timeline selection
+    bool playheadDragging_ = false;
+    float hostTimelineH_ = 0.0f;
 
     // Save/load
     std::string currentFilePath_;
@@ -591,6 +627,7 @@ private:
     void drawAddPlaneDialog();
     void drawTangentPlaneDialog();
     void drawTimeline(float panelW);
+    bool deleteSelectedFeature();      // the Delete key on the timeline selection
     void replayAllFeatures();
     void globalUndo();
     void globalRedo();

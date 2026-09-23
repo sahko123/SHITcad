@@ -864,6 +864,182 @@ void App::markDirty() {
     }
 }
 
+// ---- Timeline -------------------------------------------------------------------
+
+// Button colour by feature type and state.
+static void featureColor(const Feature& feat, bool grayed, float rgb[3]) {
+    auto set = [rgb](float r, float g, float b) { rgb[0] = r; rgb[1] = g; rgb[2] = b; };
+    set(0.0f, 0.0f, 0.0f);
+    if (grayed) {
+        set(0.4f, 0.4f, 0.4f);
+    } else if (feat.hasError) {
+        set(0.8f, 0.2f, 0.2f);
+    } else if (feat.type == FeatureType::Sketch) {
+        set(0.3f, 0.5f, 0.9f);
+    } else if (feat.type == FeatureType::Extrude) {
+        const auto& ed = std::get<ExtrudeFeatureData>(feat.data);
+        if (ed.operation == ExtrudeOperation::Cut) set(0.9f, 0.4f, 0.2f);
+        else set(0.9f, 0.6f, 0.2f);
+    } else if (feat.type == FeatureType::Revolve) {
+        const auto& rd = std::get<RevolveFeatureData>(feat.data);
+        if (rd.operation == ExtrudeOperation::Cut) set(0.9f, 0.3f, 0.5f);
+        else set(0.7f, 0.4f, 0.9f);
+    } else if (feat.type == FeatureType::Loft) {
+        set(0.3f, 0.8f, 0.5f);
+    } else if (feat.type == FeatureType::Boolean) {
+        const auto& bd = std::get<BooleanFeatureData>(feat.data);
+        if (bd.operation == BooleanOperation::Subtract) set(0.9f, 0.3f, 0.3f);
+        else set(0.2f, 0.7f, 0.9f);
+    } else if (feat.type == FeatureType::MeshImport) {
+        set(0.45f, 0.55f, 0.55f);
+    }
+}
+
+App::TimelineModel App::timelineModel() const {
+    TimelineModel m;
+    m.visible = timelineOpen_ && !featureHistory_.empty();
+    if (!m.visible) return m;
+    const auto& features = featureHistory_.features();
+    for (int i = 0; i < (int)features.size(); i++) {
+        const Feature& feat = features[i];
+        const bool rolledBack = featureHistory_.isRolledBack(i);
+        TimelineModel::Item item;
+        item.id = feat.id;
+        item.name = feat.name;
+        item.grayed = feat.suppressed || rolledBack;
+        featureColor(feat, item.grayed, item.rgb);
+        item.error = feat.hasError;
+        item.errorMsg = feat.errorMsg;
+        item.selected = feat.id == selectedFeatureID_;
+        item.suppressed = feat.suppressed;
+        item.canPlace = feat.type == FeatureType::MeshImport && !feat.suppressed && !rolledBack;
+        m.items.push_back(std::move(item));
+    }
+    const int rollbackPos = featureHistory_.rollbackPos();
+    m.playhead = rollbackPos >= 0 ? rollbackPos : (int)features.size() - 1;
+    m.dragging = playheadDragging_;
+    return m;
+}
+
+void App::editFeature(FeatureID id) {
+    const Feature* found = featureHistory_.findFeature(id);
+    if (!found || found->suppressed) return;
+    if (featureHistory_.isRolledBack(featureHistory_.featureIndex(id))) return;
+    const Feature feat = *found;   // editing may change the history
+    if (feat.type == FeatureType::Sketch) {
+        const auto& sd = std::get<SketchFeatureData>(feat.data);
+        if (mode_ != InteractionMode::Sketching) {
+            enterSketchMode(sd.sketchPlaneIndex);
+            selectedFeatureID_ = NullFeatureID; // deselect so Delete targets sketch geometry
+        }
+    } else if (feat.type == FeatureType::Extrude) {
+        editExtrudeFeature(feat.id);
+        selectedFeatureID_ = NullFeatureID;
+    } else if (feat.type == FeatureType::Revolve) {
+        editRevolveFeature(feat.id);
+        selectedFeatureID_ = NullFeatureID;
+    } else if (feat.type == FeatureType::Loft) {
+        editLoftFeature(feat.id);
+        selectedFeatureID_ = NullFeatureID;
+    } else if (feat.type == FeatureType::MeshImport) {
+        editMeshImportFeature(feat.id);
+    }
+}
+
+void App::renameFeature(FeatureID id, const std::string& name) {
+    const Feature* feat = featureHistory_.findFeature(id);
+    if (!feat) return;
+    UndoCommand cmd;
+    cmd.type = UndoActionType::RenameFeature;
+    cmd.featureID = id;
+    cmd.oldName = feat->name;
+    cmd.newName = name;
+    globalUndo_.push(std::move(cmd)); markDirty();
+    featureHistory_.renameFeature(id, name);
+}
+
+void App::setFeatureSuppressed(FeatureID id, bool suppressed) {
+    const Feature* feat = featureHistory_.findFeature(id);
+    if (!feat || feat->suppressed == suppressed) return;
+    UndoCommand cmd;
+    cmd.type = suppressed ? UndoActionType::SuppressFeature : UndoActionType::UnsuppressFeature;
+    cmd.featureID = id;
+    globalUndo_.push(std::move(cmd)); markDirty();
+    if (suppressed) featureHistory_.suppressFeature(id);
+    else featureHistory_.unsuppressFeature(id);
+    replayAllFeatures();
+}
+
+void App::deleteFeature(FeatureID id) {
+    const Feature* feat = featureHistory_.findFeature(id);
+    if (!feat) return;
+    // Collect the feature and its dependents with their indices before deleting
+    UndoCommand cmd;
+    cmd.type = UndoActionType::DeleteFeature;
+    cmd.featureID = id;
+    cmd.deletedFeatures.push_back({featureHistory_.featureIndex(id), *feat});
+    for (auto depID : featureHistory_.getDependents(id)) {
+        const Feature* depFeat = featureHistory_.findFeature(depID);
+        if (depFeat) cmd.deletedFeatures.push_back({featureHistory_.featureIndex(depID), *depFeat});
+    }
+    // Sort by index ascending for proper re-insertion on undo
+    std::sort(cmd.deletedFeatures.begin(), cmd.deletedFeatures.end(),
+        [](const auto& a, const auto& b) { return a.first < b.first; });
+    globalUndo_.push(std::move(cmd)); markDirty();
+    featureHistory_.deleteFeature(id);
+    replayAllFeatures();
+}
+
+bool App::deleteSelectedFeature() {
+    if (selectedFeatureID_ == NullFeatureID || !featureHistory_.findFeature(selectedFeatureID_)) return false;
+    deleteFeature(selectedFeatureID_);
+    selectedFeatureID_ = NullFeatureID;
+    return true;
+}
+
+void App::beginPlayheadDrag() {
+    dragStartRollbackPos_ = featureHistory_.rollbackPos();
+    playheadDragging_ = true;
+}
+
+void App::movePlayhead(int pos) {
+    if (pos != featureHistory_.rollbackPos()) {
+        featureHistory_.setRollbackPos(pos);
+        // Defer replay until mouse stops moving (150ms idle)
+        playheadReplayPending_ = true;
+        playheadLastMoveTime_ = std::chrono::steady_clock::now();
+    }
+}
+
+void App::tickPlayhead() {
+    if (!playheadReplayPending_) return;
+    auto elapsed = std::chrono::steady_clock::now() - playheadLastMoveTime_;
+    if (elapsed >= std::chrono::milliseconds(150)) {
+        replayAllFeatures();
+        playheadReplayPending_ = false;
+    }
+}
+
+void App::endPlayheadDrag() {
+    if (!playheadDragging_) return;
+    playheadDragging_ = false;
+    // Replay on drag release if still pending
+    if (playheadReplayPending_) {
+        replayAllFeatures();
+        playheadReplayPending_ = false;
+    }
+    // One undo step for the whole drag
+    const int rollbackPos = featureHistory_.rollbackPos();
+    if (dragStartRollbackPos_ != rollbackPos) {
+        UndoCommand cmd;
+        cmd.type = UndoActionType::SetRollbackPos;
+        cmd.oldRollbackPos = dragStartRollbackPos_;
+        cmd.newRollbackPos = rollbackPos;
+        globalUndo_.push(std::move(cmd)); markDirty();
+    }
+}
+
+// ImGui front end for TimelineModel (the Qt one is src/qt/Timeline.cpp).
 void App::drawTimeline(float panelW) {
     if (featureHistory_.empty()) return;
 
@@ -881,96 +1057,38 @@ void App::drawTimeline(float panelW) {
         ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoFocusOnAppearing |
         ImGuiWindowFlags_HorizontalScrollbar);
 
-    const auto& features = featureHistory_.features();
-    int rollbackPos = featureHistory_.rollbackPos();
-    int numFeatures = (int)features.size();
+    const TimelineModel m = timelineModel();
+    const int numFeatures = (int)m.items.size();
 
     // First pass: draw buttons and record their right edges (screen X)
     std::vector<float> buttonRightEdges(numFeatures);
-    float firstButtonLeft = 0.0f;
 
     for (int i = 0; i < numFeatures; i++) {
-        const Feature& feat = features[i];
+        const TimelineModel::Item& item = m.items[i];
 
         if (i > 0) ImGui::SameLine();
 
-        // Color based on type and state
-        ImVec4 col;
-        bool rolledBack = featureHistory_.isRolledBack(i);
-        bool grayed = feat.suppressed || rolledBack;
-
-        if (grayed) {
-            col = ImVec4(0.4f, 0.4f, 0.4f, 1.0f);
-        } else if (feat.hasError) {
-            col = ImVec4(0.8f, 0.2f, 0.2f, 1.0f);
-        } else if (feat.type == FeatureType::Sketch) {
-            col = ImVec4(0.3f, 0.5f, 0.9f, 1.0f);
-        } else if (feat.type == FeatureType::Extrude) {
-            const auto& ed = std::get<ExtrudeFeatureData>(feat.data);
-            if (ed.operation == ExtrudeOperation::Cut)
-                col = ImVec4(0.9f, 0.4f, 0.2f, 1.0f);
-            else
-                col = ImVec4(0.9f, 0.6f, 0.2f, 1.0f);
-        } else if (feat.type == FeatureType::Revolve) {
-            const auto& rd = std::get<RevolveFeatureData>(feat.data);
-            if (rd.operation == ExtrudeOperation::Cut)
-                col = ImVec4(0.9f, 0.3f, 0.5f, 1.0f);
-            else
-                col = ImVec4(0.7f, 0.4f, 0.9f, 1.0f);
-        } else if (feat.type == FeatureType::Loft) {
-            col = ImVec4(0.3f, 0.8f, 0.5f, 1.0f);
-        } else if (feat.type == FeatureType::Boolean) {
-            const auto& bd = std::get<BooleanFeatureData>(feat.data);
-            if (bd.operation == BooleanOperation::Subtract)
-                col = ImVec4(0.9f, 0.3f, 0.3f, 1.0f);
-            else
-                col = ImVec4(0.2f, 0.7f, 0.9f, 1.0f);
-        } else if (feat.type == FeatureType::MeshImport) {
-            col = ImVec4(0.45f, 0.55f, 0.55f, 1.0f);
-        }
-
+        const ImVec4 col(item.rgb[0], item.rgb[1], item.rgb[2], 1.0f);
         ImGui::PushStyleColor(ImGuiCol_Button, col);
         ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(col.x * 1.2f, col.y * 1.2f, col.z * 1.2f, 1.0f));
         ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(col.x * 0.8f, col.y * 0.8f, col.z * 0.8f, 1.0f));
 
-        if (feat.hasError && !grayed) {
+        const bool errorBorder = item.error && !item.grayed;
+        if (errorBorder) {
             ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(1.0f, 0.0f, 0.0f, 1.0f));
             ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 2.0f);
         }
 
         ImGui::PushID(i);
-        ImGui::Button(feat.name.c_str(), ImVec2(0, ImGui::GetFrameHeight()));
-
-        if (i == 0) firstButtonLeft = ImGui::GetItemRectMin().x;
+        ImGui::Button(item.name.c_str(), ImVec2(0, ImGui::GetFrameHeight()));
         buttonRightEdges[i] = ImGui::GetItemRectMax().x;
 
         // Click to select, double-click to edit
-        if (ImGui::IsItemClicked(0)) {
-            selectedFeatureID_ = feat.id;
-        }
-        if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(0)) {
-            if (feat.type == FeatureType::Sketch && !feat.suppressed && !rolledBack) {
-                const auto& sd = std::get<SketchFeatureData>(feat.data);
-                if (mode_ != InteractionMode::Sketching) {
-                    enterSketchMode(sd.sketchPlaneIndex);
-                    selectedFeatureID_ = NullFeatureID; // deselect so Delete targets sketch geometry
-                }
-            } else if (feat.type == FeatureType::Extrude && !feat.suppressed && !rolledBack) {
-                editExtrudeFeature(feat.id);
-                selectedFeatureID_ = NullFeatureID;
-            } else if (feat.type == FeatureType::Revolve && !feat.suppressed && !rolledBack) {
-                editRevolveFeature(feat.id);
-                selectedFeatureID_ = NullFeatureID;
-            } else if (feat.type == FeatureType::Loft && !feat.suppressed && !rolledBack) {
-                editLoftFeature(feat.id);
-                selectedFeatureID_ = NullFeatureID;
-            } else if (feat.type == FeatureType::MeshImport && !feat.suppressed && !rolledBack) {
-                editMeshImportFeature(feat.id);
-            }
-        }
+        if (ImGui::IsItemClicked(0)) selectFeature(item.id);
+        if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(0)) editFeature(item.id);
 
         // Draw selection highlight
-        if (feat.id == selectedFeatureID_) {
+        if (item.id == selectedFeatureID_) {
             ImDrawList* dl = ImGui::GetWindowDrawList();
             ImVec2 rMin = ImGui::GetItemRectMin();
             ImVec2 rMax = ImGui::GetItemRectMax();
@@ -978,83 +1096,37 @@ void App::drawTimeline(float panelW) {
                         IM_COL32(0, 200, 255, 255), 2.0f, 0, 3.0f);
         }
 
-        if (feat.hasError && ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("%s", feat.errorMsg.c_str());
+        if (item.error && ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("%s", item.errorMsg.c_str());
         }
 
         // Right-click context menu
+        bool deleted = false;
         if (ImGui::BeginPopupContextItem()) {
             static char renameBuf[128] = {};
             if (ImGui::IsWindowAppearing()) {
-                snprintf(renameBuf, sizeof(renameBuf), "%s", feat.name.c_str());
+                snprintf(renameBuf, sizeof(renameBuf), "%s", item.name.c_str());
             }
             ImGui::SetNextItemWidth(120);
             if (ImGui::InputText("Name", renameBuf, sizeof(renameBuf), ImGuiInputTextFlags_EnterReturnsTrue)) {
-                UndoCommand cmd;
-                cmd.type = UndoActionType::RenameFeature;
-                cmd.featureID = feat.id;
-                cmd.oldName = feat.name;
-                cmd.newName = renameBuf;
-                globalUndo_.push(std::move(cmd)); markDirty();
-                featureHistory_.renameFeature(feat.id, renameBuf);
+                renameFeature(item.id, renameBuf);
                 ImGui::CloseCurrentPopup();
             }
             ImGui::Separator();
 
-            if (feat.type == FeatureType::MeshImport && !feat.suppressed && !rolledBack) {
-                if (ImGui::MenuItem("Rotate / Move...")) editMeshImportFeature(feat.id);
+            if (item.canPlace) {
+                if (ImGui::MenuItem("Rotate / Move...")) editMeshImportFeature(item.id);
             }
 
-            if (feat.suppressed) {
-                if (ImGui::MenuItem("Unsuppress")) {
-                    UndoCommand cmd;
-                    cmd.type = UndoActionType::UnsuppressFeature;
-                    cmd.featureID = feat.id;
-                    globalUndo_.push(std::move(cmd)); markDirty();
-                    featureHistory_.unsuppressFeature(feat.id);
-                    replayAllFeatures();
-                }
+            if (item.suppressed) {
+                if (ImGui::MenuItem("Unsuppress")) setFeatureSuppressed(item.id, false);
             } else {
-                if (ImGui::MenuItem("Suppress")) {
-                    UndoCommand cmd;
-                    cmd.type = UndoActionType::SuppressFeature;
-                    cmd.featureID = feat.id;
-                    globalUndo_.push(std::move(cmd)); markDirty();
-                    featureHistory_.suppressFeature(feat.id);
-                    replayAllFeatures();
-                }
+                if (ImGui::MenuItem("Suppress")) setFeatureSuppressed(item.id, true);
             }
 
             if (ImGui::MenuItem("Delete")) {
-                // Collect feature + dependents with their indices before deleting
-                UndoCommand cmd;
-                cmd.type = UndoActionType::DeleteFeature;
-                cmd.featureID = feat.id;
-                // Save the feature itself
-                int idx = featureHistory_.featureIndex(feat.id);
-                cmd.deletedFeatures.push_back({idx, feat});
-                // Save dependents
-                auto deps = featureHistory_.getDependents(feat.id);
-                for (auto depID : deps) {
-                    int depIdx = featureHistory_.featureIndex(depID);
-                    const Feature* depFeat = featureHistory_.findFeature(depID);
-                    if (depFeat) cmd.deletedFeatures.push_back({depIdx, *depFeat});
-                }
-                // Sort by index ascending for proper re-insertion on undo
-                std::sort(cmd.deletedFeatures.begin(), cmd.deletedFeatures.end(),
-                    [](const auto& a, const auto& b) { return a.first < b.first; });
-                globalUndo_.push(std::move(cmd)); markDirty();
-
-                featureHistory_.deleteFeature(feat.id);
-                replayAllFeatures();
-                ImGui::EndPopup();
-                ImGui::PopID();
-                if (feat.hasError && !grayed) {
-                    ImGui::PopStyleVar();
-                    ImGui::PopStyleColor();
-                }
-                ImGui::PopStyleColor(3);
-                goto timeline_end;
+                deleteFeature(item.id);
+                deleted = true;
             }
 
             ImGui::EndPopup();
@@ -1062,36 +1134,17 @@ void App::drawTimeline(float panelW) {
 
         ImGui::PopID();
 
-        if (feat.hasError && !grayed) {
+        if (errorBorder) {
             ImGui::PopStyleVar();
             ImGui::PopStyleColor();
         }
         ImGui::PopStyleColor(3);
+        if (deleted) goto timeline_end;   // the rest of the list is out of date
     }
 
     // Delete key on selected feature
     if (selectedFeatureID_ != NullFeatureID && ImGui::IsKeyPressed(ImGuiKey_Delete) && !ImGui::IsAnyItemActive()) {
-        const Feature* selFeat = featureHistory_.findFeature(selectedFeatureID_);
-        if (selFeat) {
-            UndoCommand cmd;
-            cmd.type = UndoActionType::DeleteFeature;
-            cmd.featureID = selectedFeatureID_;
-            int idx = featureHistory_.featureIndex(selectedFeatureID_);
-            cmd.deletedFeatures.push_back({idx, *selFeat});
-            auto deps = featureHistory_.getDependents(selectedFeatureID_);
-            for (auto depID : deps) {
-                int depIdx = featureHistory_.featureIndex(depID);
-                const Feature* depFeat = featureHistory_.findFeature(depID);
-                if (depFeat) cmd.deletedFeatures.push_back({depIdx, *depFeat});
-            }
-            std::sort(cmd.deletedFeatures.begin(), cmd.deletedFeatures.end(),
-                [](const auto& a, const auto& b) { return a.first < b.first; });
-            globalUndo_.push(std::move(cmd)); markDirty();
-            featureHistory_.deleteFeature(selectedFeatureID_);
-            selectedFeatureID_ = NullFeatureID;
-            replayAllFeatures();
-            goto timeline_end;
-        }
+        if (deleteSelectedFeature()) goto timeline_end;
     }
 
     // Draw draggable playhead
@@ -1102,8 +1155,7 @@ void App::drawTimeline(float panelW) {
         float handleW = 6.0f;
 
         // Playhead X position: after the rollback feature, or after last feature if not rolled back
-        int headIdx = (rollbackPos >= 0) ? rollbackPos : numFeatures - 1;
-        float headX = buttonRightEdges[headIdx] + 2.0f;
+        float headX = buttonRightEdges[m.playhead] + 2.0f;
 
         // Draw the playhead bar
         ImVec2 pMin(headX - handleW * 0.5f, contentTop);
@@ -1115,12 +1167,8 @@ void App::drawTimeline(float panelW) {
 
         bool dragging = ImGui::IsItemActive();
         bool hovered = ImGui::IsItemHovered();
-        bool justActivated = ImGui::IsItemActivated();
 
-        // Record drag start position for undo
-        if (justActivated) {
-            dragStartRollbackPos_ = rollbackPos;
-        }
+        if (ImGui::IsItemActivated()) beginPlayheadDrag();
 
         // While dragging, snap to nearest feature boundary
         if (dragging) {
@@ -1134,48 +1182,19 @@ void App::drawTimeline(float panelW) {
                     bestIdx = i;
                 }
             }
-
-            int newPos = (bestIdx >= numFeatures - 1) ? -1 : bestIdx;
-            if (newPos != rollbackPos) {
-                featureHistory_.setRollbackPos(newPos);
-                rollbackPos = newPos;
-                // Defer replay until mouse stops moving (150ms idle)
-                playheadReplayPending_ = true;
-                playheadLastMoveTime_ = std::chrono::steady_clock::now();
-            }
-
-            // Replay after mouse idle for 150ms during drag
-            if (playheadReplayPending_) {
-                auto elapsed = std::chrono::steady_clock::now() - playheadLastMoveTime_;
-                if (elapsed >= std::chrono::milliseconds(150)) {
-                    replayAllFeatures();
-                    playheadReplayPending_ = false;
-                }
-            }
+            movePlayhead((bestIdx >= numFeatures - 1) ? -1 : bestIdx);
+            tickPlayhead();
 
             // Recompute headX based on new position
-            headIdx = (rollbackPos >= 0) ? rollbackPos : numFeatures - 1;
+            const int rollbackPos = featureHistory_.rollbackPos();
+            const int headIdx = (rollbackPos >= 0) ? rollbackPos : numFeatures - 1;
             headX = buttonRightEdges[headIdx] + 2.0f;
             pMin = ImVec2(headX - handleW * 0.5f, contentTop);
             pMax = ImVec2(headX + handleW * 0.5f, contentTop + barH);
         }
 
-        // Replay on drag release if still pending
-        if (ImGui::IsItemDeactivated()) {
-            if (playheadReplayPending_) {
-                replayAllFeatures();
-                playheadReplayPending_ = false;
-            }
-        }
-
-        // Push undo command when drag ends
-        if (ImGui::IsItemDeactivated() && dragStartRollbackPos_ != rollbackPos) {
-            UndoCommand cmd;
-            cmd.type = UndoActionType::SetRollbackPos;
-            cmd.oldRollbackPos = dragStartRollbackPos_;
-            cmd.newRollbackPos = rollbackPos;
-            globalUndo_.push(std::move(cmd)); markDirty();
-        }
+        // Replay if still pending, and one undo step, when the drag ends
+        if (ImGui::IsItemDeactivated()) endPlayheadDrag();
 
         // Color: brighter when hovered/dragging
         ImU32 headCol = (hovered || dragging)

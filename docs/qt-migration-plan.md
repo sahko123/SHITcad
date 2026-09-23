@@ -2,7 +2,8 @@
 
 Goal: replace GLFW + Dear ImGui with Qt 6 Widgets, and leave the CAD core and the
 3D viewport as layers that do not know which GUI toolkit hosts them. Cross-platform
-is a goal; Linux is kept compiling but is not run or debugged yet.
+is a goal, but for now nothing is built, run or debugged on Linux: the code stays
+portable where it is cheap to (Phase 7), and a Linux build comes later.
 
 ## Rules for every phase
 
@@ -459,6 +460,16 @@ ratio and picking near the edges.
   reached the viewport while an ImGui window had focus; Escape and Enter stay with the
   window. Fixed in the earlier Qt dialogs: Escape hid them without telling App, so the
   next frame showed them again; they now override `reject()`.
+- 5.8 timeline: done. `TimelineModel` and operations: select, edit (the double-click
+  rules), rename, suppress, delete with dependents (the context menu and the Delete key
+  had two copies of it), and the playhead as begin / move / tick / end, so the 150 ms
+  deferred replay and the one-undo-step-per-drag live in App. The ImGui timeline was
+  rewritten onto them and stayed pixel-identical (select, suppress, unsuppress, a
+  playhead drag and its undo, rename, Delete and its undo, double-click to edit).
+  `src/qt/Timeline.cpp` is a hand-painted strip over the bottom of the viewport, like
+  the ImGui one (a dock would resize the view when the first feature appears); the same
+  scenario gives the same results there. It tells App its height so the FPS readout
+  clears it. Not yet exercised live: the error tooltip (needs a failing feature).
 
 ## Phase 6: remove ImGui and GLFW
 
@@ -484,9 +495,11 @@ ratio and picking near the edges.
 | CMake: `opengl32`, `dbghelp` | `find_package(OpenGL)`; dbghelp only on `WIN32` |
 | System font paths in `App::init` | Qt's default font |
 
-Add a Linux GitHub Actions job that **only compiles**, so drift shows up without
-anyone running the app on Linux. Like the Windows job, it needs vcpkg binary
-caching, or every run spends an hour or more building OCCT and Qt.
+**Deferred (2026-09-23): no Linux compile step for now.** The plan had a Linux
+GitHub Actions job that only compiles, to catch drift early. It is dropped until a
+Linux build is wanted; the replacements above still keep the Windows-only code behind
+`#ifdef`s or Qt equivalents, so it stays cheap to add later. When it comes back it
+needs vcpkg binary caching, or every run spends an hour or more building OCCT and Qt.
 
 ## Risks to watch
 

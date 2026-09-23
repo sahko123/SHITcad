@@ -83,6 +83,7 @@ if(SHITCAD_QT)
         src/qt/KeyRouting.cpp
         src/qt/ToolPanel.cpp
         src/qt/SectionControls.cpp
+        src/qt/Timeline.cpp
     )
     set_target_properties(SHITcadQt PROPERTIES AUTOMOC ON)
     target_include_directories(SHITcadQt PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/src/qt)
