@@ -75,7 +75,7 @@ Newton-Raphson, up to 40 iterations, convergence tolerance 1e-6. Call `solver.so
 `Coincident`, `Horizontal`, `Vertical`, `Distance`, `Radius`, `Diameter`, `PointDistance`, `PointOnLine`, `PointLineDistance`, `EqualLength`, `Perpendicular`, `Parallel`, `Tangent`, `Angle`, `Symmetric`, `Concentric`, `Midpoint`
 
 ### Units and axes
-The 3D viewport is **Y-up**: the ground grid lies in XZ at y = 0 and the orbit camera's up is +Y. (The "XY Plane" reference plane is vertical.) STL from most CAD packages, Onshape included, is Z-up and lands on its side until rotated. Simulation exports declare `"up": [0, 1, 0]` rather than converting.
+The 3D viewport is **Y-up**: the ground plane is XZ at y = 0 and the orbit camera's up is +Y. The grid shows only while the view looks straight along an axis (`OrbitCamera::viewAxis()`, e.g. after numpad 1/3/7), in the plane facing the camera, as a backdrop that writes no depth. (The "XY Plane" reference plane is vertical.) STL from most CAD packages, Onshape included, is Z-up and lands on its side until rotated. Simulation exports declare `"up": [0, 1, 0]` rather than converting.
 
 All internal values are in **millimeters**. `UnitUtils.h` handles parsing/formatting with 11 unit types. `Constraint::value` is always in mm; `Constraint::inputUnit` and `inputValue` preserve the user's original input.
 
@@ -90,7 +90,7 @@ All internal values are in **millimeters**. `UnitUtils.h` handles parsing/format
 Global undo stack with typed commands: `AddFeature`, `DeleteFeature`, `SuppressFeature`, `ModifySketch`, `ModifyExtrude`, etc. Each command stores old and new state for reversal.
 
 ### Rendering pipeline
-- `Viewport3D` - orbit camera (yaw/pitch/distance), orthographic/perspective, ground grid
+- `Viewport3D` - orbit camera (yaw/pitch/distance), orthographic/perspective, ground grid, and the sky/ground background (`drawBackground`, first after the clear; theme colours `skyZenith`/`skyHorizon`/`groundHorizon`/`groundNadir`)
 - `Scene3D` - stores `Body3D` objects (OCCT shape + tessellated mesh and edges on the CPU; VAO/VBO are a cache uploaded lazily by `syncGpu()` when rendering). Adding, replacing and removing bodies never calls GL, so replay/undo/commit need no GL context (the tests run without one); freed buffers are queued and deleted at the next render. `vertexCount` is set when the body is built.
 - Host boundary: App never calls Qt. The host drives `App::frame(dt, fbW, fbH, input)` then `App::paint()` with the context current, then draws `App::overlay()`; `AppHost` gives App the window title, redraw requests and file dialogs. Everything outside the frame changes App state only through `App::post()`.
 - Viewport input is `App::in_` (`ViewportInput.h`), passed in once per frame with the semantics the handlers were written against: held-key repeat, trickled events (a quick click is seen down, then up), furthest-drag distance. Screen-space drawing over the 3D view is recorded into `App::overlay_` (`Overlay2D.h`) during the frame, including from inside the GL pass, and drawn once after it; its text is measured by the host's function so labels and hit rectangles match what is drawn.

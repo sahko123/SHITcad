@@ -28,6 +28,10 @@ void setActiveProfileBackend(ProfileDetectorBackend backend) { s_profileBackend 
 Theme Theme::dark() {
     Theme t;
     t.bgColor[0] = 0.12f; t.bgColor[1] = 0.12f; t.bgColor[2] = 0.14f;
+    t.skyZenith[0] = 0.09f; t.skyZenith[1] = 0.11f; t.skyZenith[2] = 0.16f;
+    t.skyHorizon[0] = 0.23f; t.skyHorizon[1] = 0.25f; t.skyHorizon[2] = 0.30f;
+    t.groundHorizon[0] = 0.15f; t.groundHorizon[1] = 0.16f; t.groundHorizon[2] = 0.18f;
+    t.groundNadir[0] = 0.08f; t.groundNadir[1] = 0.08f; t.groundNadir[2] = 0.09f;
     t.gridMinor[0] = 0.2f;  t.gridMinor[1] = 0.2f;  t.gridMinor[2] = 0.2f;
     t.gridMajor[0] = 0.35f; t.gridMajor[1] = 0.35f; t.gridMajor[2] = 0.35f;
 
@@ -55,8 +59,12 @@ Theme Theme::dark() {
 Theme Theme::light() {
     Theme t;
     t.bgColor[0] = 0.78f; t.bgColor[1] = 0.78f; t.bgColor[2] = 0.80f;
-    t.gridMinor[0] = 0.65f; t.gridMinor[1] = 0.65f; t.gridMinor[2] = 0.65f;
-    t.gridMajor[0] = 0.55f; t.gridMajor[1] = 0.55f; t.gridMajor[2] = 0.55f;
+    t.skyZenith[0] = 0.60f; t.skyZenith[1] = 0.71f; t.skyZenith[2] = 0.85f;
+    t.skyHorizon[0] = 0.91f; t.skyHorizon[1] = 0.94f; t.skyHorizon[2] = 0.98f;
+    t.groundHorizon[0] = 0.80f; t.groundHorizon[1] = 0.82f; t.groundHorizon[2] = 0.86f;
+    t.groundNadir[0] = 0.66f; t.groundNadir[1] = 0.67f; t.groundNadir[2] = 0.70f;
+    t.gridMinor[0] = 0.54f; t.gridMinor[1] = 0.54f; t.gridMinor[2] = 0.54f;
+    t.gridMajor[0] = 0.42f; t.gridMajor[1] = 0.42f; t.gridMajor[2] = 0.42f;
 
     t.sketchLine[0] = 0.1f; t.sketchLine[1] = 0.1f; t.sketchLine[2] = 0.1f;
     t.sketchUnderconstrained[0] = 0.2f; t.sketchUnderconstrained[1] = 0.45f; t.sketchUnderconstrained[2] = 0.85f;

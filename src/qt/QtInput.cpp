@@ -18,6 +18,26 @@ constexpr float kRepeatRate = 0.050f;    // ImGui's io.KeyRepeatRate
 int toKey(int k, bool keypad) {
     if (k >= Qt::Key_0 && k <= Qt::Key_9)
         return keypad ? (int)Key::Keypad0 + (k - Qt::Key_0) : (int)Key::Num0 + (k - Qt::Key_0);
+    if (keypad) {
+        // With NumLock off the digit keys arrive as their navigation keys:
+        // they are still the numpad digits to the view keys. (Keypad Delete
+        // stays Delete.)
+        switch (k) {
+            case Qt::Key_Insert: return (int)Key::Keypad0;
+            case Qt::Key_End: return (int)Key::Keypad1;
+            case Qt::Key_Down: return (int)Key::Keypad2;
+            case Qt::Key_PageDown: return (int)Key::Keypad3;
+            case Qt::Key_Left: return (int)Key::Keypad4;
+            case Qt::Key_Clear: return (int)Key::Keypad5;
+            case Qt::Key_Right: return (int)Key::Keypad6;
+            case Qt::Key_Home: return (int)Key::Keypad7;
+            case Qt::Key_Up: return (int)Key::Keypad8;
+            case Qt::Key_PageUp: return (int)Key::Keypad9;
+            case Qt::Key_Plus: return (int)Key::KeypadPlus;
+            case Qt::Key_Minus: return (int)Key::KeypadMinus;
+            default: break;
+        }
+    }
     switch (k) {
         case Qt::Key_A: return (int)Key::A;
         case Qt::Key_C: return (int)Key::C;

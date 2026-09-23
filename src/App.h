@@ -792,6 +792,10 @@ private:
     void markDirty();
     void updateCameraAnimation(float dt);
     void orientCameraToPlane(const SketchPlane& plane);
+    void animateCameraView(float yaw, float pitch);
+    void setOrthographic(bool on);
+    bool numpadTypesText() const;
+    void handleNumpadView(float vpW, float vpH);
 
     void getViewProj(int w, int h, float view[16], float proj[16]);
     bool hasActiveSketch() const { return activeSketchPlane_ >= 0 && activeSketchPlane_ < (int)sketchPlanes_.size(); }

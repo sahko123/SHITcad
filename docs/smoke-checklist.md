@@ -17,7 +17,20 @@ must work from both.
 ## 1. Camera and view
 
 - [ ] Middle-drag orbits; Shift + middle-drag pans; the wheel zooms toward the view.
-- [ ] `O` toggles orthographic/perspective (in any mode, when no text field is active).
+- [ ] `O` toggles orthographic/perspective (in any mode, when no text field is active),
+      keeping the model the same size on screen.
+- [ ] Numpad, as in Blender (NumLock on or off): `5` toggles ortho/perspective; `1`/`3`/`7`
+      animate to front/right/top, `Ctrl` for back/left/bottom, and switch to ortho;
+      `4`/`6`/`8`/`2` orbit 15° and return an axis view to perspective (so does
+      middle-drag), but not after `5` or `O` chose ortho; `Ctrl` + those pan; `9` flips to
+      the opposite side; `+`/`-` zoom.
+- [ ] The background is sky above a horizon and ground below; orbiting moves the horizon
+      (level views put it through the centre), in both themes and in ortho too.
+- [ ] The grid shows only in axis views, in the plane facing you (front XY, right YZ,
+      top XZ, with red X / green Y / blue Z axes), behind the model; orbiting off the
+      axis hides it.
+- [ ] Numpad digits type instead of moving the view: in a text field, in the inline value
+      box, and as the first digit of a circle diameter or fillet radius.
 - [ ] `T` toggles the object tree (Navigate only).
 - [ ] The camera animates when entering a sketch, and `N` in a sketch re-orients to the plane.
 - [ ] FPS readout at bottom right, above the timeline when that is showing.

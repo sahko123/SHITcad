@@ -13,6 +13,13 @@ enum class ProfileDetectorBackend : uint8_t {
 struct Theme {
     // 3D viewport
     float bgColor[3];
+    // Background gradient, all one smooth blend: skyHorizon at the horizon,
+    // up to skyZenith overhead, down through groundHorizon (about 20 degrees
+    // below) to groundNadir straight below.
+    float skyZenith[3];
+    float skyHorizon[3];
+    float groundHorizon[3];
+    float groundNadir[3];
     float gridMinor[3];
     float gridMajor[3];
 

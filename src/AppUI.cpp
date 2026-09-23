@@ -996,7 +996,7 @@ void App::perform(UiAction action, int arg) {
         case UiAction::Subtract:
             if (tool_.type == ToolType::BooleanSubtract) cancelBoolean(); else enterBooleanMode(BooleanOperation::Subtract);
             break;
-        case UiAction::ToggleOrtho: viewport3D_.camera().orthographic = !viewport3D_.camera().orthographic; break;
+        case UiAction::ToggleOrtho: setOrthographic(!viewport3D_.camera().orthographic); break;
         case UiAction::TogglePrefs: prefsOpen_ = !prefsOpen_; break;
     }
 }

@@ -39,7 +39,18 @@ void makeOrthographic(float* out, float halfH, float aspect, float nearP, float 
 
 // ---- OrbitCamera ----
 
+void OrbitCamera::setOrthographic(bool on) {
+    autoOrtho = false;
+    if (orthographic == on) return;
+    // Visible half-height at the target: `distance` in ortho,
+    // distance * tan(fov / 2) in perspective.
+    const float k = std::tan(toRad(45.0f) * 0.5f);
+    distance = on ? distance * k : distance / k;
+    orthographic = on;
+}
+
 void OrbitCamera::orbit(float dx, float dy) {
+    if (autoOrtho && (dx != 0.0f || dy != 0.0f)) setOrthographic(false);
     yaw -= dx * 0.3f;
     pitch += dy * 0.3f;
 }
@@ -117,6 +128,16 @@ void OrbitCamera::getViewMatrix(float* out) const {
     out[12] = -(sx * eye[0] + sy * eye[1] + sz * eye[2]);
     out[13] = -(ux * eye[0] + uy * eye[1] + uz * eye[2]);
     out[14] = (fx * eye[0] + fy * eye[1] + fz * eye[2]);
+}
+
+int OrbitCamera::viewAxis() const {
+    const float yawR = toRad(yaw), pitchR = toRad(pitch);
+    const float dir[3] = {std::cos(pitchR) * std::sin(yawR), std::sin(pitchR),
+                          std::cos(pitchR) * std::cos(yawR)};
+    const float kAligned = std::cos(toRad(1.0f));
+    for (int a = 0; a < 3; a++)
+        if (std::fabs(dir[a]) >= kAligned) return a;
+    return -1;
 }
 
 void OrbitCamera::getProjection(float* out, float aspect) const {
@@ -230,16 +251,102 @@ void main() {
 }
 )";
 
+// One triangle covering the screen; vNdc is the position in normalized
+// device coordinates.
+static const char* kBackgroundVertSrc = R"(
+#version 330 core
+out vec2 vNdc;
+
+void main() {
+    vec2 p = vec2((gl_VertexID << 1) & 2, gl_VertexID & 2) * 2.0 - 1.0;
+    vNdc = p;
+    gl_Position = vec4(p, 0.0, 1.0);
+}
+)";
+
+static const char* kBackgroundFragSrc = R"(
+#version 330 core
+in vec2 vNdc;
+
+uniform vec3 uRight;
+uniform vec3 uUp;
+uniform vec3 uForward;
+uniform float uScaleX;   // tan(fov / 2) * aspect
+uniform float uScaleY;   // tan(fov / 2)
+uniform vec3 uZenith;
+uniform vec3 uSkyHorizon;
+uniform vec3 uGroundHorizon;
+uniform vec3 uNadir;
+
+out vec4 FragColor;
+
+void main() {
+    vec3 d = normalize(uForward + vNdc.x * uScaleX * uRight + vNdc.y * uScaleY * uUp);
+    float y = d.y;   // the world is Y-up
+    // One continuous gradient with no line at the horizon: the pale horizon
+    // colour at y = 0 eases up into the zenith, and down into the ground
+    // over a wide band before darkening towards the nadir. smoothstep eases
+    // in and out of every stop, so no band has a visible edge.
+    vec3 c;
+    if (y >= 0.0) {
+        c = mix(uSkyHorizon, uZenith, smoothstep(0.0, 0.85, y));
+    } else {
+        c = mix(uSkyHorizon, uGroundHorizon, smoothstep(0.0, 0.35, -y));
+        c = mix(c, uNadir, smoothstep(0.2, 1.0, -y));
+    }
+    // Dither away the 8-bit banding of a slow gradient.
+    float n = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453);
+    c += (n - 0.5) / 255.0;
+    FragColor = vec4(c, 1.0);
+}
+)";
+
 // ---- Viewport3D ----
 
 bool Viewport3D::init() {
     if (!meshShader_.compile(kMeshVertSrc, kMeshFragSrc)) return false;
     if (!gridShader_.compile(kGridVertSrc, kGridFragSrc)) return false;
+    if (!backgroundShader_.compile(kBackgroundVertSrc, kBackgroundFragSrc)) return false;
+    glGenVertexArrays(1, &backgroundVAO_);
     buildGrid();
     return true;
 }
 
+void Viewport3D::drawBackground(const float* view, float aspect) {
+    // The view matrix's rows are the camera's right, up and backward axes.
+    // Spread over a 90-degree field rather than the camera's 45, so the
+    // horizon stays on screen for most orbit angles (level views still put it
+    // through the centre). Nothing drawn sits at infinity to disagree.
+    const float t = std::tan(toRad(90.0f) * 0.5f);
+    backgroundShader_.use();
+    backgroundShader_.setVec3("uRight", view[0], view[4], view[8]);
+    backgroundShader_.setVec3("uUp", view[1], view[5], view[9]);
+    backgroundShader_.setVec3("uForward", -view[2], -view[6], -view[10]);
+    backgroundShader_.setFloat("uScaleX", t * aspect);
+    backgroundShader_.setFloat("uScaleY", t);
+    const auto& th = activeTheme();
+    backgroundShader_.setVec3("uZenith", th.skyZenith[0], th.skyZenith[1], th.skyZenith[2]);
+    backgroundShader_.setVec3("uSkyHorizon", th.skyHorizon[0], th.skyHorizon[1], th.skyHorizon[2]);
+    backgroundShader_.setVec3("uGroundHorizon", th.groundHorizon[0], th.groundHorizon[1], th.groundHorizon[2]);
+    backgroundShader_.setVec3("uNadir", th.groundNadir[0], th.groundNadir[1], th.groundNadir[2]);
+
+    const GLboolean depthTest = glIsEnabled(GL_DEPTH_TEST);
+    const GLboolean cull = glIsEnabled(GL_CULL_FACE);
+    GLboolean depthMask = GL_TRUE;
+    glGetBooleanv(GL_DEPTH_WRITEMASK, &depthMask);
+    glDisable(GL_DEPTH_TEST);
+    glDisable(GL_CULL_FACE);
+    glDepthMask(GL_FALSE);
+    glBindVertexArray(backgroundVAO_);
+    glDrawArrays(GL_TRIANGLES, 0, 3);
+    glBindVertexArray(0);
+    glDepthMask(depthMask);
+    if (depthTest) glEnable(GL_DEPTH_TEST);
+    if (cull) glEnable(GL_CULL_FACE);
+}
+
 void Viewport3D::shutdown() {
+    if (backgroundVAO_) { glDeleteVertexArrays(1, &backgroundVAO_); backgroundVAO_ = 0; }
     if (gridVAO_) { glDeleteVertexArrays(1, &gridVAO_); gridVAO_ = 0; }
     if (gridVBO_) { glDeleteBuffers(1, &gridVBO_); gridVBO_ = 0; }
 }
@@ -250,27 +357,36 @@ void Viewport3D::buildGrid() {
 
     float extent = 100.0f;
     float step = 1.0f;
+    const float axisColor[3][3] = {{0.7f, 0.2f, 0.2f}, {0.2f, 0.7f, 0.2f}, {0.2f, 0.2f, 0.7f}};
+    const auto& theme = activeTheme();
 
-    // Minor grid lines
-    for (float i = -extent; i <= extent; i += step) {
-        const auto& theme = activeTheme();
-        if (std::fabs(i) < 0.001f) continue; // skip axes
-        bool major = (std::fabs(std::fmod(i, 10.0f)) < 0.001f);
-        float c = major ? theme.gridMajor[0] : theme.gridMinor[0];
-        verts.push_back({i, 0, -extent, c, c, c});
-        verts.push_back({i, 0,  extent, c, c, c});
-        verts.push_back({-extent, 0, i, c, c, c});
-        verts.push_back({ extent, 0, i, c, c, c});
+    for (int normal = 0; normal < 3; normal++) {
+        // The plane's two axes, in the order X, Y, Z.
+        const int u = normal == 0 ? 1 : 0;
+        const int v = normal == 2 ? 1 : 2;
+        auto line = [&](float u0, float v0, float u1, float v1, const float* col) {
+            float a[3] = {}, b[3] = {};
+            a[u] = u0; a[v] = v0;
+            b[u] = u1; b[v] = v1;
+            verts.push_back({a[0], a[1], a[2], col[0], col[1], col[2]});
+            verts.push_back({b[0], b[1], b[2], col[0], col[1], col[2]});
+        };
+
+        for (float i = -extent; i <= extent; i += step) {
+            if (std::fabs(i) < 0.001f) continue; // skip axes
+            bool major = (std::fabs(std::fmod(i, 10.0f)) < 0.001f);
+            float c = major ? theme.gridMajor[0] : theme.gridMinor[0];
+            const float col[3] = {c, c, c};
+            line(i, -extent, i, extent, col);
+            line(-extent, i, extent, i, col);
+        }
+
+        // The plane's axes in their colours: X red, Y green, Z blue
+        line(-extent, 0, extent, 0, axisColor[u]);
+        line(0, -extent, 0, extent, axisColor[v]);
+
+        if (normal == 0) gridVertCount_ = (int)verts.size();
     }
-
-    // X axis (red)
-    verts.push_back({-extent, 0, 0, 0.7f, 0.2f, 0.2f});
-    verts.push_back({ extent, 0, 0, 0.7f, 0.2f, 0.2f});
-    // Z axis (blue)
-    verts.push_back({0, 0, -extent, 0.2f, 0.2f, 0.7f});
-    verts.push_back({0, 0,  extent, 0.2f, 0.2f, 0.7f});
-
-    gridVertCount_ = (int)verts.size();
 
     glGenVertexArrays(1, &gridVAO_);
     glGenBuffers(1, &gridVBO_);
@@ -288,14 +404,21 @@ void Viewport3D::buildGrid() {
 }
 
 void Viewport3D::drawGrid(const float* view, const float* proj) {
+    const int axis = camera_.viewAxis();
+    if (axis < 0) return;
+
     gridShader_.use();
     gridShader_.setMat4("uView", view);
     gridShader_.setMat4("uProj", proj);
     applyClip(gridShader_, nullptr); // the ground grid is never sectioned
 
+    GLboolean depthMask = GL_TRUE;
+    glGetBooleanv(GL_DEPTH_WRITEMASK, &depthMask);
+    glDepthMask(GL_FALSE);
     glBindVertexArray(gridVAO_);
-    glDrawArrays(GL_LINES, 0, gridVertCount_);
+    glDrawArrays(GL_LINES, axis * gridVertCount_, gridVertCount_);
     glBindVertexArray(0);
+    glDepthMask(depthMask);
 }
 
 void Viewport3D::handleInput(const InputFrame& in, float canvasX, float canvasY, float canvasW, float canvasH) {
@@ -335,6 +458,7 @@ void Viewport3D::render(float x, float y, float w, float h) {
     float aspect = (h > 0) ? w / h : 1.0f;
     camera_.getProjection(proj, aspect);
 
+    drawBackground(view, aspect);
     drawGrid(view, proj);
 
     glDisable(GL_DEPTH_TEST);

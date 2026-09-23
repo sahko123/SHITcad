@@ -152,6 +152,9 @@ void App::render3DScene(int w, int h) {
     float view[16], proj[16];
     getViewProj(w, h, view, proj);
 
+    // Sky and ground behind everything, so the horizon shows which way is up
+    viewport3D_.drawBackground(view, h > 0 ? (float)w / (float)h : 1.0f);
+
     // Ground grid — hidden in sketch mode since the adaptive sketch grid takes over
     if (mode_ != InteractionMode::Sketching)
         viewport3D_.drawGroundGrid(view, proj);
@@ -364,8 +367,9 @@ void App::renderFrame() {
 
     // Toggle ortho/perspective with O key
     if (in_.keyPressed(Key::O)) {
-        viewport3D_.camera().orthographic = !viewport3D_.camera().orthographic;
+        setOrthographic(!viewport3D_.camera().orthographic);
     }
+    handleNumpadView(vpW, vpH);
 
     // The panels are the host's widgets, outside the view: all of it takes input.
     viewport3D_.handleInput(in_, 0.0f, 0.0f, vpW, vpH);
@@ -830,6 +834,106 @@ void App::updateCameraAnimation(float dt) {
     cam.targetX = lerp(cameraFrom_.targetX, cameraTo_.targetX, s);
     cam.targetY = lerp(cameraFrom_.targetY, cameraTo_.targetY, s);
     cam.targetZ = lerp(cameraFrom_.targetZ, cameraTo_.targetZ, s);
+}
+
+// Turn the camera to a yaw/pitch about the same target, the short way round.
+// Starts from where a running animation was heading.
+void App::animateCameraView(float yaw, float pitch) {
+    OrbitCamera to = cameraAnimating_ ? cameraTo_ : viewport3D_.camera();
+    const float currentYaw = viewport3D_.camera().yaw;
+    float yawDiff = std::fmod(yaw - currentYaw, 360.0f);
+    if (yawDiff > 180.0f) yawDiff -= 360.0f;
+    if (yawDiff < -180.0f) yawDiff += 360.0f;
+    to.yaw = currentYaw + yawDiff;
+    to.pitch = pitch;
+    to.distance = viewport3D_.camera().distance;
+    to.orthographic = viewport3D_.camera().orthographic;
+    to.autoOrtho = viewport3D_.camera().autoOrtho;
+
+    cameraFrom_ = viewport3D_.camera();
+    cameraTo_ = to;
+    cameraAnimating_ = true;
+    cameraAnimT_ = 0.0f;
+}
+
+void App::setOrthographic(bool on) {
+    OrbitCamera& cam = viewport3D_.camera();
+    const float before = cam.distance;
+    cam.setOrthographic(on);
+    // An animation in flight lerps the distance: keep it in the new projection.
+    const float k = cam.distance / before;
+    cameraFrom_.distance *= k;
+    cameraTo_.distance *= k;
+}
+
+// Keys that go into a value rather than to the view: digits open the inline
+// box while a circle's centre or a fillet's corner waits for its size, and a
+// value being typed keeps them. (Qt text fields never pass keys to the view.)
+bool App::numpadTypesText() const {
+    if (tool_.inlineInputActive) return true;
+    if (mode_ == InteractionMode::Sketching && hasActiveSketch() && tool_.hasFirstPoint &&
+        (tool_.type == ToolType::Circle || tool_.type == ToolType::Fillet))
+        return true;
+    return tool_.type == ToolType::Dimension && dimTool_.phase != DimToolState::Selecting;
+}
+
+// Blender's numpad: 1/3/7 front/right/top (Ctrl: back/left/bottom), 5 ortho
+// or perspective, 2/4/6/8 orbit in 15-degree steps (Ctrl: pan), 9 the
+// opposite side, +/- zoom. The axis views switch to orthographic and orbiting
+// away switches back, unless 5 or O chose the projection.
+void App::handleNumpadView(float vpW, float vpH) {
+    if (numpadTypesText()) return;
+    auto pressed = [&](int d) { return in_.keyPressed(keypadDigitKey(d)); };
+    OrbitCamera& cam = viewport3D_.camera();
+    constexpr float kStep = 15.0f;
+
+    auto axisView = [&](float yaw, float pitch) {
+        if (!cam.orthographic) {
+            setOrthographic(true);
+            cam.autoOrtho = true;
+        }
+        animateCameraView(yaw, pitch);
+    };
+    if (pressed(1)) axisView(in_.ctrl ? 180.0f : 0.0f, 0.0f);
+    if (pressed(3)) axisView(in_.ctrl ? -90.0f : 90.0f, 0.0f);
+    if (pressed(7)) axisView(0.0f, in_.ctrl ? -90.0f : 90.0f);
+
+    if (pressed(5)) setOrthographic(!cam.orthographic);
+
+    if (pressed(9)) {
+        const OrbitCamera& at = cameraAnimating_ ? cameraTo_ : cam;
+        animateCameraView(at.yaw + 180.0f, -at.pitch);
+    }
+
+    const float h = (float)pressed(6) - (float)pressed(4);
+    const float v = (float)pressed(8) - (float)pressed(2);
+    if (h != 0.0f || v != 0.0f) {
+        if (in_.ctrl) {
+            // Pan the view a tenth of its height per press, carrying an
+            // animation in flight along with it.
+            const float x0 = cam.targetX, y0 = cam.targetY, z0 = cam.targetZ;
+            const float px = vpH * 0.1f;
+            cam.pan(-h * px, v * px, vpW, vpH);
+            for (OrbitCamera* c : {&cameraFrom_, &cameraTo_}) {
+                c->targetX += cam.targetX - x0;
+                c->targetY += cam.targetY - y0;
+                c->targetZ += cam.targetZ - z0;
+            }
+        } else {
+            if (cam.autoOrtho) setOrthographic(false);
+            OrbitCamera& to = cameraAnimating_ ? cameraTo_ : cam;
+            to.yaw += h * kStep;
+            to.pitch += v * kStep;
+        }
+    }
+
+    const float zoom = (float)in_.keyPressed(Key::KeypadPlus) - (float)in_.keyPressed(Key::KeypadMinus);
+    if (zoom != 0.0f) {
+        const float before = cam.distance;
+        cam.zoom(zoom);
+        cameraFrom_.distance *= cam.distance / before;
+        cameraTo_.distance *= cam.distance / before;
+    }
 }
 
 // enterExtrudeMode, handleExtrudeInput, drawExtrudePanel, updateExtrudePreview,
