@@ -13,8 +13,6 @@
 #include <TopoDS_Solid.hxx>
 
 #include <glad/gl.h>
-#include <imgui.h>
-#include <imgui_internal.h>
 #include <cstdio>
 #include <cmath>
 #include <algorithm>
@@ -108,87 +106,6 @@ void App::setLoftSectionProfile(int section, int profile) {
 void App::setLoftSolid(bool solid) {
     loftTool_.solid = solid;
     loftTool_.previewDirty = true;
-}
-
-// ImGui front end for LoftPanelModel (the Qt one is src/qt/ToolPanel.cpp).
-void App::drawLoftPanel() {
-    ImGuiIO& io = ImGui::GetIO();
-    float panelW = 250.0f;
-
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, {10, 10});
-    ImGui::SetNextWindowPos({io.DisplaySize.x - panelW, 30});
-    ImGui::SetNextWindowSize({panelW, 0});
-    ImGui::Begin("Loft", nullptr,
-        ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
-        ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_AlwaysAutoResize);
-
-    ImGui::Text("Select profiles on different");
-    ImGui::Text("sketch planes to loft between.");
-    ImGui::Separator();
-
-    // List current sections
-    for (int i = 0; i < (int)loftTool_.sections.size(); i++) {
-        const auto& sec = loftTool_.sections[i];
-        char label[64];
-        snprintf(label, sizeof(label), "Section %d: Plane %d, Profile %d", i+1, sec.sketchPlaneIndex, sec.profileIndex);
-        ImGui::TextUnformatted(label);
-        ImGui::SameLine();
-        ImGui::PushID(i);
-        if (ImGui::SmallButton("X")) {
-            removeLoftSection(i);
-            ImGui::PopID();
-            break; // invalidated iterator
-        }
-        ImGui::PopID();
-    }
-
-    ImGui::Separator();
-
-    // Add section: pick a sketch plane that has profiles (after any removal above)
-    ImGui::Text("Add section:");
-    const LoftPanelModel m = loftPanelModel();
-    for (const auto& c : m.candidates) {
-        if (ImGui::Button(c.label.c_str())) addLoftSection(c.plane);
-    }
-
-    // Profile selection per section (read live: the buttons above change the list)
-    if (!loftTool_.sections.empty()) {
-        ImGui::Separator();
-        ImGui::Text("Profile selection:");
-        for (int i = 0; i < (int)loftTool_.sections.size(); i++) {
-            const auto& sec = loftTool_.sections[i];
-            int numProfiles = (int)sec.detectedProfiles.size();
-            if (numProfiles <= 1) continue;
-
-            char label[64];
-            snprintf(label, sizeof(label), "Section %d profile", i+1);
-            ImGui::PushID(100 + i);
-            int profile = sec.profileIndex;
-            if (ImGui::SliderInt(label, &profile, 0, numProfiles - 1)) setLoftSectionProfile(i, profile);
-            ImGui::PopID();
-        }
-    }
-
-    // Solid toggle
-    ImGui::Separator();
-    bool solid = loftTool_.solid;
-    if (ImGui::Checkbox("Solid", &solid)) setLoftSolid(solid);
-
-    // OK / Cancel
-    ImGui::Separator();
-    bool canCommit = loftTool_.canCommit();
-    if (!canCommit) ImGui::BeginDisabled();
-    if (ImGui::Button("OK [Enter]", {95, 0})) {
-        commitLoft();
-    }
-    if (!canCommit) ImGui::EndDisabled();
-    ImGui::SameLine();
-    if (ImGui::Button("Cancel [Esc]", {95, 0})) {
-        cancelLoft();
-    }
-
-    ImGui::End();
-    ImGui::PopStyleVar();
 }
 
 void App::updateLoftPreview() {

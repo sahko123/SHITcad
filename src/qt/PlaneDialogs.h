@@ -16,9 +16,8 @@ class QVBoxLayout;
 
 namespace shitcad {
 
-// Qt front end for AddPlaneModel (the ImGui one is App::drawAddPlaneDialog):
-// a reference plane offset from another plane, or from a face picked in the
-// viewport.
+// Qt front end for AddPlaneModel: a reference plane offset from another
+// plane, or from a face picked in the viewport.
 class AddPlaneDialog : public QDialog {
     Q_OBJECT
 public:
@@ -46,9 +45,8 @@ private:
     size_t shownSources_ = 0;
 };
 
-// Qt front end for TangentPlaneModel (the ImGui one is
-// App::drawTangentPlaneDialog): a plane tangent to a cylinder, at an angle
-// from the clicked point. Create also starts a sketch on it.
+// Qt front end for TangentPlaneModel: a plane tangent to a cylinder, at an
+// angle from the clicked point. Create also starts a sketch on it.
 class TangentPlaneDialog : public QDialog {
     Q_OBJECT
 public:

@@ -5,17 +5,17 @@ Parametric CAD modeler. Sketch 2D profiles with constraints, extrude/revolve/lof
 ## Build
 
 ```bash
-# Requires: CMake 3.20+, MSVC (C++17), vcpkg with OpenCASCADE installed
+# Requires: CMake 3.20+, MSVC (C++17), vcpkg (installs OpenCASCADE and a trimmed qtbase)
 cmake -B build -S . -DCMAKE_TOOLCHAIN_FILE=[vcpkg-root]/scripts/buildsystems/vcpkg.cmake
 cmake --build build --config Release
 ```
 
-Tests are opt-in (`-DSHITCAD_BUILD_TESTS=ON`), then run `build/Release/MeshImportTest.exe`, `SimulationTest.exe` and `ReplayTest.exe`. `ReplayTest` builds one history per feature type in code and checks volumes, bounds, every constraint type and save/load round trips; it is the regression net for the Qt migration (`docs/qt-migration-plan.md`, manual part in `docs/smoke-checklist.md`).
+Tests are opt-in (`-DSHITCAD_BUILD_TESTS=ON`), then run `build/Release/MeshImportTest.exe`, `SimulationTest.exe` and `ReplayTest.exe`. They build on the core sources only (no `App*.cpp`, no UI). `ReplayTest` builds one history per feature type in code and checks volumes, bounds, every constraint type and save/load round trips; replay needs no GL context. `SimulationTest` compiles the shaders and picks through a section view in an offscreen Qt GL context. Manual checks: `docs/smoke-checklist.md`.
 Run the build from PowerShell or cmd: Git Bash rewrites MSBuild's `/m` switch into a path.
 
-The Qt host is opt-in while the migration is under way: configure with `-DSHITCAD_QT=ON` to also build `SHITcadQt` (vcpkg then installs a trimmed `qtbase`, the manifest's `qt` feature; the first build takes a while). It runs the same App and, for now, the same ImGui UI inside a `QOpenGLWidget` (`src/qt/`). Qt code lives only in `src/qt/` and only in that target. Panels that have moved to Qt read a model struct from App each frame and change App only through `App::post()` with a named operation; the ImGui version of the same panel uses the same model and operations and is skipped when the host sets its `App::HostPanel` bit. Keyboard shortcuts stay in the viewport handlers: `src/qt/KeyRouting.cpp` forwards keys from the docks, the floating tool panel and the tool windows to the viewport unless a text field has focus. Qt dialogs tell App they closed by overriding `reject()` (Escape and the window's X both land there).
+The UI is Qt 6 Widgets (`src/qt/`, the only place Qt is used; history in `docs/qt-migration-plan.md`). The first configure builds OpenCASCADE and qtbase through vcpkg and takes a long time. The build copies Qt's `platforms/qwindows.dll` next to the executable; without it nothing can open a window.
 
-Dependencies are auto-fetched via FetchContent (GLFW 3.4, GLAD, ImGui 1.91.9, nlohmann/json 3.11.3). OpenCASCADE comes from vcpkg.
+Dependencies fetched via FetchContent: glad (the GL loader, generated at build time; needs Python with Jinja2) and nlohmann/json 3.11.3. OpenCASCADE and Qt come from vcpkg.
 
 ## Architecture
 
@@ -30,15 +30,20 @@ The `App` class is large and split across multiple .cpp files by responsibility:
 
 | File | Methods |
 |------|---------|
-| `main.cpp` | `GlfwHost`: window, GL context, ImGui context and fonts, the frame loop (implements `AppHost`) |
-| `App.cpp` | `init()`, `frame()`, `paint()`, `post()`, `shutdown()`, `renderFrame()`, camera, navigation input, the ImGui input/overlay glue |
-| `AppSketch.cpp` | `handleSketchInput()`, `handleToolAction()`, `handleSelection()`, `handleDrag()`, constraint application |
-| `AppUI.cpp` | `drawToolbar()`, `drawObjectTree()`, `drawTimeline()`, `drawPreferencesWindow()` |
-| `AppDimension.cpp` | `drawDimensionPanel()`, `handleDimToolClick()`, `renderDimensions()`, dimension label layout |
-| `AppExtrude.cpp` | Extrude tool: input, panel, preview, commit, edit |
-| `AppRevolve.cpp` | Revolve tool: input, panel, preview, commit, edit |
-| `AppLoft.cpp` | Loft tool: input, panel, preview, commit, edit |
-| `AppBoolean.cpp` | Boolean tool: input, panel, preview, commit |
+| `App.cpp` | `init()`, `frame()`, `paint()`, `post()`, `shutdown()`, `renderFrame()`, camera, navigation input |
+| `AppSketch.cpp` | `handleSketchInput()`, `handleToolAction()`, `handleSelection()`, `handleDrag()`, constraint application, the inline value box's model |
+| `AppUI.cpp` | Panel models and operations: toolbar (`toolbarModel()`/`perform()`), preferences, mesh import and placement, plane dialogs, object tree, timeline; save/open/export, global undo |
+| `AppDimension.cpp` | Dimension panel model, `handleDimToolClick()`, `renderDimensions()`, dimension label layout |
+| `AppExtrude.cpp` | Extrude tool: input, panel model, preview, commit, edit |
+| `AppRevolve.cpp` | Revolve tool: input, panel model, preview, commit, edit |
+| `AppLoft.cpp` | Loft tool: input, panel model, preview, commit, edit |
+| `AppBoolean.cpp` | Boolean tool: input, panel model, preview, commit |
+
+### UI (`src/qt/`)
+- `main.cpp` builds the `QMainWindow`: the viewport as central widget, the toolbar, the object tree and Simulation docks, dialogs, and the widgets floating over the view (tool panel, timeline, Dimension panel, inline value box). It also sets the Fusion palette from the Light Mode preference and saves the window layout (`QSettings`).
+- `ViewportWidget` is the `QOpenGLWidget` host (implements `AppHost`): each repaint it fills an `InputFrame` (`QtInput.cpp`), calls `App::frame` then `App::paint`, paints `App::overlay()` with QPainter (`QtOverlay.cpp`, GL state saved and restored around it), and emits `frameBuilt`.
+- **Panels are views of App**: on `frameBuilt` each reads a model struct (`toolbarModel()`, `timelineModel()`, `simSetupModel()`, ...) and changes App only by `App::post()`-ing a named operation, which runs at the start of the next frame. A refresh never writes into a widget that has focus or is being dragged; structural changes (rows added or removed) rebuild only what changed. Live edits commit their undo step when the edit finishes.
+- **Keyboard shortcuts stay in the viewport handlers**: `KeyRouting.cpp` forwards keys from the docks, the floating panels and the tool windows to the viewport unless a text field has focus (Escape and Enter stay with a dialog). Qt dialogs tell App they closed by overriding `reject()`.
 
 ### Data flow for 3D features (extrude/revolve/loft)
 1. User enters sketch mode on a `SketchPlane` -> edits `Sketch` entities
@@ -87,8 +92,8 @@ Global undo stack with typed commands: `AddFeature`, `DeleteFeature`, `SuppressF
 ### Rendering pipeline
 - `Viewport3D` - orbit camera (yaw/pitch/distance), orthographic/perspective, ground grid
 - `Scene3D` - stores `Body3D` objects (OCCT shape + tessellated mesh and edges on the CPU; VAO/VBO are a cache uploaded lazily by `syncGpu()` when rendering). Adding, replacing and removing bodies never calls GL, so replay/undo/commit need no GL context (the tests run without one); freed buffers are queued and deleted at the next render. `vertexCount` is set when the body is built.
-- Host boundary: App never calls GLFW. The host drives `App::frame(dt, fbW, fbH)` then `App::paint()` with the context current; `AppHost` gives App the window title and redraw requests. Code outside the ImGui frame changes App state only through `App::post()`, which runs at the start of the next frame.
-- Viewport input comes from `App::in_` (`ViewportInput.h`), filled once per frame; screen-space drawing over the 3D view goes through `App::overlay_` (`Overlay2D.h`), flushed after the 3D pass. Handlers must not query ImGui input or draw lists directly.
+- Host boundary: App never calls Qt. The host drives `App::frame(dt, fbW, fbH, input)` then `App::paint()` with the context current, then draws `App::overlay()`; `AppHost` gives App the window title, redraw requests and file dialogs. Everything outside the frame changes App state only through `App::post()`.
+- Viewport input is `App::in_` (`ViewportInput.h`), passed in once per frame with the semantics the handlers were written against: held-key repeat, trickled events (a quick click is seen down, then up), furthest-drag distance. Screen-space drawing over the 3D view is recorded into `App::overlay_` (`Overlay2D.h`) during the frame, including from inside the GL pass, and drawn once after it; its text is measured by the host's function so labels and hit rectangles match what is drawn.
 - `SketchRenderer` - draws sketch geometry, tool previews, selection highlights, dimension labels
 - Shaders are compiled at init via `ShaderProgram`
 
@@ -104,7 +109,7 @@ Global undo stack with typed commands: `AddFeature`, `DeleteFeature`, `SuppressF
 
 ### Simulation workspace (`Simulation.h/cpp`, `AppSimulation.cpp`)
 - Toolbar tabs switch `workspace_` between Model and Simulation (only from Navigate with no 3D tool active). Simulation replaces `handleNavigateInput` with `handleSimulationInput` and shows the Simulation panel.
-- `SimulationSetup` (surface roles, nozzles, run settings) is set-up data, not geometry: saved as a `"simulation"` block in the project (forces `version: 2`), undone as a whole via `ModifySimulation`. Widgets edit `simulation_` live; `commitSimulationEdit()` pushes one undo step from `simUndoBase_` - call it on `IsItemDeactivatedAfterEdit()` or after a discrete action.
+- `SimulationSetup` (surface roles, nozzles, run settings) is set-up data, not geometry: saved as a `"simulation"` block in the project (forces `version: 2`), undone as a whole via `ModifySimulation`. Live edits change `simulation_` directly; `commitSimulationEdit()` pushes one undo step from `simUndoBase_` (a no-op if nothing changed) - call it when an edit finishes (slider released, field finished). The operations for discrete actions (flip, delete, role) commit themselves.
 - Nozzles store position/axis in their **host mesh's frame** (`hostFeature`), so moving or rotating an import carries its nozzles. Always go through `nozzleWorld` / `setNozzleWorld`.
 - A placed nozzle sprays along **-normal** of the picked triangle (into the cavity for an outward-wound fluid-cavity STL), offset inward by the standoff.
 - `buildTier1Spec` writes a cip-sim spec (`cip-sim/spec/README.md`): mm, `"up": [0,1,0]`, one surface per active MeshImport with its unit and placement as `transform`. The frame is declared, not converted.
@@ -121,7 +126,7 @@ Global undo stack with typed commands: `AddFeature`, `DeleteFeature`, `SuppressF
 - Controls appear in the Simulation panel under "View" and, in the Model workspace, from the toolbar's Section button. The plane is a view setting: not saved in the project.
 
 ### Fixes from the 2026-09-16 review (read before touching these)
-- **Paths are stored as UTF-8.** The native dialogs return the ANSI code page; `ansiToUtf8` converts at the boundary. An accented character used to throw out of `dump()` inside an ImGui draw and terminate the app. JSON dumps also use `error_handler_t::replace`.
+- **Paths are stored as UTF-8.** The native dialogs return the ANSI code page; `ansiToUtf8` converts at the boundary. An accented character used to throw out of `dump()` inside a UI draw and terminate the app. JSON dumps also use `error_handler_t::replace`.
 - **Open files through `Utf8Path.h`, never with a raw `std::string`.** `std::ofstream(str)`, `fs::path(str)`, `path::string()`, `CreateProcessA` and `ShellExecuteA` all read ANSI on Windows, so a UTF-8 path fails to open anything outside ASCII (and `path::string()` throws). Use `fsPath(str)` to open and `utf8(path)` to get a string back; start processes with the W APIs. OCCT's `const char*` file functions take UTF-8, so pass them the string directly. `testNonAsciiPaths` covers import, save/load, results and the engine launch.
 - **State that can go stale is the main hazard here**, not the maths. `App::runInputs()` is the single definition of what a run depended on - spec + rays/bounces (which are argv, not in the spec) + a size/mtime stamp of every STL - and the Results panel compares it. `clearSimulationRun()` is called when a project is opened; `simSummary_` is cleared on start and on cancel, so a previous run's numbers can never be attributed to a later one.
 - **A mesh's unit change rescales its nozzles** (`setMeshImportData`), since they are stored in the host's scaled frame.
@@ -136,7 +141,7 @@ Global undo stack with typed commands: `AddFeature`, `DeleteFeature`, `SuppressF
 - Project format: JSON (nlohmann/json), stores full feature history + plane definitions
 - Export: STL, STEP, IGES, OBJ, DXF (via OCCT)
 - Import: STL (as a MeshImport feature, above), STEP, IGES
-- All file dialogs use Windows native dialogs
+- File dialogs go through `AppHost::chooseFile` (`FileDialogs.h` lists them): `QFileDialog`, native on Windows, with Unicode paths. App falls back to its Win32 dialogs only if a host provides none.
 
 ## Conventions
 
@@ -146,7 +151,7 @@ Global undo stack with typed commands: `AddFeature`, `DeleteFeature`, `SuppressF
 - **State structs**: tool states (e.g., `ExtrudeToolState`) have a `reset()` method that does `*this = {}`
 - **No exceptions** - error handling via return values (`bool`, `SolveResult`, etc.)
 - **OCCT types**: `TopoDS_Shape`, `TopoDS_Face`, `gp_Pnt`, etc. are used at the boundary between sketch/profile data and 3D geometry
-- **ImGui**: immediate mode - UI is rebuilt every frame in `renderFrame()`
+- **UI**: Qt Widgets, only in `src/qt/`; panels follow App's models and act through `App::post()` (see "UI" above). No UI code in `App*.cpp` beyond models and operations.
 - **OpenGL 3.3 core** - no fixed pipeline, manual VAO/VBO management
 
 ## Adding a new sketch entity type
@@ -160,7 +165,7 @@ Global undo stack with typed commands: `AddFeature`, `DeleteFeature`, `SuppressF
 7. Add to `Solver.cpp` if constraints can reference it
 8. Add to `Serialization.cpp` for save/load
 9. Add `ToolType` entry and handler in `Tools.h/cpp`
-10. Wire up in `AppSketch.cpp` (`handleToolAction`) and `AppUI.cpp` (toolbar button)
+10. Wire up in `AppSketch.cpp` (`handleToolAction`) and the toolbar (`toolbarModel()`/`perform()` in `AppUI.cpp`, drawn by `src/qt/Toolbar.cpp`)
 
 ## Adding a new constraint type
 
@@ -170,20 +175,20 @@ Global undo stack with typed commands: `AddFeature`, `DeleteFeature`, `SuppressF
 4. Add to `AppDimension.cpp` if it's a dimensional constraint (distance/angle)
 5. Add to `AppSketch.cpp` `applyGeometricConstraint()` if it's geometric
 6. Add to `Serialization.cpp` for save/load
-7. Add toolbar button in `AppUI.cpp`
+7. Add a toolbar button (`toolbarModel()`/`perform()` in `AppUI.cpp`, drawn by `src/qt/Toolbar.cpp`)
 
 ## Adding a new 3D feature type
 
 1. Define `*FeatureData` struct in `FeatureHistory.h`
 2. Add to `FeatureType` enum and `Feature::data` variant
 3. Add `add*Feature()`, `update*Data()` to `FeatureHistory`
-4. Create `App*Tool.cpp` with input, panel, preview, commit, cancel, edit methods
+4. Create `App*Tool.cpp` with input, panel model and operations, preview, commit, cancel, edit methods, and a page for it in `src/qt/ToolPanel.cpp`
 5. Add `*ToolState` struct in `ExtrudeTool.h` (or new header)
 6. Add tool state member + methods to `App.h`
 7. Add case in `FeatureReplay.cpp` `replayAll()` for rebuilding from history
 8. Add to `Serialization.cpp` for save/load
 9. Add `UndoActionType` + handling in `UndoStack.h/cpp`
-10. Wire up toolbar entry in `AppUI.cpp`
+10. Wire up the toolbar entry (`toolbarModel()`/`perform()` in `AppUI.cpp`)
 
 ## Key constants (`Constants.h`)
 

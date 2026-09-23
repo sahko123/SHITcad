@@ -1,6 +1,5 @@
 #include "App.h"
 
-#include <imgui.h>
 
 #include <algorithm>
 #include <cmath>
@@ -99,52 +98,6 @@ void App::centreSection() {
     float lo[3], hi[3];
     sceneBounds(lo, hi);
     section_.position = (lo[section_.axis] + hi[section_.axis]) * 0.5f;
-}
-
-// ImGui front end for SectionModel (the Qt one is src/qt/SectionControls.cpp),
-// in the Section window and in the Simulation panel's View section.
-void App::drawSectionControls() {
-    float lo[3], hi[3];
-    sceneBounds(lo, hi);
-
-    bool enabled = section_.enabled;
-    if (ImGui::Checkbox("Section view", &enabled)) setSectionEnabled(enabled);
-    if (!section_.enabled) {
-        ImGui::TextDisabled("Cut the model open to see inside.");
-        return;
-    }
-
-    int axis = section_.axis;
-    ImGui::AlignTextToFramePadding();
-    ImGui::TextUnformatted("Cut along");
-    ImGui::SameLine();
-    ImGui::RadioButton("X", &axis, 0); ImGui::SameLine();
-    ImGui::RadioButton("Y", &axis, 1); ImGui::SameLine();
-    ImGui::RadioButton("Z", &axis, 2); ImGui::SameLine();
-    bool flip = section_.flip;
-    if (ImGui::Checkbox("Flip", &flip)) setSectionFlip(flip);
-    setSectionAxis(axis);
-
-    setSectionPosition(section_.position);   // the scene may have changed size
-    float position = section_.position;
-    ImGui::SetNextItemWidth(-60);
-    if (ImGui::SliderFloat("Position", &position, lo[section_.axis], hi[section_.axis], "%.0f mm"))
-        setSectionPosition(position);
-    if (ImGui::Button("Centre")) centreSection();
-    ImGui::SameLine();
-    bool cap = section_.cap;
-    if (ImGui::Checkbox("Cap the cut", &cap)) setSectionCap(cap);
-    ImGui::TextDisabled("Cuts geometry and results. Spray cones stay whole.");
-
-    if (section_.cap) {
-        const SectionModel m = sectionModel();
-        const int open = m.openSurfaces, closed = m.closedSurfaces;
-        if (open > 0)
-            ImGui::TextDisabled("%d open surface%s cannot be capped and are left hollow.",
-                                open, open == 1 ? "" : "s");
-        if (closed == 0 && open > 0)
-            ImGui::TextDisabled("(A cap needs a watertight surface.)");
-    }
 }
 
 // Fill the opening left by the cut so the model reads as solid.

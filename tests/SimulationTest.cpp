@@ -24,8 +24,12 @@
 #include <thread>
 
 #include <glad/gl.h>
-#include <GLFW/glfw3.h>
 #include <nlohmann/json.hpp>
+
+#include <QGuiApplication>
+#include <QOffscreenSurface>
+#include <QOpenGLContext>
+#include <QSurfaceFormat>
 
 #include <algorithm>
 #include <array>
@@ -840,21 +844,26 @@ int main(int argc, char** argv) {
     testSaveLoad();
 
     const fs::path crossDir = argc > 1 ? fs::path(argv[1]) : fs::temp_directory_path() / "shitcad_sim_crosscheck";
-    if (!glfwInit()) {
-        std::printf("glfwInit failed\n");
-        g_failures++;
-    } else {
-        glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
-        glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
-        glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
-        glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
-        GLFWwindow* win = glfwCreateWindow(64, 64, "test", nullptr, nullptr);
-        if (!win) {
+    {
+        // An offscreen OpenGL 3.3 core context, as the app renders with.
+        int qtArgc = 1;
+        char* qtArgv[] = {argv[0], nullptr};
+        QGuiApplication qapp(qtArgc, qtArgv);
+        QSurfaceFormat fmt;
+        fmt.setVersion(3, 3);
+        fmt.setProfile(QSurfaceFormat::CoreProfile);
+        QOpenGLContext ctx;
+        ctx.setFormat(fmt);
+        QOffscreenSurface surface;
+        surface.setFormat(fmt);
+        surface.create();
+        if (!ctx.create() || !ctx.makeCurrent(&surface)) {
             std::printf("no GL context\n");
             g_failures++;
         } else {
-            glfwMakeContextCurrent(win);
-            gladLoadGL(glfwGetProcAddress);
+            gladLoadGL([](const char* name) -> GLADapiproc {
+                return (GLADapiproc)QOpenGLContext::currentContext()->getProcAddress(name);
+            });
             writeCrossCheck(crossDir);
             testPickingRespectsTheSection(fs::temp_directory_path() / "shitcad_simulation_test");
             {
@@ -870,9 +879,8 @@ int main(int argc, char** argv) {
                 ShaderProgram sp;
                 CHECK(sp.compile(kResultVertSrc, kResultFragSrc) && sp.id() != 0, "result shader failed to compile");
             }
-            glfwDestroyWindow(win);
+            ctx.doneCurrent();
         }
-        glfwTerminate();
     }
 
     // Engine tests need Python (and, for end to end, the cip-sim repo):

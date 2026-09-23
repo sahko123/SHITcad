@@ -6,7 +6,7 @@ namespace shitcad {
 
 // Every path SHITcad holds in a std::string is UTF-8: the native dialogs are
 // converted at the boundary (see Serialization.h ansiToUtf8), paths typed into
-// ImGui are UTF-8, and paths read back from JSON are UTF-8.
+// the UI are UTF-8, and paths read back from JSON are UTF-8.
 //
 // The standard library disagrees on Windows: std::ofstream(std::string),
 // std::filesystem::path(std::string) and path::string() all use the ANSI code

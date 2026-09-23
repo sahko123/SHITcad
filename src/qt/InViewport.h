@@ -28,8 +28,8 @@ protected:
     void keyReleaseEvent(QKeyEvent* e) override;
 };
 
-// Qt front end for InlineInputModel (the ImGui one is App::drawInlineDimInput):
-// the value box beside the cursor while drawing a circle or a fillet.
+// Qt front end for InlineInputModel: the value box beside the cursor while
+// drawing a circle or a fillet.
 class InlineInput : public ViewportField {
     Q_OBJECT
 public:
@@ -42,10 +42,10 @@ private:
     std::string lastText_;   // the model's text when last seen
 };
 
-// Qt front end for DimensionPanelModel (the ImGui one is App::drawDimensionPanel):
-// floats over the viewport's top-right corner, like the tool panel. The value
-// field takes the keyboard back whenever the model asks, as the ImGui field
-// does every frame while a label is being placed.
+// Qt front end for DimensionPanelModel: floats over the viewport's top-right
+// corner, like the tool panel. The value field takes the keyboard back
+// whenever the model asks, which it does every frame while a label is being
+// placed, so typing reaches it while the mouse places the label.
 class DimensionPanel : public QFrame {
     Q_OBJECT
 public:

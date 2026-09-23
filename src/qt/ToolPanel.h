@@ -16,9 +16,9 @@ class QVBoxLayout;
 
 namespace shitcad {
 
-// Qt front end for the Extrude, Revolve, Loft and Boolean panels (the ImGui
-// ones are App::draw*Panel). One frame over the top-right corner of the
-// viewport, where the ImGui panels sit, showing the page for the active tool.
+// Qt front end for the Extrude, Revolve, Loft and Boolean panel models. One
+// frame over the top-right corner of the viewport, showing the page for the
+// active tool.
 // It floats rather than docks so that starting a tool does not resize the 3D
 // view. Keys it does not use are swallowed here: those meant for the viewport
 // reach it through KeyRouting, and an Escape that only leaves a text field
@@ -44,7 +44,7 @@ private:
     void refreshLoft(const App::LoftPanelModel& m);
     void refreshBoolean(const App::BooleanPanelModel& m);
     // A typed value is applied on Enter or focus loss; Enter also hands the
-    // keyboard back to the viewport, as an ImGui field lets go on Enter.
+    // keyboard back to the viewport, so a second Enter commits the tool.
     QLineEdit* valueField(QWidget* parent, void (App::*apply)(const std::string&));
     void setField(QLineEdit* field, const std::string& text);
 

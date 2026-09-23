@@ -20,7 +20,7 @@ constexpr int kSteps = 1000;   // slider resolution across the scene's extent
 QLabel* note(const QString& text, QWidget* parent) {
     auto* label = new QLabel(text, parent);
     label->setWordWrap(true);
-    label->setEnabled(false);   // greyed, like ImGui::TextDisabled
+    label->setEnabled(false);   // greyed
     return label;
 }
 
@@ -104,8 +104,8 @@ void SectionControls::refresh(const App::SectionModel& m) {
     body_->setVisible(m.enabled);
     if (!m.enabled) return;
 
-    // Shown means clamped: the ImGui controls pull the plane back into the
-    // scene whenever they are drawn, so these do too.
+    // Shown means clamped: while the controls are up, the plane is pulled
+    // back into the scene if the scene shrank.
     if (m.outOfRange) {
         App* a = &app_;
         const float mm = m.position;
@@ -149,8 +149,8 @@ SectionWindow::SectionWindow(App& app, QWidget* parent) : QDialog(parent), app_(
 void SectionWindow::refresh() {
     const App::SectionModel m = app_.sectionModel();
     if (m.windowOpen != isVisible()) {
-        // First shown at the top right of the view, as the ImGui window is,
-        // rather than centred over the model; after that where it was left.
+        // First shown at the top right of the view rather than centred over
+        // the model; after that where it was left.
         if (m.windowOpen && !placed_ && parentWidget()) {
             placed_ = true;
             controls_->refresh(m);

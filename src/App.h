@@ -44,9 +44,8 @@ enum class Workspace : uint8_t {
 
 // ---- Front-end model -------------------------------------------------------
 // What a panel shows and what its controls do, independent of the toolkit that
-// draws it. The ImGui toolbar and the Qt toolbar both read ToolbarModel and
-// call App::perform, so the two cannot drift apart. (Phase 5 of
-// docs/qt-migration-plan.md: each panel gets this as it moves to Qt.)
+// draws it: the host's panels read a model struct each frame and change App
+// through named operations (for the toolbar, ToolbarModel and App::perform).
 enum class UiAction : uint8_t {
     // sketch toolbar
     FinishSketch, SelectTool /* arg: ToolType */, Extrude, Revolve, Loft, SnapView,
@@ -78,23 +77,20 @@ struct ToolbarModel {
 
 class App {
 public:
-    // Called by the host once a GL context is current and an ImGui context
-    // (with fonts) exists, before the ImGui backends are initialised.
+    // Called by the host once a GL context is current.
     bool init(AppHost* host, float dpiScale);
-    // One frame: runs posted commands, reads input, builds the UI. The host
-    // has begun the ImGui frame.
-    // `input` is this frame's viewport input from the host; without it the
-    // input is read from ImGui (the GLFW host).
-    void frame(float dt, int framebufferW, int framebufferH, const InputFrame* input = nullptr);
-    // Draws the 3D scene into the current framebuffer, then hands this
-    // frame's overlays to ImGui. The host calls ImGui::Render() after it.
+    // One frame: runs posted commands, then handles this frame's viewport
+    // input (from the host) and records the overlay.
+    void frame(float dt, int framebufferW, int framebufferH, const InputFrame& input);
+    // Draws the 3D scene into the current framebuffer. The host then draws
+    // overlay() over it.
     void paint();
-    // Frees App's GL resources. The host tears down ImGui and the window after.
+    // Frees App's GL resources, with the context current.
     void shutdown();
 
     // Queue an operation to run at the start of the next frame, when the GL
-    // context is current and no frame is half-built. Panels that live outside
-    // the ImGui frame (Qt, later) must change App state only through this.
+    // context is current and no frame is half-built. The host's panels
+    // change App state only through this.
     void post(std::function<void()> fn);
     bool hasPosted() const { return !posted_.empty(); }
 
@@ -208,8 +204,8 @@ public:
     void setBodyVisible(int bodyIndex, bool visible);
     void editPlaneSketch(int planeIndex); // enterSketchMode, ignoring a stale index
 
-    // ---- Tool panels. Typed values are applied as the ImGui fields apply
-    // them, on Enter or when the field loses focus; an invalid value puts
+    // ---- Tool panels. Typed values are applied on Enter or when the field
+    // loses focus; an invalid value puts
     // back the last good one.
     struct ExtrudePanelModel {
         bool open = false;
@@ -445,27 +441,10 @@ public:
     void applyDimension();             // Enter / Apply
     void cancelDimension();            // Escape / Cancel
 
-    // Panels the host draws itself (Qt); App then skips their ImGui versions.
-    enum HostPanel : uint32_t {
-        HostToolbar     = 1u << 0,
-        HostPreferences = 1u << 1,
-        HostMeshImport  = 1u << 2,
-        HostMeshPlace   = 1u << 3,
-        HostAddPlane    = 1u << 4,
-        HostTangentPlane = 1u << 5,
-        HostObjectTree  = 1u << 6,
-        HostToolPanels  = 1u << 7,     // extrude, revolve, loft, boolean
-        HostSection     = 1u << 8,     // the Model workspace's Section window
-        HostTimeline    = 1u << 9,
-        HostSimulation  = 1u << 10,
-        HostInViewport  = 1u << 11,    // inline value box and dimension panel
-        HostOverlay     = 1u << 12,    // the host draws overlay_ after paint()
-    };
-    // Screen-space drawing recorded this frame, for a host that draws it.
+    // Screen-space drawing recorded this frame; the host draws it after
+    // paint() and measures its text (setOverlayMeasure, before the first frame).
     const Overlay2D& overlay() const { return overlay_; }
     void setOverlayMeasure(Overlay2D::MeasureFn fn) { overlay_.setMeasure(fn); }
-    void setHostPanel(HostPanel p, bool on = true) { hostPanels_ = on ? (hostPanels_ | p) : (hostPanels_ & ~p); }
-    bool hostHas(HostPanel p) const { return (hostPanels_ & p) != 0; }
 
     InteractionMode mode() const { return mode_; }
     Scene3D& scene() { return scene_; }
@@ -493,8 +472,6 @@ public:
 
 private:
     AppHost* host_ = nullptr;
-    uint32_t hostPanels_ = 0;             // HostPanel bits
-    float imguiToolbarHeight() const;     // 0 when the host provides the toolbar
     int fbW_ = 0, fbH_ = 0;               // framebuffer size for this frame
     std::vector<std::function<void()>> posted_;
     void framebufferSize(int& w, int& h) const { w = fbW_; h = fbH_; }
@@ -507,7 +484,6 @@ private:
     // This frame's input for the 3D view, filled once at the top of
     // renderFrame(). Viewport handlers read this, never the GUI toolkit.
     InputFrame in_;
-    const InputFrame* hostInput_ = nullptr;   // this frame's, from the host
     float frameTimes_[60] = {};               // for the FPS readout
     int frameTimeIdx_ = 0;
     float frameTimeSum_ = 0.0f;
@@ -739,47 +715,35 @@ private:
 
     void renderFrame();
     void render3DScene(int w, int h);
-    void drawToolbar();
-    void drawObjectTree();
     void handleNavigateInput(float vpW, float vpH);
     void handleSketchInput(float vpW, float vpH);
-    void drawInlineDimInput(Sketch& sketch);   // value box while drawing a circle / fillet
     void drawSketchMessage();                  // transient warning at the bottom of the view
     void handleToolAction(Sketch& sketch, Point2D localPos);
     void switchTool(ToolType newTool);
     void handleSelection(Sketch& sketch, bool ctrlHeld = false);
     void handleDrag(Sketch& sketch);
     void handleDeletion(Sketch& sketch);
-    void drawDimensionPanel(Sketch& sketch);
     void syncDimensionLive();          // typed dimension value into its constraint, every frame
     void handleDimToolClick(Sketch& sketch);
-    void drawPreferencesWindow();
-    void drawAddPlaneDialog();
-    void drawTangentPlaneDialog();
-    void drawTimeline(float panelW);
     bool deleteSelectedFeature();      // the Delete key on the timeline selection
     void replayAllFeatures();
     void globalUndo();
     void globalRedo();
     void handleExtrudeInput(float vpW, float vpH);
-    void drawExtrudePanel();
     void updateExtrudePreview();
     void renderExtrudePreview(const float* view, const float* proj, const float* eyePos);
     void renderExtrudeHandle(const float* view, const float* proj, float vpW, float vpH);
     void renderDimensions(const float view[16], const float proj[16], float vpW, float vpH);
     void editExtrudeFeature(FeatureID id);
     void handleRevolveInput(float vpW, float vpH);
-    void drawRevolvePanel();
     void updateRevolvePreview();
     void renderRevolvePreview(const float* view, const float* proj, const float* eyePos);
     void editRevolveFeature(FeatureID id);
     void handleLoftInput(float vpW, float vpH);
-    void drawLoftPanel();
     void updateLoftPreview();
     void renderLoftPreview(const float* view, const float* proj, const float* eyePos);
     void editLoftFeature(FeatureID id);
     void handleBooleanInput(float vpW, float vpH);
-    void drawBooleanPanel();
     void updateBooleanPreview();
     void renderBooleanPreview(const float* view, const float* proj, const float* eyePos);
     void saveProjectDialog();
@@ -794,9 +758,7 @@ private:
     void exportDxfDialog();
     void importModelDialog();
     void beginMeshImport(const std::string& path);
-    void drawMeshImportDialog();
     void editMeshImportFeature(FeatureID id);
-    void drawMeshPlacePanel();
     void setMeshImportData(const MeshImportFeatureData& data); // live edit + replay
     // Bounds of the mesh being placed, from its drawn triangles when available.
     bool meshPlaceBounds(MeshImportFeatureData& data, double lo[3], double hi[3], std::string* error) const;
@@ -805,7 +767,6 @@ private:
     // Simulation workspace (AppSimulation.cpp)
     bool canSwitchWorkspace() const;
     void setWorkspace(Workspace w);
-    void drawSimulationPanel();
     void handleSimulationInput(float vpW, float vpH);
     void renderSimulationOverlay(const float* view, const float* proj);
     float simulationSceneExtent();
@@ -822,13 +783,10 @@ private:
     void clearSimulationRun();
     void releaseSimulationResults();
     void renderSimulationResults(const float* view, const float* proj, const float* eyePos);
-    void drawSimulationRunSection();
-    void drawSimulationResultsSection();
     void drawNozzleLabels();              // names beside the cone apexes
     void validateSimulationSelection();   // drop a nozzle selection undo removed
     // Section view (AppSection.cpp)
     void sceneBounds(float lo[3], float hi[3]);
-    void drawSectionControls();
     void renderSectionCap(const float* view, const float* proj, bool resultsShown);
     void drawMeshHoverReadout();
     void applyGeometricConstraint(Sketch& sketch, ConstraintType type);

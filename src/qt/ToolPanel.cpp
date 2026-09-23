@@ -49,7 +49,7 @@ void setLabel(QLabel* label, const QString& text) {
     if (label->text() != text) label->setText(text);
 }
 
-// OK and Cancel side by side, as in the ImGui panels.
+// OK and Cancel side by side.
 QHBoxLayout* okCancel(QPushButton* ok, QPushButton* cancel) {
     auto* row = new QHBoxLayout;
     row->addWidget(ok);
@@ -428,7 +428,7 @@ void ToolPanel::refresh() {
 }
 
 void ToolPanel::keyPressEvent(QKeyEvent* e) {
-    // Escape in a field leaves the field without applying it, as in ImGui.
+    // Escape in a field leaves the field without applying it.
     if (e->key() == Qt::Key_Escape) {
         if (auto* field = qobject_cast<QLineEdit*>(focusWidget()); field && field->hasFocus()) {
             const QSignalBlocker block(field);

@@ -5,8 +5,7 @@
 
 namespace shitcad {
 
-// 32-bit colour, packed as R | G << 8 | B << 16 | A << 24 - the same layout as
-// ImGui's IM_COL32, so values move between the two unchanged.
+// 32-bit colour, packed as R | G << 8 | B << 16 | A << 24.
 using Color32 = uint32_t;
 constexpr Color32 rgba32(int r, int g, int b, int a) {
     return (Color32)(r & 0xFF) | ((Color32)(g & 0xFF) << 8) |

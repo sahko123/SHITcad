@@ -14,8 +14,6 @@
 #include <TopoDS_Solid.hxx>
 
 #include <glad/gl.h>
-#include <imgui.h>
-#include <imgui_internal.h>
 #include "UnitUtils.h"
 #include <cstdio>
 #include <cstdlib>
@@ -29,100 +27,11 @@ namespace shitcad {
 
 static float lerp(float a, float b, float t) { return a + (b - a) * t; }
 
-// Overlay text is measured with the calls the overlay code used before it was
-// recorded: CalcTextSize at the UI font size, CalcTextSizeA when scaled. They
-// round differently, and label layout and hit rectangles depend on the result.
-static OvVec2 measureWithImGui(const char* text, float scale) {
-    ImVec2 s = (scale == 1.0f)
-        ? ImGui::CalcTextSize(text)
-        : ImGui::GetFont()->CalcTextSizeA(ImGui::GetFontSize() * scale, FLT_MAX, 0.0f, text);
-    return {s.x, s.y};
-}
-
-// Draws the recorded overlay into ImGui's foreground list, which renders above
-// every window. Must run before ImGui::Render().
-static void flushOverlayToImGui(const Overlay2D& ov) {
-    ImDrawList* dl = ImGui::GetForegroundDrawList();
-    auto v = [](OvVec2 p) { return ImVec2(p.x, p.y); };
-    for (const auto& c : ov.commands()) {
-        switch (c.kind) {
-            case Overlay2D::Kind::Line: dl->AddLine(v(c.a), v(c.b), c.col, c.thickness); break;
-            case Overlay2D::Kind::Rect: dl->AddRect(v(c.a), v(c.b), c.col, c.rounding, 0, c.thickness); break;
-            case Overlay2D::Kind::RectFilled: dl->AddRectFilled(v(c.a), v(c.b), c.col, c.rounding); break;
-            case Overlay2D::Kind::TriangleFilled: dl->AddTriangleFilled(v(c.a), v(c.b), v(c.c), c.col); break;
-            case Overlay2D::Kind::Circle: dl->AddCircle(v(c.a), c.rounding, c.col, c.segments, c.thickness); break;
-            case Overlay2D::Kind::CircleFilled: dl->AddCircleFilled(v(c.a), c.rounding, c.col, c.segments); break;
-            case Overlay2D::Kind::Text:
-                if (c.textScale == 1.0f)
-                    dl->AddText(v(c.a), c.col, c.text.c_str());
-                else
-                    dl->AddText(ImGui::GetFont(), ImGui::GetFontSize() * c.textScale, v(c.a), c.col, c.text.c_str());
-                break;
-        }
-    }
-}
-
-// The only place viewport input is read from ImGui. Called after
-// ImGui::NewFrame(), so every value is the one the handlers used to query.
-static void fillInputFromImGui(InputFrame& in, float viewY) {
-    static const ImGuiKey kKeys[(int)Key::Count] = {
-        ImGuiKey_A, ImGuiKey_C, ImGuiKey_D, ImGuiKey_E, ImGuiKey_F, ImGuiKey_L, ImGuiKey_N,
-        ImGuiKey_O, ImGuiKey_P, ImGuiKey_R, ImGuiKey_S, ImGuiKey_T, ImGuiKey_V, ImGuiKey_Y, ImGuiKey_Z,
-        ImGuiKey_0, ImGuiKey_1, ImGuiKey_2, ImGuiKey_3, ImGuiKey_4,
-        ImGuiKey_5, ImGuiKey_6, ImGuiKey_7, ImGuiKey_8, ImGuiKey_9,
-        ImGuiKey_Keypad0, ImGuiKey_Keypad1, ImGuiKey_Keypad2, ImGuiKey_Keypad3, ImGuiKey_Keypad4,
-        ImGuiKey_Keypad5, ImGuiKey_Keypad6, ImGuiKey_Keypad7, ImGuiKey_Keypad8, ImGuiKey_Keypad9,
-        ImGuiKey_KeypadDecimal, ImGuiKey_KeypadEnter, ImGuiKey_Period, ImGuiKey_Enter,
-        ImGuiKey_Escape, ImGuiKey_Delete, ImGuiKey_Backspace,
-    };
-    static_assert(sizeof(kKeys) / sizeof(kKeys[0]) == (size_t)Key::Count, "every Key needs an ImGuiKey");
-    static_assert((int)Key::A == 0 && (int)Key::Num0 == 15 && (int)Key::Keypad0 == 25 &&
-                  (int)Key::Backspace == (int)Key::Count - 1, "kKeys must follow the Key order");
-
-    const ImGuiIO& io = ImGui::GetIO();
-    in.mouseX = io.MousePos.x;
-    in.mouseY = io.MousePos.y;
-    in.mouseDX = io.MouseDelta.x;
-    in.mouseDY = io.MouseDelta.y;
-    in.wheel = io.MouseWheel;
-    in.dt = io.DeltaTime;
-    in.viewX = 0.0f;
-    in.viewY = viewY;
-    in.viewW = io.DisplaySize.x;
-    in.viewH = io.DisplaySize.y - viewY;
-    in.screenW = io.DisplaySize.x;
-    in.screenH = io.DisplaySize.y;
-    in.shift = io.KeyShift;
-    in.ctrl = io.KeyCtrl;
-    in.alt = io.KeyAlt;
-    in.uiWantsMouse = io.WantCaptureMouse;
-    in.uiWantsKeyboard = io.WantCaptureKeyboard;
-    for (int b = 0; b < (int)MouseButton::Count; b++) {
-        in.down[b] = io.MouseDown[b];
-        in.clicked[b] = ImGui::IsMouseClicked(b);
-        in.released[b] = ImGui::IsMouseReleased(b);
-        in.doubleClicked[b] = ImGui::IsMouseDoubleClicked(b);
-        in.pressX[b] = io.MouseClickedPos[b].x;
-        in.pressY[b] = io.MouseClickedPos[b].y;
-        in.dragMaxDistSqr[b] = io.MouseDragMaxDistanceSqr[b];
-    }
-    for (int k = 0; k < (int)Key::Count; k++)
-        in.pressed[(size_t)k] = ImGui::IsKeyPressed(kKeys[k]); // with auto-repeat, as before
-    in.typed.clear();
-    for (int i = 0; i < io.InputQueueCharacters.Size; i++)
-        in.typed.push_back((char32_t)io.InputQueueCharacters[i]);
-}
-
 bool App::init(AppHost* host, float dpiScale) {
     host_ = host;
     dpiScale_ = dpiScale;
 
     prefs_.applyTheme();
-
-    // Scale ImGui style for high-DPI
-    ImGui::GetStyle().ScaleAllSizes(dpiScale_);
-
-    overlay_.setMeasure(measureWithImGui);
 
     if (!viewport3D_.init()) {
         fprintf(stderr, "Failed to init 3D viewport\n");
@@ -174,10 +83,10 @@ bool App::init(AppHost* host, float dpiScale) {
     return true;
 }
 
-void App::frame(float dt, int framebufferW, int framebufferH, const InputFrame* input) {
+void App::frame(float dt, int framebufferW, int framebufferH, const InputFrame& input) {
     fbW_ = framebufferW;
     fbH_ = framebufferH;
-    hostInput_ = input;
+    in_ = input;
 
     // Frame rate over the last 60 frames, for the FPS readout
     frameTimeSum_ += dt - frameTimes_[frameTimeIdx_];
@@ -196,25 +105,17 @@ void App::frame(float dt, int framebufferW, int framebufferH, const InputFrame* 
 
     overlay_.clear();
     renderFrame();
-    hostInput_ = nullptr;
 }
 
+// The host draws overlay() after this: the 3D pass records overlays too
+// (extrude handle, box select, simulation labels).
 void App::paint() {
     render3DScene(fbW_, fbH_);
-
-    // After the 3D pass, which records overlays too (extrude handle, box
-    // select, simulation labels), and before ImGui builds its draw data.
-    if (!hostHas(HostOverlay)) flushOverlayToImGui(overlay_);
 }
 
 void App::post(std::function<void()> fn) {
     posted_.push_back(std::move(fn));
     if (host_) host_->requestRedraw();
-}
-
-float App::imguiToolbarHeight() const {
-    if (hostHas(HostToolbar)) return 0.0f;
-    return ImGui::GetFrameHeight() + ImGui::GetStyle().WindowPadding.y * 2.0f;
 }
 
 std::string App::chooseFile(FileDialog kind, const char* title) {
@@ -437,7 +338,7 @@ void App::render3DScene(int w, int h) {
 
         // Selection overlay
         if (selection_.dragMode == SelectionDragMode::BoxSelect) {
-            // Draw box in screen space using ImGui
+            // Draw box in screen space
             Overlay2D& ov = overlay_;
             OvVec2 a(f(selection_.dragAnchorScreen.x), f(selection_.dragAnchorScreen.y));
             OvVec2 b(in_.mouseX, in_.mouseY);
@@ -456,10 +357,6 @@ void App::render3DScene(int w, int h) {
 }
 
 void App::renderFrame() {
-    // Toolbar height, needed for the input rect before the toolbar is drawn
-    float toolbarH = imguiToolbarHeight();
-    if (hostInput_) in_ = *hostInput_;
-    else fillInputFromImGui(in_, toolbarH);
     const float vpW = in_.screenW;
     const float vpH = in_.screenH;
 
@@ -485,33 +382,8 @@ void App::renderFrame() {
         viewport3D_.camera().orthographic = !viewport3D_.camera().orthographic;
     }
 
-    // Toolbar — auto-fit height (unless the host draws its own)
-    if (!hostHas(HostToolbar)) {
-        ImGui::SetNextWindowPos({0, 0});
-        ImGui::SetNextWindowSize({vpW, toolbarH});
-        ImGui::Begin("##toolbar", nullptr,
-            ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
-            ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse |
-            ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse |
-            ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoFocusOnAppearing);
-        drawToolbar();
-        ImGui::End();
-    }
-
-    // Object tree sidebar (positioned below toolbar)
-    float panelW = 0.0f;
-    if (objectTreeOpen_ && !hostHas(HostObjectTree)) {
-        panelW = 200.0f;
-        drawObjectTree();
-    }
-    // Opened from the tree; the ImGui build only shows it while the tree is.
-    if ((objectTreeOpen_ || hostHas(HostObjectTree)) && !hostHas(HostAddPlane)) drawAddPlaneDialog();
-
-    // Handle input (below toolbar, right of object tree)
-    float inputY = toolbarH;
-    float inputH = vpH - inputY;
-
-    viewport3D_.handleInput(in_, panelW, inputY, vpW - panelW, inputH);
+    // The panels are the host's widgets, outside the view: all of it takes input.
+    viewport3D_.handleInput(in_, 0.0f, 0.0f, vpW, vpH);
 
     // Route extrude/revolve input regardless of mode
     profiler_.begin("Input");
@@ -544,59 +416,26 @@ void App::renderFrame() {
         meshHover_ = {};
     profiler_.end();
 
-    // Extrude panel
-    if (!hostHas(HostToolPanels)) {
-        if (tool_.type == ToolType::Extrude && hasExtrudeSketch()) drawExtrudePanel();
-        if (tool_.type == ToolType::Revolve && hasRevolveSketch()) drawRevolvePanel();
-        if (tool_.type == ToolType::Loft) drawLoftPanel();
-        if (isBooleanActive()) drawBooleanPanel();
-    }
-
-    // Dimension panel
+    // Dimension tool: the typed value follows into its constraint every frame
     if (tool_.type == ToolType::Dimension && activeSketchPlane_ >= 0) {
         if (dimTool_.warningTimer > 0) dimTool_.warningTimer -= in_.dt;
-        if (!hostHas(HostInViewport)) {
-            drawDimensionPanel(activeSketch());
-        } else if (dimTool_.phase != DimToolState::Selecting) {
-            // What the ImGui panel does besides drawing itself
+        if (dimTool_.phase != DimToolState::Selecting) {
             syncDimensionLive();
             if (in_.keyPressed(Key::Escape)) cancelDimension();
         }
     }
 
-    // Preferences window
-    if (prefsOpen_ && !hostHas(HostPreferences)) drawPreferencesWindow();
-
-    // Cylinder tangent plane dialog
-    if (!hostHas(HostTangentPlane)) drawTangentPlaneDialog();
-    if (sectionWindowOpen_ && workspace_ == Workspace::Model && !hostHas(HostSection)) {
-        ImGui::SetNextWindowSize({300, 0}, ImGuiCond_Appearing);
-        ImGui::SetNextWindowPos({vpW - 320, 60}, ImGuiCond_Appearing);
-        ImGui::Begin("Section view", &sectionWindowOpen_, ImGuiWindowFlags_AlwaysAutoResize);
-        drawSectionControls();
-        ImGui::End();
-    }
-    if (!hostHas(HostMeshImport)) drawMeshImportDialog();
     pollSimulationRun(); // every frame, whichever workspace is showing
     validateSimulationSelection();
-    if (!hostHas(HostSimulation)) drawSimulationPanel();
     drawNozzleLabels();
     validateMeshPlace();
-    if (!hostHas(HostMeshPlace)) drawMeshPlacePanel();
     drawMeshHoverReadout();
 
-    // Timeline
-    float timelineH = 0.0f;
+    // Timeline: the playhead's deferred replay, and Delete on its selection
+    const float timelineH = hostTimelineH_;
     if (timelineOpen_ && !featureHistory_.empty()) {
-        if (!hostHas(HostTimeline)) {
-            timelineH = ImGui::GetFrameHeight() + ImGui::GetStyle().WindowPadding.y * 2.0f;
-            drawTimeline(panelW);
-        } else {
-            // What the ImGui timeline does besides drawing itself
-            timelineH = hostTimelineH_;
-            if (playheadDragging_) tickPlayhead();
-            if (in_.keyPressed(Key::Delete) && !in_.uiWantsKeyboard) deleteSelectedFeature();
-        }
+        if (playheadDragging_) tickPlayhead();
+        if (in_.keyPressed(Key::Delete) && !in_.uiWantsKeyboard) deleteSelectedFeature();
     }
 
     // FPS / frametime overlay
@@ -612,7 +451,7 @@ void App::renderFrame() {
         ov.addText(pos, rgba32(200, 200, 200, 255), fpsText);
     }
 
-    // Dimension annotations (must be in ImGui frame, before ImGui::Render())
+    // Dimension annotations
     {
         int w, h;
         framebufferSize(w, h);
@@ -653,7 +492,7 @@ void App::renderFrame() {
 
         // Position: bottom-left of viewport, above any timeline
         float margin  = 16.0f;
-        float rulerX  = panelW + margin;
+        float rulerX  = margin;
         float rulerY  = vpH - margin - 24.0f;
 
         Overlay2D& ov = overlay_;

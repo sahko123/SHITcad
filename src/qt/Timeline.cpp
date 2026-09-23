@@ -249,7 +249,7 @@ void Timeline::contextMenu(int i, const QPoint& globalPos) {
     const uint32_t id = item.id;
 
     QMenu menu(this);
-    // Name field: Enter renames, as in the ImGui popup
+    // Name field: Enter renames
     auto* nameRow = new QWidget(&menu);
     auto* row = new QHBoxLayout(nameRow);
     row->setContentsMargins(8, 4, 8, 4);

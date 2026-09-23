@@ -13,8 +13,6 @@
 #include <TopoDS_Solid.hxx>
 
 #include <glad/gl.h>
-#include <imgui.h>
-#include <imgui_internal.h>
 #include <cstdio>
 #include <cmath>
 #include <algorithm>
@@ -199,68 +197,6 @@ void App::pickRevolveAxis(bool clearCurrent) {
 }
 
 void App::pickRevolveProfiles() { revolveTool_.phase = RevolvePhase::SelectingProfiles; }
-
-// ImGui front end for RevolvePanelModel (the Qt one is src/qt/ToolPanel.cpp).
-void App::drawRevolvePanel() {
-    ImGuiIO& io = ImGui::GetIO();
-    float panelW = 220.0f;
-    const RevolvePanelModel m = revolvePanelModel();
-
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, {10, 10});
-    ImGui::SetNextWindowPos({io.DisplaySize.x - panelW, 30});
-    ImGui::SetNextWindowSize({panelW, 0});
-    ImGui::Begin("Revolve", nullptr,
-        ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
-        ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_AlwaysAutoResize);
-
-    // Operation
-    ImGui::Text("Operation:");
-    const char* opNames[] = {"New Body", "Cut"};
-    int opIdx = m.operation;
-    if (ImGui::Combo("##revOp", &opIdx, opNames, 2)) setRevolveOperation(opIdx);
-
-    // Angle: applied on Enter, or when the field loses focus after an edit
-    ImGui::Text("Angle (deg):");
-    if (ImGui::InputText("##revAngle", revolveTool_.angleBuf, sizeof(revolveTool_.angleBuf),
-            ImGuiInputTextFlags_EnterReturnsTrue))
-        setRevolveAngleText(revolveTool_.angleBuf);
-    if (ImGui::IsItemDeactivatedAfterEdit()) setRevolveAngleText(revolveTool_.angleBuf);
-
-    // Axis info
-    ImGui::Separator();
-    if (m.axisLine != NullID) {
-        ImGui::Text("Axis: Line %u", m.axisLine);
-        if (ImGui::Button("Change Axis")) pickRevolveAxis(true);
-    } else if (m.selectingAxis) {
-        ImGui::TextColored(ImVec4(1,0.8f,0,1), "Click a line for axis");
-    } else if (ImGui::Button("Select Axis")) {
-        pickRevolveAxis(false);
-    }
-
-    // Profile info. The phase is read again: the axis buttons above change it.
-    ImGui::Separator();
-    ImGui::Text("Profiles: %d / %d", m.selectedProfiles, m.totalProfiles);
-
-    if (revolveTool_.phase != RevolvePhase::SelectingAxis) {
-        if (ImGui::Button("Select Profiles")) pickRevolveProfiles();
-    }
-
-    // OK / Cancel
-    ImGui::Separator();
-    bool canCommit = revolveTool_.hasSelectedProfiles() && revolveTool_.axisLineID != NullID;
-    if (!canCommit) ImGui::BeginDisabled();
-    if (ImGui::Button("OK [Enter]", {95, 0})) {
-        commitRevolve();
-    }
-    if (!canCommit) ImGui::EndDisabled();
-    ImGui::SameLine();
-    if (ImGui::Button("Cancel [Esc]", {95, 0})) {
-        cancelRevolve();
-    }
-
-    ImGui::End();
-    ImGui::PopStyleVar();
-}
 
 void App::updateRevolvePreview() {
     revolveTool_.previewDirty = false;

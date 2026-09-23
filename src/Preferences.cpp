@@ -1,5 +1,4 @@
 #include "Preferences.h"
-#include <imgui.h>
 
 namespace shitcad {
 
@@ -109,111 +108,6 @@ void Preferences::applyTheme() {
     } else {
         conTextCol[0] = 180/255.0f; conTextCol[1] = 160/255.0f; conTextCol[2] = 255/255.0f; conTextCol[3] = 200/255.0f;
         conBgCol[0] = 30/255.0f; conBgCol[1] = 30/255.0f; conBgCol[2] = 40/255.0f; conBgCol[3] = 160/255.0f;
-    }
-
-    if (lightMode) {
-        ImGui::StyleColorsLight();
-    } else {
-        ImGui::StyleColorsDark();
-    }
-
-    ImGuiStyle& style = ImGui::GetStyle();
-
-    // Geometry — rounded, spacious, modern
-    style.WindowRounding    = 6.0f;
-    style.FrameRounding     = 4.0f;
-    style.GrabRounding      = 4.0f;
-    style.TabRounding       = 4.0f;
-    style.PopupRounding     = 4.0f;
-    style.ChildRounding     = 4.0f;
-    style.ScrollbarRounding = 6.0f;
-
-    style.WindowBorderSize  = 1.0f;
-    style.FrameBorderSize   = 0.0f;
-    style.PopupBorderSize   = 1.0f;
-
-    style.FramePadding      = {8, 5};
-    style.ItemSpacing       = {8, 5};
-    style.ItemInnerSpacing  = {6, 4};
-    style.WindowPadding     = {10, 10};
-    style.ScrollbarSize     = 14.0f;
-    style.GrabMinSize       = 12.0f;
-
-    // Color overrides for a polished Fusion 360-inspired look
-    if (lightMode) {
-        // Toolbar / window backgrounds — soft warm gray
-        style.Colors[ImGuiCol_WindowBg]         = {0.94f, 0.94f, 0.95f, 1.0f};
-        style.Colors[ImGuiCol_ChildBg]          = {0.94f, 0.94f, 0.95f, 1.0f};
-        style.Colors[ImGuiCol_PopupBg]          = {0.97f, 0.97f, 0.98f, 0.98f};
-        style.Colors[ImGuiCol_Border]           = {0.78f, 0.78f, 0.80f, 0.65f};
-
-        // Buttons
-        style.Colors[ImGuiCol_Button]           = {0.84f, 0.84f, 0.86f, 1.0f};
-        style.Colors[ImGuiCol_ButtonHovered]    = {0.74f, 0.80f, 0.92f, 1.0f};
-        style.Colors[ImGuiCol_ButtonActive]     = {0.55f, 0.65f, 0.85f, 1.0f};
-
-        // Frames (inputs, combos)
-        style.Colors[ImGuiCol_FrameBg]          = {0.88f, 0.88f, 0.90f, 1.0f};
-        style.Colors[ImGuiCol_FrameBgHovered]   = {0.82f, 0.85f, 0.92f, 1.0f};
-        style.Colors[ImGuiCol_FrameBgActive]    = {0.75f, 0.80f, 0.90f, 1.0f};
-
-        // Header (tree nodes, collapsible)
-        style.Colors[ImGuiCol_Header]           = {0.82f, 0.85f, 0.92f, 0.6f};
-        style.Colors[ImGuiCol_HeaderHovered]    = {0.70f, 0.78f, 0.92f, 0.8f};
-        style.Colors[ImGuiCol_HeaderActive]     = {0.55f, 0.65f, 0.85f, 1.0f};
-
-        // Accent — blue highlight
-        style.Colors[ImGuiCol_CheckMark]        = {0.20f, 0.45f, 0.80f, 1.0f};
-        style.Colors[ImGuiCol_SliderGrab]       = {0.30f, 0.50f, 0.80f, 1.0f};
-        style.Colors[ImGuiCol_SliderGrabActive] = {0.20f, 0.40f, 0.75f, 1.0f};
-
-        // Separators
-        style.Colors[ImGuiCol_Separator]        = {0.75f, 0.75f, 0.78f, 0.5f};
-
-        // Title bar
-        style.Colors[ImGuiCol_TitleBg]          = {0.88f, 0.88f, 0.90f, 1.0f};
-        style.Colors[ImGuiCol_TitleBgActive]    = {0.82f, 0.85f, 0.92f, 1.0f};
-
-        // Text
-        style.Colors[ImGuiCol_Text]             = {0.12f, 0.12f, 0.14f, 1.0f};
-        style.Colors[ImGuiCol_TextDisabled]     = {0.50f, 0.50f, 0.52f, 1.0f};
-    } else {
-        // Dark theme — charcoal with blue accents
-        style.Colors[ImGuiCol_WindowBg]         = {0.16f, 0.16f, 0.18f, 1.0f};
-        style.Colors[ImGuiCol_ChildBg]          = {0.16f, 0.16f, 0.18f, 1.0f};
-        style.Colors[ImGuiCol_PopupBg]          = {0.14f, 0.14f, 0.16f, 0.98f};
-        style.Colors[ImGuiCol_Border]           = {0.30f, 0.30f, 0.33f, 0.50f};
-
-        // Buttons
-        style.Colors[ImGuiCol_Button]           = {0.24f, 0.24f, 0.27f, 1.0f};
-        style.Colors[ImGuiCol_ButtonHovered]    = {0.30f, 0.38f, 0.55f, 1.0f};
-        style.Colors[ImGuiCol_ButtonActive]     = {0.25f, 0.35f, 0.58f, 1.0f};
-
-        // Frames
-        style.Colors[ImGuiCol_FrameBg]          = {0.20f, 0.20f, 0.23f, 1.0f};
-        style.Colors[ImGuiCol_FrameBgHovered]   = {0.26f, 0.30f, 0.40f, 1.0f};
-        style.Colors[ImGuiCol_FrameBgActive]    = {0.28f, 0.34f, 0.50f, 1.0f};
-
-        // Header
-        style.Colors[ImGuiCol_Header]           = {0.24f, 0.28f, 0.38f, 0.6f};
-        style.Colors[ImGuiCol_HeaderHovered]    = {0.28f, 0.35f, 0.52f, 0.8f};
-        style.Colors[ImGuiCol_HeaderActive]     = {0.25f, 0.35f, 0.58f, 1.0f};
-
-        // Accent
-        style.Colors[ImGuiCol_CheckMark]        = {0.40f, 0.65f, 1.00f, 1.0f};
-        style.Colors[ImGuiCol_SliderGrab]       = {0.35f, 0.55f, 0.85f, 1.0f};
-        style.Colors[ImGuiCol_SliderGrabActive] = {0.40f, 0.60f, 0.90f, 1.0f};
-
-        // Separators
-        style.Colors[ImGuiCol_Separator]        = {0.32f, 0.32f, 0.36f, 0.5f};
-
-        // Title bar
-        style.Colors[ImGuiCol_TitleBg]          = {0.14f, 0.14f, 0.16f, 1.0f};
-        style.Colors[ImGuiCol_TitleBgActive]    = {0.20f, 0.24f, 0.34f, 1.0f};
-
-        // Text
-        style.Colors[ImGuiCol_Text]             = {0.92f, 0.92f, 0.94f, 1.0f};
-        style.Colors[ImGuiCol_TextDisabled]     = {0.50f, 0.50f, 0.52f, 1.0f};
     }
 }
 

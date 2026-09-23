@@ -8,11 +8,11 @@
 
 namespace shitcad {
 
-// Qt front end for TimelineModel (the ImGui one is App::drawTimeline): a
-// strip over the bottom of the viewport, like the ImGui one, with a button
-// per feature and the playhead. Painted by hand: click selects, double-click
-// edits, right-click renames / suppresses / deletes, and the playhead drags
-// between features. The wheel scrolls a long history.
+// Qt front end for TimelineModel: a strip over the bottom of the viewport
+// (not a dock, so the view does not resize when the first feature appears),
+// with a button per feature and the playhead. Painted by hand: click
+// selects, double-click edits, right-click renames / suppresses / deletes,
+// and the playhead drags between features. The wheel scrolls a long history.
 class Timeline : public QWidget {
     Q_OBJECT
 public:

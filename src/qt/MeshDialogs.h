@@ -13,7 +13,7 @@ class QLineEdit;
 
 namespace shitcad {
 
-// Qt front end for MeshImportModel (the ImGui one is App::drawMeshImportDialog):
+// Qt front end for MeshImportModel:
 // STL has no units, so this asks for one while showing the resulting size.
 class MeshImportDialog : public QDialog {
     Q_OBJECT
@@ -39,7 +39,7 @@ private:
     QWidget* form_ = nullptr;          // everything hidden when the file failed to read
 };
 
-// Qt front end for MeshPlaceModel (the ImGui one is App::drawMeshPlacePanel):
+// Qt front end for MeshPlaceModel:
 // rotate and move an imported mesh into place, applied live.
 class MeshPlacePanel : public QDialog {
     Q_OBJECT

@@ -11,7 +11,7 @@
 
 namespace shitcad {
 
-// Qt front end for ToolbarModel: the same buttons as the ImGui toolbar
+// Qt front end for ToolbarModel: the buttons for the current mode
 // (App::drawToolbar), driven by the same model and actions. refresh() runs
 // after every frame; it rebuilds the bar when the variant (sketch / model /
 // simulation) changes and otherwise only updates checked, enabled and text

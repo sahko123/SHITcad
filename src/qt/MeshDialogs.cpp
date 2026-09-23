@@ -271,7 +271,7 @@ void MeshPlacePanel::refresh() {
 }
 
 void MeshPlacePanel::reject() {
-    if (!closing_) { // the window's X, like Cancel in the ImGui panel
+    if (!closing_) { // the window's X or Escape: like Cancel
         App* a = &app_;
         app_.post([a] { a->finishMeshPlace(false); });
     }

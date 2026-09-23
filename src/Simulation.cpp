@@ -268,7 +268,7 @@ bool buildTier1Spec(const SimulationSetup& sim, const FeatureHistory& history,
 
     doc["surfaces"] = surfaces;
     doc["nozzles"] = nozzles;
-    // `replace` rather than the default throw: this runs inside an ImGui draw
+    // `replace` rather than the default throw: this runs every frame
     // (the stale-results check), and a path byte that is not valid UTF-8 would
     // otherwise terminate the app rather than show an error.
     outJson = doc.dump(2, ' ', false, json::error_handler_t::replace);

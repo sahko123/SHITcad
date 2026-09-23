@@ -4,7 +4,6 @@
 #include "FeatureReplay.h"
 #include <BRepAlgoAPI_Cut.hxx>
 #include <BRepAlgoAPI_Fuse.hxx>
-#include <imgui.h>
 
 namespace shitcad {
 
@@ -82,69 +81,6 @@ void App::clearBooleanTarget() {
 void App::clearBooleanTool() {
     booleanTool_.toolBodyIndex = -1;
     booleanTool_.previewValid = false;
-}
-
-// ImGui front end for BooleanPanelModel (the Qt one is src/qt/ToolPanel.cpp).
-// Widgets read the tool live, as before: a Clear changes what follows it.
-void App::drawBooleanPanel() {
-    ImGui::SetNextWindowPos({ImGui::GetMainViewport()->WorkPos.x + ImGui::GetMainViewport()->WorkSize.x - 250,
-                             ImGui::GetMainViewport()->WorkPos.y + 60}, ImGuiCond_Always);
-    ImGui::SetNextWindowSize({240, 0}, ImGuiCond_Always);
-
-    const char* title = (booleanTool_.operation == BooleanOperation::Union) ? "Union Bodies" : "Subtract Bodies";
-    ImGui::Begin(title, nullptr, ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse);
-
-    if (booleanTool_.operation == BooleanOperation::Union) {
-        ImGui::TextWrapped("Pick two bodies to combine into one.");
-    } else {
-        ImGui::TextWrapped("Pick target body, then tool body to cut away.");
-    }
-
-    ImGui::Separator();
-
-    // Target body
-    if (booleanTool_.hasTarget()) {
-        ImGui::Text("Target: Body %d", booleanTool_.targetBodyIndex);
-        ImGui::SameLine();
-        if (ImGui::SmallButton("Clear##target")) clearBooleanTarget();
-    } else {
-        ImGui::TextColored({1, 1, 0, 1}, "Click to select target body");
-    }
-
-    // Tool body
-    if (booleanTool_.hasTool()) {
-        if (booleanTool_.operation == BooleanOperation::Union)
-            ImGui::Text("Other: Body %d", booleanTool_.toolBodyIndex);
-        else
-            ImGui::Text("Tool:  Body %d", booleanTool_.toolBodyIndex);
-        ImGui::SameLine();
-        if (ImGui::SmallButton("Clear##tool")) clearBooleanTool();
-    } else if (booleanTool_.hasTarget()) {
-        if (booleanTool_.operation == BooleanOperation::Union)
-            ImGui::TextColored({1, 1, 0, 1}, "Click another body to combine");
-        else
-            ImGui::TextColored({1, 1, 0, 1}, "Click body to subtract");
-    }
-
-    ImGui::Separator();
-
-    bool canCommit = booleanTool_.canCommit();
-    if (!canCommit) ImGui::BeginDisabled();
-    if (ImGui::Button("Apply [Enter]", {-1, 0})) {
-        commitBoolean();
-    }
-    if (!canCommit) ImGui::EndDisabled();
-
-    if (ImGui::Button("Cancel [Esc]", {-1, 0})) {
-        cancelBoolean();
-    }
-
-    if (booleanTool_.previewValid) {
-        ImGui::Separator();
-        ImGui::TextColored({0, 1, 0, 1}, "Preview ready");
-    }
-
-    ImGui::End();
 }
 
 void App::updateBooleanPreview() {

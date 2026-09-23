@@ -529,6 +529,19 @@ ratio and picking near the edges.
   left on, QPainter's fills and strokes vanished and only text drew. Checked: dimension
   lines, arrows and label boxes, constraint badges, the ruler, the FPS box, and a
   section cut across frames.
+- 6.3 removal and theming: done. Deleted every ImGui front end (`draw*` in the `App*.cpp`
+  files), `fillInputFromImGui`, the ImGui overlay flush and font loading, the six
+  `GImGui->ActiveId` resets, the `HostPanel` bits (everything is host-drawn),
+  `ImGuiQt`, the GLFW host (`src/main.cpp`) and its target. `SHITcad` is now the Qt
+  app (`src/qt/main.cpp`); qtbase is a plain vcpkg dependency, and GLFW and ImGui are
+  gone from `cmake/Dependencies.cmake`. The tests build on the core sources only;
+  `SimulationTest` makes its GL context with `QOffscreenSurface` instead of a hidden
+  GLFW window. `Preferences::applyTheme()` keeps choosing the 3D colours; the widgets
+  get Fusion with a light or dark palette from the same preference (`applyUiTheme` in
+  `src/qt/main.cpp`), deliberately minimal since the look is to be redesigned. CLAUDE.md
+  and the README describe the Qt app. The font row of the Phase 7 table is done with it
+  (the overlay uses Qt's font). Checked: build and the three test programs (same check
+  counts; the GL checks run on the offscreen context).
 
 ## Phase 7: platform layer and cross-platform build (can start after Phase 4)
 
@@ -538,7 +551,7 @@ ratio and picking near the edges.
 | `AppSimulationRun.cpp`: `%APPDATA%`, `%TEMP%`, `ShellExecute` (ParaView), `python` | `QStandardPaths`, `QProcess::startDetached`; default interpreter `python3` off Windows |
 | `CrashLogger.cpp`: dbghelp minidumps | `#ifdef _WIN32`; stub elsewhere |
 | CMake: `opengl32`, `dbghelp` | `find_package(OpenGL)`; dbghelp only on `WIN32` |
-| System font paths in `App::init` | Qt's default font |
+| System font paths in `App::init` | Done in 6.3: Qt's font |
 
 **Deferred (2026-09-23): no Linux compile step for now.** The plan had a Linux
 GitHub Actions job that only compiles, to catch drift early. It is dropped until a

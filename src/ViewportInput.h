@@ -22,13 +22,15 @@ inline Key keypadDigitKey(int d) { return (Key)((int)Key::Keypad0 + d); }
 
 // One frame of input for the 3D viewport, independent of the GUI toolkit.
 // The host fills it once per frame, before any handler runs; handlers read
-// only this. The semantics are ImGui's, which the handlers were written
-// against:
-//  - keyPressed() includes auto-repeat (ImGui::IsKeyPressed with repeat).
+// only this. The semantics are Dear ImGui's, which the UI used first and the
+// handlers were written against (src/qt/QtInput.cpp reproduces them):
+//  - keyPressed() includes auto-repeat (0.275 s, then every 0.05 s).
 //  - clicked is true on every press, including the second press of a double click.
 //  - dragging() compares the *furthest* the mouse has been from the press
 //    position, not the current distance, so a drag stays a drag.
-//  - typed holds the characters typed this frame (ImGui's InputQueueCharacters).
+//  - typed holds the characters typed this frame.
+// uiWantsMouse/uiWantsKeyboard are false with the Qt host: its panels are
+// separate widgets whose input never reaches the viewport.
 // Coordinates are in the window space the projection and picking code uses.
 struct InputFrame {
     float mouseX = 0, mouseY = 0;

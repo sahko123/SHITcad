@@ -1,9 +1,6 @@
 #include "ViewportWidget.h"
-#include "ImGuiFonts.h"
 #include "QtOverlay.h"
 
-#include <imgui.h>
-#include <imgui_impl_opengl3.h>
 
 #include <QFileDialog>
 #include <QFileInfo>
@@ -25,8 +22,7 @@ namespace {
 
 // The GL state QPainter's GL engine may change, saved before the overlay is
 // painted and put back after it, so App's 3D pass starts each frame from the
-// state it left (as it did when ImGui drew the overlay: its GL backend
-// restores what it touches).
+// state it left.
 struct GlStateGuard {
     GLint program, vao, arrayBuffer, activeTexture, texture2D, unpackAlign;
     GLint viewport[4], scissorBox[4];
@@ -121,18 +117,11 @@ ViewportWidget::~ViewportWidget() {
     teardown();
 }
 
-bool ViewportWidget::wantsTextInput() const {
-    return ready_ && ImGui::GetIO().WantTextInput;
-}
-
 void ViewportWidget::teardown() {
     if (!ready_) return;
     ready_ = false;
     makeCurrent();
     app_.shutdown();
-    ImGui_ImplOpenGL3_Shutdown();
-    imgui_.shutdown();
-    ImGui::DestroyContext();
     doneCurrent();
 }
 
@@ -182,22 +171,14 @@ void ViewportWidget::initializeGL() {
         return;
     }
 
-    IMGUI_CHECKVERSION();
-    ImGui::CreateContext();
     const float dpi = std::max(1.0f, (float)devicePixelRatioF());
-    loadImGuiFonts(dpi);
-
+    // The overlay is drawn with QPainter, and its text measured with the same font.
+    setOverlayScale(dpi);
+    app_.setOverlayMeasure(overlayMeasure);
     if (!app_.init(this, dpi)) {
         fprintf(stderr, "Failed to initialize SHITcad\n");
         return;
     }
-    imgui_.init(this);
-    ImGui_ImplOpenGL3_Init("#version 330");
-
-    // The overlay is drawn with QPainter, and its text measured with the same font.
-    setOverlayScale(dpi);
-    app_.setOverlayMeasure(overlayMeasure);
-    app_.setHostPanel(App::HostOverlay);
 
     // The context dies with the widget's window; tear down while it exists.
     connect(context(), &QOpenGLContext::aboutToBeDestroyed, this, [this] { teardown(); });
@@ -215,10 +196,6 @@ void ViewportWidget::paintGL() {
     const float dt = (float)clock_.nsecsElapsed() * 1e-9f;
     clock_.restart();
 
-    imgui_.newFrame(dt);
-    ImGui_ImplOpenGL3_NewFrame();
-    ImGui::NewFrame();
-
     const float s = (float)devicePixelRatioF();
     const int w = (int)std::lround(width() * s), h = (int)std::lround(height() * s);
 
@@ -230,7 +207,7 @@ void ViewportWidget::paintGL() {
     input_.frame(dt, (float)w, (float)h, in);
 
     profiler.begin("UI+Input");
-    app_.frame(dt, w, h, &in);
+    app_.frame(dt, w, h, in);
     profiler.end();
     emit frameBuilt();
 
@@ -258,11 +235,6 @@ void ViewportWidget::paintGL() {
         QPainter painter(this);
         drawOverlay(painter, app_.overlay(), (float)devicePixelRatioF());
     }
-    profiler.end();
-
-    ImGui::Render();
-    profiler.begin("ImGuiDraw");
-    ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
     profiler.end();
 
     profiler.recordFrameEnd();

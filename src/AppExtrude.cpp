@@ -13,8 +13,6 @@
 #include <TopoDS_Solid.hxx>
 
 #include <glad/gl.h>
-#include <imgui.h>
-#include <imgui_internal.h>
 #include <cstdio>
 #include <cmath>
 #include <algorithm>
@@ -288,65 +286,6 @@ void App::setExtrudeOffsetText(const std::string& text) {
     snprintf(extrudeTool_.offsetBuf, sizeof(extrudeTool_.offsetBuf), "%s", text.c_str());
     extrudeTool_.offset = (float)atof(extrudeTool_.offsetBuf);
     extrudeTool_.previewDirty = true;
-}
-
-// ImGui front end for ExtrudePanelModel (the Qt one is src/qt/ToolPanel.cpp).
-void App::drawExtrudePanel() {
-    ImGuiIO& io = ImGui::GetIO();
-    float panelW = 220.0f;
-    const ExtrudePanelModel m = extrudePanelModel();
-
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, {10, 10});
-    ImGui::SetNextWindowPos({io.DisplaySize.x - panelW, 30});
-    ImGui::SetNextWindowSize({panelW, 0});
-    ImGui::Begin("Extrude", nullptr,
-        ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
-        ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_AlwaysAutoResize);
-
-    // Operation
-    ImGui::Text("Operation:");
-    const char* opNames[] = {"New Body", "Cut"};
-    int opIdx = m.operation;
-    if (ImGui::Combo("##op", &opIdx, opNames, 2)) setExtrudeOperation(opIdx);
-
-    // Distance: applied on Enter, or when the field loses focus after an edit
-    ImGui::Text("Distance:");
-    if (ImGui::InputText("##dist", extrudeTool_.heightBuf, sizeof(extrudeTool_.heightBuf),
-            ImGuiInputTextFlags_EnterReturnsTrue))
-        setExtrudeDistanceText(extrudeTool_.heightBuf);
-    if (ImGui::IsItemDeactivatedAfterEdit()) setExtrudeDistanceText(extrudeTool_.heightBuf);
-
-    // Direction
-    ImGui::Text("Direction:");
-    const char* dirNames[] = {"One Side", "Other Side", "Both Sides", "Symmetric"};
-    int dirIdx = m.direction;
-    if (ImGui::Combo("##dir", &dirIdx, dirNames, 4)) setExtrudeDirection(dirIdx);
-
-    // Offset
-    ImGui::Text("Offset:");
-    if (ImGui::InputText("##offset", extrudeTool_.offsetBuf, sizeof(extrudeTool_.offsetBuf),
-            ImGuiInputTextFlags_EnterReturnsTrue))
-        setExtrudeOffsetText(extrudeTool_.offsetBuf);
-    if (ImGui::IsItemDeactivatedAfterEdit()) setExtrudeOffsetText(extrudeTool_.offsetBuf);
-
-    // Profile info
-    ImGui::Separator();
-    ImGui::Text("Profiles: %d / %d", m.selectedProfiles, m.totalProfiles);
-
-    // OK / Cancel
-    ImGui::Separator();
-    if (!m.canCommit) ImGui::BeginDisabled();
-    if (ImGui::Button("OK [Enter]", {95, 0})) {
-        commitExtrude();
-    }
-    if (!m.canCommit) ImGui::EndDisabled();
-    ImGui::SameLine();
-    if (ImGui::Button("Cancel [Esc]", {95, 0})) {
-        cancelExtrude();
-    }
-
-    ImGui::End();
-    ImGui::PopStyleVar();
 }
 
 // Helper: build the tool shape from selected profiles for current extrude settings

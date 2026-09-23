@@ -7,8 +7,6 @@
 #include "FeatureReplay.h"
 
 #include <glad/gl.h>
-#include <imgui.h>
-#include <imgui_internal.h>
 #include "UnitUtils.h"
 #include <cstdio>
 #include <cmath>
@@ -288,7 +286,6 @@ void App::handleSketchInput(float vpW, float vpH) {
                         // Update dim tool inputBuf so live sync doesn't overwrite the flip
                         if (dimTool_.phase == DimToolState::Editing && dimTool_.constraintID == selection_.dragDimID) {
                             formatAngleText(dimTool_.inputBuf, sizeof(dimTool_.inputBuf), f(sideDeg));
-                            GImGui->ActiveId = 0;
                         }
                     }
                 }
@@ -297,7 +294,7 @@ void App::handleSketchInput(float vpW, float vpH) {
     }
     if (selection_.dragMode == SelectionDragMode::None &&
         in_.dragging(MouseButton::Left, 3.0f)) {
-        ImVec2 clickPos(in_.pressX[0], in_.pressY[0]);
+        OvVec2 clickPos(in_.pressX[0], in_.pressY[0]);
         for (const auto& r : dimLabelRects_) {
             if (r.sketchPlaneIndex != activeSketchPlane_) continue;
             if (clickPos.x >= r.x0 && clickPos.x <= r.x1 &&
@@ -400,7 +397,6 @@ void App::handleSketchInput(float vpW, float vpH) {
                             cc->angleCW = newCW;
                             dimTool_.measuredMm = f(newDeg);
                             formatAngleText(dimTool_.inputBuf, sizeof(dimTool_.inputBuf), f(newDeg));
-                            GImGui->ActiveId = 0; // force InputText to re-read buffer
                         }
                     }
                 }
@@ -528,7 +524,6 @@ void App::handleSketchInput(float vpW, float vpH) {
                                             dimTool_.focusNeeded = true;
                                             dimTool_.placingFirstFrame = true;
                                             selection_.select(HitType::Dimension, cid);
-                                            GImGui->ActiveId = 0;
                                         }
                                         goto skipFinalize;
                                     }
@@ -617,9 +612,6 @@ void App::handleSketchInput(float vpW, float vpH) {
                             dimTool_.focusNeeded = true;
                             dimTool_.placingFirstFrame = true;
                             selection_.select(HitType::Dimension, cid);
-                            // Force ImGui to drop its internal InputText editing state
-                            // so it picks up the new buffer content (angle instead of length)
-                            GImGui->ActiveId = 0;
                         }
                         // Don't finalize — stay in EditingAndPlacing
                         goto skipFinalize;
@@ -675,7 +667,6 @@ void App::handleSketchInput(float vpW, float vpH) {
                                 dimTool_.focusNeeded = true;
                                 dimTool_.placingFirstFrame = true;
                                 selection_.select(HitType::Dimension, cid);
-                                GImGui->ActiveId = 0;
                                 goto skipFinalize;
                             }
                         }
@@ -710,7 +701,6 @@ void App::handleSketchInput(float vpW, float vpH) {
                                 dimTool_.focusNeeded = true;
                                 dimTool_.placingFirstFrame = true;
                                 selection_.select(HitType::Dimension, cid);
-                                GImGui->ActiveId = 0;
                                 goto skipFinalize;
                             }
                         }
@@ -1010,7 +1000,6 @@ void App::handleSketchInput(float vpW, float vpH) {
         }
     }
 
-    if (!hostHas(HostInViewport)) drawInlineDimInput(sketch);
     drawSketchMessage();
 
     // Keyboard shortcuts
@@ -1402,40 +1391,6 @@ void App::cancelInlineInput() {
     }
 }
 
-// ImGui front end for InlineInputModel (the Qt one is src/qt/InViewport.cpp).
-void App::drawInlineDimInput(Sketch& sketch) {
-    (void)sketch;
-    const InlineInputModel m = inlineInputModel();
-    if (!m.active) return;
-    ImGui::SetNextWindowPos(ImVec2(m.x, m.y), ImGuiCond_Always);
-    ImGui::SetNextWindowSize(ImVec2(120, 0));
-    ImGui::Begin("##InlineDim", nullptr,
-        ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
-        ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoScrollbar |
-        ImGuiWindowFlags_AlwaysAutoResize);
-
-    ImGui::SetNextItemWidth(100);
-    if (tool_.inlineInputFocus) {
-        ImGui::SetKeyboardFocusHere();
-        tool_.inlineInputFocus = false;
-    }
-
-    // Callback to move cursor to end and clear selection on first focus
-    auto cursorEndCb = [](ImGuiInputTextCallbackData* data) -> int {
-        data->CursorPos = data->BufTextLen;
-        data->SelectionStart = data->SelectionEnd = data->BufTextLen;
-        return 0;
-    };
-
-    if (ImGui::InputText("##inlineDimInput", tool_.inlineInputBuf, sizeof(tool_.inlineInputBuf),
-            ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_CallbackAlways, cursorEndCb))
-        submitInlineInput();
-
-    if (in_.keyPressed(Key::Escape)) cancelInlineInput();
-
-    ImGui::End();
-}
-
 void App::drawSketchMessage() {
     // Sketch status message (warnings, constraint feedback, etc.), drawn over
     // the view near the bottom for sketchMsgTimer_ seconds.
@@ -1672,7 +1627,7 @@ void App::handleSelection(Sketch& sketch, bool ctrlHeld) {
     float apparentScale = computeApparentScale(activePlane(), view, proj, (float)w, (float)h);
 
     // Check dimension label rects first (they're drawn on top)
-    ImVec2 mouse(in_.mouseX, in_.mouseY);
+    OvVec2 mouse(in_.mouseX, in_.mouseY);
     EntityID dimHitID = NullID;
     for (const auto& r : dimLabelRects_) {
         if (r.sketchPlaneIndex != activeSketchPlane_) continue;

@@ -55,7 +55,7 @@ ObjectTree::ObjectTree(App& app, QWidget* parent) : QDockWidget("Object Tree", p
     });
     connect(tree_, &QTreeWidget::itemDoubleClicked, this, [this, a](QTreeWidgetItem* it, int) {
         if (!it->parent() || it->parent()->data(0, kSectionRole).toInt() == Bodies) return;
-        // A double click on the check box only toggles it twice, as in ImGui.
+        // A double click on the check box only toggles it twice.
         QStyleOptionViewItem opt;
         opt.initFrom(tree_);
         opt.rect = tree_->visualItemRect(it);
@@ -107,7 +107,7 @@ void ObjectTree::refresh() {
     sync(sections_[Planes], m.planes);
     sync(sections_[Sketches], m.sketches);
     sync(sections_[Bodies], m.bodies);
-    // As in the ImGui tree, empty Sketches and Bodies sections are left out.
+    // Empty Sketches and Bodies sections are left out.
     sections_[Sketches]->setHidden(m.sketches.empty());
     sections_[Bodies]->setHidden(m.bodies.empty());
 }

@@ -14,7 +14,7 @@ class QPushButton;
 
 namespace shitcad {
 
-// Qt front end for Preferences (the ImGui one is App::drawPreferencesWindow).
+// Qt front end for Preferences.
 // Non-modal; shown while App::preferencesOpen(). Edits go to App through
 // post(setPreferences); refresh() loads App's values back when they differ
 // from what the dialog last sent (light mode resets the colours, for one).

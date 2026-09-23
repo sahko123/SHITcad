@@ -3,8 +3,6 @@
 #include "AutoConstraint.h"
 
 #include <glad/gl.h>
-#include <imgui.h>
-#include <imgui_internal.h>
 #include "UnitUtils.h"
 #include <cstdio>
 #include <cmath>
@@ -318,7 +316,7 @@ void App::handleDimToolClick(Sketch& sketch) {
     }
 
     // Check if user clicked on an existing dimension label first
-    ImVec2 mouse(in_.mouseX, in_.mouseY);
+    OvVec2 mouse(in_.mouseX, in_.mouseY);
     for (const auto& r : dimLabelRects_) {
         if (r.sketchPlaneIndex != activeSketchPlane_) continue;
         if (mouse.x >= r.x0 && mouse.x <= r.x1 && mouse.y >= r.y0 && mouse.y <= r.y1) {
@@ -743,70 +741,6 @@ void App::cancelDimension() {
     }
     dimTool_.reset();
     selection_.clear();
-}
-
-// ImGui front end for DimensionPanelModel (the Qt one is src/qt/InViewport.cpp).
-void App::drawDimensionPanel(Sketch& sketch) {
-    ImGuiIO& io = ImGui::GetIO();
-    float panelW = 220.0f;
-
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, {10, 10});
-    ImGui::SetNextWindowPos({io.DisplaySize.x - panelW, 30});
-    ImGui::SetNextWindowSize({panelW, 0});
-    ImGui::Begin("Dimension", nullptr,
-        ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
-        ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_AlwaysAutoResize);
-
-    const DimensionPanelModel m = dimensionPanelModel();
-
-    // Show warning if duplicate dimension was attempted
-    if (!m.warning.empty()) {
-        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.8f, 0.2f, 1.0f));
-        ImGui::TextWrapped("%s", m.warning.c_str());
-        ImGui::PopStyleColor();
-        ImGui::Separator();
-    }
-
-    if (!m.editing) {
-        ImGui::TextWrapped("%s", m.hint.c_str());
-    } else {
-        if (!m.kind.empty()) ImGui::TextUnformatted(m.kind.c_str());
-        if (!m.placeHint.empty()) ImGui::TextColored({0.6f, 0.8f, 1.0f, 1.0f}, "%s", m.placeHint.c_str());
-
-        ImGui::SetNextItemWidth(-1);
-        // During EditingAndPlacing, always keep input focused so user can type while placing
-        if (m.takeFocus) {
-            ImGui::SetKeyboardFocusHere();
-            dimTool_.focusNeeded = false;
-        }
-
-        bool entered = ImGui::InputText("##dimval", dimTool_.inputBuf, sizeof(dimTool_.inputBuf),
-            ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_AutoSelectAll);
-
-        bool driven = dimTool_.driven;
-        if (ImGui::Checkbox("Driven (reference only)", &driven)) setDimensionDriven(driven);
-
-        // Sync input value to constraint live (so label updates in real-time)
-        syncDimensionLive();
-
-        ImGui::Separator();
-        const char* applyLabel = m.editingExisting ? "Update [Enter]" : "Apply [Enter]";
-        bool apply = ImGui::Button(applyLabel, {95, 0});
-        ImGui::SameLine();
-        bool cancelled = false;
-        if (ImGui::Button("Cancel [Esc]", {95, 0})) {
-            cancelDimension();
-            cancelled = true;
-        }
-
-        if (!cancelled && (entered || apply)) applyDimension();
-
-        if (ImGui::IsKeyPressed(ImGuiKey_Escape)) cancelDimension();
-    }
-    (void)sketch;
-
-    ImGui::End();
-    ImGui::PopStyleVar();
 }
 
 void App::renderDimensions(const float view[16], const float proj[16], float vpW, float vpH) {

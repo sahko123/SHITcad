@@ -33,7 +33,7 @@ QLabel* note(const QString& text, QWidget* parent, const char* colour = nullptr)
     auto* label = new QLabel(text, parent);
     label->setWordWrap(true);
     if (colour) label->setStyleSheet(QString("color: %1;").arg(colour));
-    else label->setEnabled(false);   // greyed, like ImGui::TextDisabled
+    else label->setEnabled(false);   // greyed
     return label;
 }
 

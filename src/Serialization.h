@@ -36,7 +36,7 @@ std::string openNativeFolderDialog(const char* title);
 
 // The native dialogs return paths in the Windows ANSI code page. Anything that
 // stores a path in JSON (the project file, a spec) needs UTF-8, or nlohmann's
-// dump() throws on the first accented character - which, called from an ImGui
+// dump() throws on the first accented character - which, called from a UI
 // draw, takes the whole app down. Converted at the boundary; filesystem calls
 // use u8path to convert back.
 std::string ansiToUtf8(const std::string& ansi);

@@ -1,7 +1,6 @@
 #pragma once
 // App.h first: it brings in glad, which must precede any GL header Qt pulls in.
 #include "App.h"
-#include "ImGuiQt.h"
 #include "QtInput.h"
 
 #include <QElapsedTimer>
@@ -13,9 +12,9 @@
 
 namespace shitcad {
 
-// Hosts App inside a QOpenGLWidget. Until the panels move to Qt widgets
-// (Phase 5 of docs/qt-migration-plan.md), the whole existing ImGui UI is
-// drawn inside this widget, fed by ImGuiQt.
+// Hosts App inside a QOpenGLWidget: feeds it the viewport's input
+// (InputCollector), runs a frame per repaint, and paints App's overlay with
+// QPainter over the 3D scene. The panels are separate Qt widgets.
 class ViewportWidget : public QOpenGLWidget, public AppHost {
     Q_OBJECT
 public:
@@ -23,8 +22,6 @@ public:
     ~ViewportWidget() override;
 
     App& app() { return app_; }
-    // An ImGui text field in the viewport is taking typed text.
-    bool wantsTextInput() const;
 
     // AppHost
     void setWindowTitle(const std::string& utf8Title) override;
@@ -50,14 +47,13 @@ protected:
     void focusOutEvent(QFocusEvent* e) override;
     void leaveEvent(QEvent* e) override;
     void changeEvent(QEvent* e) override;
-    bool focusNextPrevChild(bool) override { return false; } // Tab belongs to ImGui
+    bool focusNextPrevChild(bool) override { return false; } // Tab does not leave the view
 
 private:
     void teardown();
     float scale() const;
 
     App app_;
-    ImGuiQt imgui_;         // ImGui still draws the overlay until Phase 6.2
     InputCollector input_;
     QElapsedTimer clock_;
     bool ready_ = false;

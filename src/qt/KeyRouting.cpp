@@ -76,9 +76,7 @@ bool KeyRouting::eventFilter(QObject* obj, QEvent* e) {
     QWidget* focus = QApplication::focusWidget();
     if (focus && w != focus) return false;
     if (isTextInput(focus)) return false;
-    if (isNavigationKey(ke->key()) && !(ke->modifiers() & Qt::ControlModifier) &&
-        !viewport_->wantsTextInput())
-        return false;
+    if (isNavigationKey(ke->key()) && !(ke->modifiers() & Qt::ControlModifier)) return false;
 
     if (e->type() == QEvent::KeyPress && !ke->isAutoRepeat() && scan) held_.insert(scan);
     QCoreApplication::sendEvent(viewport_, e);

@@ -11,7 +11,6 @@
 #undef near
 #undef far
 
-#include <imgui.h>
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
@@ -419,60 +418,6 @@ void App::cancelSimulationRun() {
     simSummary_ = RunSummary{};
 }
 
-void App::drawSimulationRunSection() {
-    const SimRunModel m = simRunModel();
-
-    if (ImGui::CollapsingHeader("Run", ImGuiTreeNodeFlags_DefaultOpen)) {
-        if (ImGui::TreeNodeEx("Engine (cip-sim)", m.problem.empty() ? 0 : ImGuiTreeNodeFlags_DefaultOpen)) {
-            static char pathBuf[512];
-            static char pyBuf[260];
-            if (!ImGui::IsAnyItemActive()) {
-                snprintf(pathBuf, sizeof(pathBuf), "%s", simEngine_.cipSimPath.c_str());
-                snprintf(pyBuf, sizeof(pyBuf), "%s", simEngine_.python.c_str());
-            }
-            ImGui::TextUnformatted("cip-sim folder");
-            ImGui::SetNextItemWidth(-70);
-            ImGui::InputText("##cipsim", pathBuf, sizeof(pathBuf));
-            if (ImGui::IsItemDeactivatedAfterEdit()) setEnginePaths(pathBuf, simEngine_.python);
-            ImGui::SameLine();
-            if (ImGui::Button("Browse")) browseEngineFolder();
-            ImGui::TextUnformatted("Python");
-            ImGui::SetNextItemWidth(-1);
-            ImGui::InputText("##python", pyBuf, sizeof(pyBuf));
-            if (ImGui::IsItemDeactivatedAfterEdit()) setEnginePaths(simEngine_.cipSimPath, pyBuf);
-            if (!m.problem.empty()) ImGui::TextColored({1, 0.8f, 0.3f, 1}, "%s", m.problem.c_str());
-            else ImGui::TextDisabled("Saved for this computer, not in the project.");
-            ImGui::TreePop();
-        }
-
-        if (m.running) {
-            ImGui::Text("Running Tier 1... %.0f s", m.seconds);
-            if (!m.log.empty()) ImGui::TextDisabled("%s", m.log.back().c_str());
-            if (ImGui::Button("Cancel", {-1, 0})) cancelSimulationRun();
-        } else {
-            bool ready = m.problem.empty();
-            if (!ready) ImGui::BeginDisabled();
-            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.20f, 0.50f, 0.25f, 1.0f));
-            if (ImGui::Button("Run Tier 1 coverage", {-1, 0})) startTier1Run();
-            ImGui::PopStyleColor();
-            if (!ready) ImGui::EndDisabled();
-            // Read live: Run may have just started or failed to.
-            if (simPhase_ == SimPhase::Done)
-                ImGui::TextColored({0.4f, 0.9f, 0.5f, 1}, "Finished in %.0f s", simRunEnd_ - simRunStart_);
-            if (simPhase_ == SimPhase::Cancelled) ImGui::TextDisabled("Cancelled.");
-        }
-        if (!simRunError_.empty() && simPhase_ != SimPhase::Running) {
-            ImGui::PushTextWrapPos(0.0f);
-            ImGui::TextColored({1, 0.45f, 0.45f, 1}, "%s", simRunError_.c_str());
-            ImGui::PopTextWrapPos();
-        }
-        if (!simRunLog_.empty() && ImGui::TreeNode("Log")) {
-            for (const auto& l : simRunLog_) ImGui::TextDisabled("%s", l.c_str());
-            ImGui::TreePop();
-        }
-    }
-}
-
 static const char* fieldLabel(const std::string& name) {
     if (name == "reach") return "Coverage";
     if (name == "total_flux") return "Total flux";
@@ -536,130 +481,6 @@ void App::setResultsField(int field) {
 void App::openRunFolder() {
     if (simView_.runDir.empty()) return;
     ShellExecuteW(nullptr, L"open", fsPath(simView_.runDir).c_str(), nullptr, nullptr, 1 /* SW_SHOWNORMAL */);
-}
-
-void App::drawSimulationResultsSection() {
-    if (!simView_.loaded) return;
-    if (!ImGui::CollapsingHeader("Results", ImGuiTreeNodeFlags_DefaultOpen)) return;
-    const SimResultsModel rm = simResultsModel();
-
-    if (rm.stale)
-        ImGui::TextColored({1, 0.8f, 0.3f, 1},
-                           "Set-up, settings or geometry changed since this run - run again.");
-
-    bool show = simView_.show;
-    if (ImGui::Checkbox("Show on geometry", &show)) setResultsShown(show);
-    const ResultMesh& m = simView_.mesh;
-    ImGui::SetNextItemWidth(-1);
-    if (ImGui::BeginCombo("##field", simView_.field < (int)m.fields.size() ? fieldLabel(m.fields[simView_.field].name) : "")) {
-        for (int i = 0; i < (int)m.fields.size(); i++) {
-            if (ImGui::Selectable(fieldLabel(m.fields[i].name), i == simView_.field)) setResultsField(i);
-        }
-        ImGui::EndCombo();
-    }
-
-    // Legend
-    if (simView_.field < (int)m.fields.size()) {
-        const ResultField& f = m.fields[simView_.field];
-        ImDrawList* dl = ImGui::GetWindowDrawList();
-        const float sw = ImGui::GetTextLineHeight();
-        if (f.categorical) {
-            for (int k = 0; k < (int)std::max(f.labels.size(), f.colours.size()); k++) {
-                float c[3];
-                categoryColour(f, k, c);
-                ImVec2 p = ImGui::GetCursorScreenPos();
-                dl->AddRectFilled(p, {p.x + sw, p.y + sw}, IM_COL32((int)(c[0] * 255), (int)(c[1] * 255), (int)(c[2] * 255), 255));
-                ImGui::Dummy({sw, sw});
-                ImGui::SameLine();
-                std::string label = k < (int)f.labels.size() ? f.labels[k] : std::to_string(k);
-                if (f.name == "reach") {
-                    const auto& o = simView_.summary.overall;
-                    const double pct = k == 0 ? o.dryPct : k == 1 ? o.splashPct : o.directPct;
-                    ImGui::Text("%s  %.1f%%", label.c_str(), pct);
-                } else {
-                    ImGui::TextUnformatted(label.c_str());
-                }
-                if (f.name == "reach" && k == 2)
-                    ImGui::TextDisabled("  percentages are of scored wall area;\n"
-                                        "  caps and obstructions are drawn muted");
-            }
-        } else {
-            const float hi = f.p95 > 0 ? f.p95 : f.maxValue;
-            ImVec2 p = ImGui::GetCursorScreenPos();
-            const float barW = ImGui::GetContentRegionAvail().x, barH = sw;
-            const int steps = 32;
-            for (int s = 0; s < steps; s++) {
-                float a[3], b[3];
-                rampColour((float)s / steps, a);
-                rampColour((float)(s + 1) / steps, b);
-                dl->AddRectFilledMultiColor({p.x + barW * s / steps, p.y}, {p.x + barW * (s + 1) / steps, p.y + barH},
-                    IM_COL32((int)(a[0] * 255), (int)(a[1] * 255), (int)(a[2] * 255), 255),
-                    IM_COL32((int)(b[0] * 255), (int)(b[1] * 255), (int)(b[2] * 255), 255),
-                    IM_COL32((int)(b[0] * 255), (int)(b[1] * 255), (int)(b[2] * 255), 255),
-                    IM_COL32((int)(a[0] * 255), (int)(a[1] * 255), (int)(a[2] * 255), 255));
-            }
-            ImGui::Dummy({barW, barH});
-            ImGui::Text("0");
-            ImGui::SameLine(barW - 90);
-            ImGui::Text("%.3g %s", hi, f.unit.c_str());
-            ImVec2 q = ImGui::GetCursorScreenPos();
-            dl->AddRectFilled(q, {q.x + sw, q.y + sw},
-                IM_COL32((int)(kNoValueColour[0] * 255), (int)(kNoValueColour[1] * 255), (int)(kNoValueColour[2] * 255), 255));
-            ImGui::Dummy({sw, sw});
-            ImGui::SameLine();
-            ImGui::TextDisabled("none reached (scale tops out at the 95th percentile)");
-            if (f.name.find("flux") != std::string::npos) {
-                ImVec2 q2 = ImGui::GetCursorScreenPos();
-                dl->AddRectFilled(q2, {q2.x + sw, q2.y + sw},
-                    IM_COL32((int)(kUnsampledColour[0] * 255), (int)(kUnsampledColour[1] * 255),
-                             (int)(kUnsampledColour[2] * 255), 255));
-                ImGui::Dummy({sw, sw});
-                ImGui::SameLine();
-                ImGui::TextDisabled("sprayed, but no ray sampled it - raise rays");
-                if (!simView_.summary.fluxTrustworthy)
-                    ImGui::TextColored({1, 0.8f, 0.3f, 1},
-                                       "Flux map under-sampled: raise rays. Coverage is unaffected.");
-            }
-            if (f.noData > 0)
-                ImGui::TextDisabled("%d faces have no value for this field", f.noData);
-        }
-    }
-
-    // Coverage table
-    if (ImGui::BeginTable("coverage", 5, ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_SizingStretchProp)) {
-        ImGui::TableSetupColumn("Surface", ImGuiTableColumnFlags_WidthStretch, 2.0f);
-        ImGui::TableSetupColumn("Direct");
-        ImGui::TableSetupColumn("Splash");
-        ImGui::TableSetupColumn("Dry");
-        ImGui::TableSetupColumn("m2");
-        ImGui::TableHeadersRow();
-        auto rowOut = [](const CoverageRow& r, bool bold) {
-            ImGui::TableNextRow();
-            ImGui::TableNextColumn();
-            if (bold) ImGui::TextUnformatted(r.name.c_str());
-            else if (r.scored) ImGui::TextUnformatted(r.name.c_str());
-            else ImGui::TextDisabled("%s (cap)", r.name.c_str());
-            ImGui::TableNextColumn(); ImGui::Text("%.1f%%", r.directPct);
-            ImGui::TableNextColumn(); ImGui::Text("%.1f%%", r.splashPct);
-            ImGui::TableNextColumn();
-            if (r.dryPct > 0.05) ImGui::TextColored({1, 0.5f, 0.45f, 1}, "%.1f%%", r.dryPct);
-            else ImGui::Text("%.1f%%", r.dryPct);
-            ImGui::TableNextColumn(); ImGui::Text("%.3g", r.areaM2);
-        };
-        rowOut(simView_.summary.overall, true);
-        for (const auto& r : simView_.summary.surfaces) rowOut(r, false);
-        ImGui::EndTable();
-    }
-    ImGui::TextDisabled("Tier 1 is line of sight + range-limited splash, not CFD.");
-
-    if (ImGui::Button("Open in ParaView")) openResultsInParaView();
-    ImGui::SameLine();
-    if (ImGui::Button("Open run folder")) openRunFolder();
-    if (!paraviewMessage_.empty()) {
-        ImGui::PushTextWrapPos(0.0f);
-        ImGui::TextDisabled("%s", paraviewMessage_.c_str());
-        ImGui::PopTextWrapPos();
-    }
 }
 
 } // namespace shitcad

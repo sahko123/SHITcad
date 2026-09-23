@@ -25,10 +25,9 @@ class SectionControls;
 class ResultLegend;
 
 // Qt front end for the Simulation panel models (SimSetupModel, SimRunModel,
-// SimResultsModel; the ImGui one is App::drawSimulationPanel). A dock on the
-// right, shown in the Simulation workspace. Live edits (sliders) change the
-// set-up as they move and commit one undo step on release; typed values apply
-// and commit when the field is finished.
+// SimResultsModel). A dock on the right, shown in the Simulation workspace.
+// Live edits (sliders) change the set-up as they move and commit one undo
+// step on release; typed values apply and commit when the field is finished.
 class SimulationPanel : public QDockWidget {
     Q_OBJECT
 public:

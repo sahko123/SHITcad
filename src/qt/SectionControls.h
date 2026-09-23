@@ -14,7 +14,7 @@ class QSlider;
 
 namespace shitcad {
 
-// Qt front end for SectionModel (the ImGui one is App::drawSectionControls).
+// Qt front end for SectionModel.
 // A widget of its own so the Simulation panel can hold it too (Phase 5.9).
 class SectionControls : public QWidget {
     Q_OBJECT

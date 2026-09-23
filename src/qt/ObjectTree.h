@@ -11,7 +11,7 @@ class QTreeWidgetItem;
 
 namespace shitcad {
 
-// Qt front end for ObjectTreeModel (the ImGui one is App::drawObjectTree):
+// Qt front end for ObjectTreeModel:
 // reference planes, sketches and bodies with visibility checks, in a dock.
 // Rows are keyed and updated in place, so the current item, expansion and
 // scroll position survive planes and bodies being added or removed.

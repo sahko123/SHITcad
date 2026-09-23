@@ -5,13 +5,14 @@
 namespace shitcad {
 
 // What App needs from the program that hosts it (the window, the event loop).
-// App never talks to GLFW or Qt directly; the host owns the window and the GL
-// context, and drives App once per frame:
+// App never talks to Qt directly; the host owns the window and the GL context,
+// and drives App once per frame:
 //
-//   app.frame(dt, framebufferW, framebufferH);   // input + UI (ImGui frame begun)
-//   app.paint();                                 // 3D scene, then overlays
+//   app.frame(dt, framebufferW, framebufferH, input);   // input, tools, overlay
+//   app.paint();                                        // 3D scene
+//   ...then draws app.overlay() over it
 //
-// with the GL context current for both.
+// with the GL context current.
 class AppHost {
 public:
     virtual ~AppHost() = default;
@@ -19,8 +20,8 @@ public:
     // Ask for another frame. A no-op while the host renders continuously;
     // an on-demand host must honour it (see App::post).
     virtual void requestRedraw() {}
-    // Show a file or folder chooser. Return false to let App use the Win32
-    // dialogs; otherwise `utf8Path` is the choice, empty if cancelled.
+    // Show a file or folder chooser. Return false to let App use its Win32
+    // fallback dialogs; otherwise `utf8Path` is the choice, empty if cancelled.
     virtual bool chooseFile(FileDialog /*kind*/, const char* /*title*/, std::string& /*utf8Path*/) { return false; }
 };
 
