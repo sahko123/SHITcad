@@ -75,6 +75,7 @@ if(SHITCAD_QT)
         src/qt/main_qt.cpp
         src/qt/ViewportWidget.cpp
         src/qt/ImGuiQt.cpp
+        src/qt/QtInput.cpp
         src/qt/Toolbar.cpp
         src/qt/PreferencesDialog.cpp
         src/qt/MeshDialogs.cpp

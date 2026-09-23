@@ -2,6 +2,7 @@
 // App.h first: it brings in glad, which must precede any GL header Qt pulls in.
 #include "App.h"
 #include "ImGuiQt.h"
+#include "QtInput.h"
 
 #include <QElapsedTimer>
 #include <QOpenGLWidget>
@@ -53,9 +54,11 @@ protected:
 
 private:
     void teardown();
+    float scale() const;
 
     App app_;
-    ImGuiQt imgui_;
+    ImGuiQt imgui_;         // ImGui still draws the overlay until Phase 6.2
+    InputCollector input_;
     QElapsedTimer clock_;
     bool ready_ = false;
     // A modal dialog opened during a frame (the Win32 file dialogs) runs its

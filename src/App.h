@@ -83,7 +83,9 @@ public:
     bool init(AppHost* host, float dpiScale);
     // One frame: runs posted commands, reads input, builds the UI. The host
     // has begun the ImGui frame.
-    void frame(float dt, int framebufferW, int framebufferH);
+    // `input` is this frame's viewport input from the host; without it the
+    // input is read from ImGui (the GLFW host).
+    void frame(float dt, int framebufferW, int framebufferH, const InputFrame* input = nullptr);
     // Draws the 3D scene into the current framebuffer, then hands this
     // frame's overlays to ImGui. The host calls ImGui::Render() after it.
     void paint();
@@ -501,6 +503,10 @@ private:
     // This frame's input for the 3D view, filled once at the top of
     // renderFrame(). Viewport handlers read this, never the GUI toolkit.
     InputFrame in_;
+    const InputFrame* hostInput_ = nullptr;   // this frame's, from the host
+    float frameTimes_[60] = {};               // for the FPS readout
+    int frameTimeIdx_ = 0;
+    float frameTimeSum_ = 0.0f;
     // Screen-space drawing over the 3D view for this frame, recorded by the
     // overlay code and drawn once after the scene (see Overlay2D.h).
     Overlay2D overlay_;

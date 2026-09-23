@@ -174,9 +174,15 @@ bool App::init(AppHost* host, float dpiScale) {
     return true;
 }
 
-void App::frame(float dt, int framebufferW, int framebufferH) {
+void App::frame(float dt, int framebufferW, int framebufferH, const InputFrame* input) {
     fbW_ = framebufferW;
     fbH_ = framebufferH;
+    hostInput_ = input;
+
+    // Frame rate over the last 60 frames, for the FPS readout
+    frameTimeSum_ += dt - frameTimes_[frameTimeIdx_];
+    frameTimes_[frameTimeIdx_] = dt;
+    frameTimeIdx_ = (frameTimeIdx_ + 1) % 60;
 
     updateCameraAnimation(dt);
 
@@ -190,6 +196,7 @@ void App::frame(float dt, int framebufferW, int framebufferH) {
 
     overlay_.clear();
     renderFrame();
+    hostInput_ = nullptr;
 }
 
 void App::paint() {
@@ -449,13 +456,12 @@ void App::render3DScene(int w, int h) {
 }
 
 void App::renderFrame() {
-    ImGuiIO& io = ImGui::GetIO();
-    float vpW = io.DisplaySize.x;
-    float vpH = io.DisplaySize.y;
-
     // Toolbar height, needed for the input rect before the toolbar is drawn
     float toolbarH = imguiToolbarHeight();
-    fillInputFromImGui(in_, toolbarH);
+    if (hostInput_) in_ = *hostInput_;
+    else fillInputFromImGui(in_, toolbarH);
+    const float vpW = in_.screenW;
+    const float vpH = in_.screenH;
 
     // Sync user-adjustable dimension colors into active theme (before renderDimensions)
     {
@@ -595,9 +601,9 @@ void App::renderFrame() {
 
     // FPS / frametime overlay
     {
-        ImGuiIO& fpsIo = ImGui::GetIO();
+        const float fps = frameTimeSum_ > 0.0f ? 60.0f / frameTimeSum_ : 0.0f;
         char fpsText[64];
-        snprintf(fpsText, sizeof(fpsText), "%.1f FPS  (%.2f ms)", fpsIo.Framerate, 1000.0f / fpsIo.Framerate);
+        snprintf(fpsText, sizeof(fpsText), "%.1f FPS  (%.2f ms)", fps, fps > 0.0f ? 1000.0f / fps : 0.0f);
         Overlay2D& ov = overlay_;
         OvVec2 textSize = ov.textSize(fpsText);
         OvVec2 pos(vpW - textSize.x - 8.0f, vpH - textSize.y - 8.0f - timelineH);

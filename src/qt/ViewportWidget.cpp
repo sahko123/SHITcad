@@ -6,6 +6,7 @@
 
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QGuiApplication>
 #include <QKeyEvent>
 #include <QStandardPaths>
 #include <QMouseEvent>
@@ -70,7 +71,7 @@ bool ViewportWidget::chooseFile(FileDialog kind, const char* title, std::string&
     }
 
     utf8Path.clear();
-    imgui_.releaseAll();
+    input_.releaseAll();
     if (dlg.exec() == QDialog::Accepted && !dlg.selectedFiles().isEmpty()) {
         const QString chosen = dlg.selectedFiles().first();
         lastDir_ = spec.folder ? chosen : QFileInfo(chosen).absolutePath();
@@ -127,8 +128,15 @@ void ViewportWidget::paintGL() {
     const float s = (float)devicePixelRatioF();
     const int w = (int)std::lround(width() * s), h = (int)std::lround(height() * s);
 
+    InputFrame in;
+    in.viewX = 0.0f;
+    in.viewY = 0.0f;   // the toolbar is a Qt widget: the whole viewport takes input
+    in.viewW = (float)w;
+    in.viewH = (float)h;
+    input_.frame(dt, (float)w, (float)h, in);
+
     profiler.begin("UI+Input");
-    app_.frame(dt, w, h);
+    app_.frame(dt, w, h, &in);
     profiler.end();
     emit frameBuilt();
 
@@ -146,22 +154,24 @@ void ViewportWidget::paintGL() {
     inFrame_ = false;
 }
 
-void ViewportWidget::mousePressEvent(QMouseEvent* e) { imgui_.mouseButton(e, true); }
-void ViewportWidget::mouseReleaseEvent(QMouseEvent* e) { imgui_.mouseButton(e, false); }
-// Qt replaces the second press of a double click with this event; ImGui
-// times double clicks itself and needs it as an ordinary press.
-void ViewportWidget::mouseDoubleClickEvent(QMouseEvent* e) { imgui_.mouseButton(e, true); }
-void ViewportWidget::mouseMoveEvent(QMouseEvent* e) { imgui_.mouseMove(e); }
-void ViewportWidget::wheelEvent(QWheelEvent* e) { imgui_.wheel(e); }
-void ViewportWidget::keyPressEvent(QKeyEvent* e) { imgui_.key(e, true); }
-void ViewportWidget::keyReleaseEvent(QKeyEvent* e) { imgui_.key(e, false); }
-void ViewportWidget::focusInEvent(QFocusEvent*) { imgui_.focus(true); }
-void ViewportWidget::focusOutEvent(QFocusEvent*) { imgui_.focus(false); }
-void ViewportWidget::leaveEvent(QEvent*) { imgui_.leave(); }
+float ViewportWidget::scale() const { return (float)devicePixelRatioF(); }
+
+void ViewportWidget::mousePressEvent(QMouseEvent* e) { input_.mouseButton(e, scale(), true, false); }
+void ViewportWidget::mouseReleaseEvent(QMouseEvent* e) { input_.mouseButton(e, scale(), false, false); }
+// Qt replaces the second press of a double click with this event.
+void ViewportWidget::mouseDoubleClickEvent(QMouseEvent* e) { input_.mouseButton(e, scale(), true, true); }
+void ViewportWidget::mouseMoveEvent(QMouseEvent* e) { input_.mouseMove(e, scale()); }
+void ViewportWidget::wheelEvent(QWheelEvent* e) { input_.wheel(e); }
+void ViewportWidget::keyPressEvent(QKeyEvent* e) { input_.key(e, true); }
+void ViewportWidget::keyReleaseEvent(QKeyEvent* e) { input_.key(e, false); }
+void ViewportWidget::focusInEvent(QFocusEvent*) {}
+// Key releases made while a dock or field has the keyboard never come here.
+void ViewportWidget::focusOutEvent(QFocusEvent*) { input_.releaseAll(false); }
+void ViewportWidget::leaveEvent(QEvent*) { input_.leave(QGuiApplication::mouseButtons() != Qt::NoButton); }
 
 void ViewportWidget::changeEvent(QEvent* e) {
     // Another window (a native dialog, another app) became active.
-    if (e->type() == QEvent::ActivationChange && !isActiveWindow() && ready_) imgui_.releaseAll();
+    if (e->type() == QEvent::ActivationChange && !isActiveWindow() && ready_) input_.releaseAll();
     QOpenGLWidget::changeEvent(e);
 }
 

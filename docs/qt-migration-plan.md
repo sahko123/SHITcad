@@ -509,6 +509,19 @@ ratio and picking near the edges.
    light).
 4. Update `CLAUDE.md` (build, architecture, the ImGui-specific notes) and the README.
 
+**Progress.**
+- 6.1 input: done. Not in the list above but needed first: the Qt build read its
+  viewport input through ImGui (`ImGuiQt` fed ImGui, `fillInputFromImGui` read it back).
+  `src/qt/QtInput.cpp` now fills `InputFrame` from Qt events with ImGui's semantics:
+  held-key repeat (0.275 s, then every 0.05 s), trickled events (a click inside one
+  frame is seen down, then up), furthest-drag distance, and an invalid position once
+  the mouse leaves with no button held. The host passes it to `App::frame`; the GLFW
+  build still reads ImGui. Keyboard focus moving to a field inside the view releases
+  keys but keeps the mouse (the old path lost the mouse position there); App computes
+  its own frame rate. Checked: double-click into a sketch, clicks, O, Ctrl+Z/Y, L,
+  Escape, T, a typed circle diameter, a dimension typed while placing, dragging a
+  sketch corner, orbit and zoom.
+
 ## Phase 7: platform layer and cross-platform build (can start after Phase 4)
 
 | Today (Windows-only) | Replacement |
