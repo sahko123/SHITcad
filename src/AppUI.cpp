@@ -1236,15 +1236,7 @@ void App::drawObjectTree() {
         }
 
         // Add Offset Plane button
-        if (ImGui::SmallButton("+ Add Plane")) {
-            addPlaneDialogOpen_ = true;
-            addPlaneSourceIndex_ = 0;
-            addPlaneOffset_ = 10.0f;
-            snprintf(addPlaneOffsetBuf_, sizeof(addPlaneOffsetBuf_), "%.1f", addPlaneOffset_);
-            snprintf(addPlaneNameBuf_, sizeof(addPlaneNameBuf_), "");
-            addPlaneFromFace_ = false;
-            addPlaneWaitingFace_ = false;
-        }
+        if (ImGui::SmallButton("+ Add Plane")) openAddPlaneDialog();
 
         ImGui::TreePop();
     }
@@ -1317,112 +1309,7 @@ void App::drawObjectTree() {
     ImGui::PopStyleVar();
 
     // Add Plane dialog
-    if (addPlaneDialogOpen_) {
-        ImGui::SetNextWindowSize({280, 0});
-        ImGui::Begin("Add Reference Plane", &addPlaneDialogOpen_,
-            ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoCollapse);
-
-        // Source selection
-        ImGui::Text("Source:");
-
-        // Build list of reference planes + "Pick Face" option
-        if (ImGui::RadioButton("From Plane", !addPlaneFromFace_)) {
-            addPlaneFromFace_ = false;
-            addPlaneWaitingFace_ = false;
-        }
-        if (!addPlaneFromFace_) {
-            ImGui::Indent();
-            for (int i = 0; i < (int)sketchPlanes_.size(); i++) {
-                if (!sketchPlanes_[i].isReferencePlane) continue;
-                if (ImGui::RadioButton(sketchPlanes_[i].name.c_str(), addPlaneSourceIndex_ == i)) {
-                    addPlaneSourceIndex_ = i;
-                }
-            }
-            ImGui::Unindent();
-        }
-
-        if (ImGui::RadioButton("From Face", addPlaneFromFace_)) {
-            addPlaneFromFace_ = true;
-            addPlaneWaitingFace_ = true;
-        }
-        if (addPlaneFromFace_) {
-            ImGui::Indent();
-            if (addPlaneWaitingFace_) {
-                ImGui::TextColored({1.0f, 0.8f, 0.2f, 1.0f}, "Click a face in the viewport");
-            } else {
-                ImGui::TextColored({0.3f, 1.0f, 0.3f, 1.0f}, "Face selected");
-            }
-            ImGui::Unindent();
-        }
-
-        ImGui::Separator();
-
-        // Offset
-        ImGui::Text("Offset distance:");
-        ImGui::SetNextItemWidth(120);
-        if (ImGui::InputText("##offset", addPlaneOffsetBuf_, sizeof(addPlaneOffsetBuf_),
-                ImGuiInputTextFlags_EnterReturnsTrue)) {
-            addPlaneOffset_ = (float)atof(addPlaneOffsetBuf_);
-        }
-
-        // Name (optional)
-        ImGui::Text("Name (optional):");
-        ImGui::SetNextItemWidth(180);
-        ImGui::InputText("##name", addPlaneNameBuf_, sizeof(addPlaneNameBuf_));
-
-        ImGui::Separator();
-
-        // Create button
-        bool canCreate = !addPlaneFromFace_ || !addPlaneWaitingFace_;
-        if (!canCreate) ImGui::BeginDisabled();
-        if (ImGui::Button("Create", {80, 0})) {
-            addPlaneOffset_ = (float)atof(addPlaneOffsetBuf_);
-
-            const SketchPlane& src = addPlaneFromFace_
-                ? addPlaneFaceSource_
-                : sketchPlanes_[addPlaneSourceIndex_];
-            SketchPlane newPlane;
-            std::memcpy(newPlane.origin, src.origin, sizeof(src.origin));
-            std::memcpy(newPlane.normal, src.normal, sizeof(src.normal));
-            std::memcpy(newPlane.uAxis, src.uAxis, sizeof(src.uAxis));
-            std::memcpy(newPlane.vAxis, src.vAxis, sizeof(src.vAxis));
-
-            // Apply offset along normal
-            newPlane.origin[0] += newPlane.normal[0] * addPlaneOffset_;
-            newPlane.origin[1] += newPlane.normal[1] * addPlaneOffset_;
-            newPlane.origin[2] += newPlane.normal[2] * addPlaneOffset_;
-
-            // Set name
-            if (addPlaneNameBuf_[0] != '\0') {
-                newPlane.name = addPlaneNameBuf_;
-            } else {
-                // Auto-generate name
-                const char* srcName = addPlaneFromFace_ ? "Face" : src.name.c_str();
-                char autoName[128];
-                snprintf(autoName, sizeof(autoName), "%s + %.1f", srcName, addPlaneOffset_);
-                newPlane.name = autoName;
-            }
-
-            newPlane.isReferencePlane = true;
-            newPlane.visible = true;
-            newPlane.color[0] = 0.5f; newPlane.color[1] = 0.5f;
-            newPlane.color[2] = 0.5f; newPlane.color[3] = 0.10f;
-
-            newPlane.planeID = nextPlaneID_++;
-            sketchPlanes_.push_back(std::move(newPlane));
-            addPlaneDialogOpen_ = false;
-            markDirty();
-        }
-        if (!canCreate) ImGui::EndDisabled();
-
-        ImGui::SameLine();
-        if (ImGui::Button("Cancel", {80, 0})) {
-            addPlaneDialogOpen_ = false;
-            addPlaneWaitingFace_ = false;
-        }
-
-        ImGui::End();
-    }
+    if (!hostHas(HostAddPlane)) drawAddPlaneDialog();
 }
 
 // ---- Toolbar model ------------------------------------------------------------
@@ -1716,6 +1603,222 @@ void App::drawToolbar() {
     }
 
     ImGui::PopStyleVar(2);
+}
+
+// ---- Add Reference Plane --------------------------------------------------------
+
+App::AddPlaneModel App::addPlaneModel() const {
+    AddPlaneModel m;
+    m.open = addPlaneDialogOpen_;
+    if (!m.open) return m;
+    m.fromFace = addPlaneFromFace_;
+    m.waitingFace = addPlaneWaitingFace_;
+    m.sourceIndex = addPlaneSourceIndex_;
+    m.offsetText = addPlaneOffsetBuf_;
+    m.name = addPlaneNameBuf_;
+    for (int i = 0; i < (int)sketchPlanes_.size(); i++)
+        if (sketchPlanes_[i].isReferencePlane) m.sources.push_back({i, sketchPlanes_[i].name});
+    m.canCreate = !addPlaneFromFace_ || !addPlaneWaitingFace_;
+    return m;
+}
+
+void App::openAddPlaneDialog() {
+    addPlaneDialogOpen_ = true;
+    addPlaneSourceIndex_ = 0;
+    addPlaneOffset_ = 10.0f;
+    snprintf(addPlaneOffsetBuf_, sizeof(addPlaneOffsetBuf_), "%.1f", addPlaneOffset_);
+    snprintf(addPlaneNameBuf_, sizeof(addPlaneNameBuf_), "");
+    addPlaneFromFace_ = false;
+    addPlaneWaitingFace_ = false;
+}
+
+void App::setAddPlaneSource(bool fromFace, int planeIndex) {
+    addPlaneFromFace_ = fromFace;
+    addPlaneWaitingFace_ = fromFace;   // a face still has to be clicked
+    if (!fromFace && planeIndex >= 0 && planeIndex < (int)sketchPlanes_.size())
+        addPlaneSourceIndex_ = planeIndex;
+}
+
+void App::setAddPlaneOffsetText(const std::string& text) {
+    snprintf(addPlaneOffsetBuf_, sizeof(addPlaneOffsetBuf_), "%s", text.c_str());
+    addPlaneOffset_ = (float)atof(addPlaneOffsetBuf_);
+}
+
+void App::setAddPlaneName(const std::string& name) {
+    snprintf(addPlaneNameBuf_, sizeof(addPlaneNameBuf_), "%s", name.c_str());
+}
+
+void App::createOffsetPlane() {
+    if (!addPlaneDialogOpen_ || (addPlaneFromFace_ && addPlaneWaitingFace_)) return;
+    addPlaneOffset_ = (float)atof(addPlaneOffsetBuf_);
+
+    const SketchPlane& src = addPlaneFromFace_
+        ? addPlaneFaceSource_
+        : sketchPlanes_[addPlaneSourceIndex_];
+    SketchPlane newPlane;
+    std::memcpy(newPlane.origin, src.origin, sizeof(src.origin));
+    std::memcpy(newPlane.normal, src.normal, sizeof(src.normal));
+    std::memcpy(newPlane.uAxis, src.uAxis, sizeof(src.uAxis));
+    std::memcpy(newPlane.vAxis, src.vAxis, sizeof(src.vAxis));
+
+    // Apply offset along normal
+    newPlane.origin[0] += newPlane.normal[0] * addPlaneOffset_;
+    newPlane.origin[1] += newPlane.normal[1] * addPlaneOffset_;
+    newPlane.origin[2] += newPlane.normal[2] * addPlaneOffset_;
+
+    if (addPlaneNameBuf_[0] != '\0') {
+        newPlane.name = addPlaneNameBuf_;
+    } else {
+        // Auto-generate name
+        const char* srcName = addPlaneFromFace_ ? "Face" : src.name.c_str();
+        char autoName[128];
+        snprintf(autoName, sizeof(autoName), "%s + %.1f", srcName, addPlaneOffset_);
+        newPlane.name = autoName;
+    }
+
+    newPlane.isReferencePlane = true;
+    newPlane.visible = true;
+    newPlane.color[0] = 0.5f; newPlane.color[1] = 0.5f;
+    newPlane.color[2] = 0.5f; newPlane.color[3] = 0.10f;
+
+    newPlane.planeID = nextPlaneID_++;
+    sketchPlanes_.push_back(std::move(newPlane));
+    addPlaneDialogOpen_ = false;
+    markDirty();
+}
+
+void App::cancelAddPlane() {
+    addPlaneDialogOpen_ = false;
+    addPlaneWaitingFace_ = false;
+}
+
+// ImGui front end for AddPlaneModel (the Qt one is src/qt/PlaneDialogs.cpp).
+void App::drawAddPlaneDialog() {
+    if (!addPlaneDialogOpen_) return;
+    ImGui::SetNextWindowSize({280, 0});
+    ImGui::Begin("Add Reference Plane", &addPlaneDialogOpen_,
+        ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoCollapse);
+
+    // Source selection
+    ImGui::Text("Source:");
+
+    if (ImGui::RadioButton("From Plane", !addPlaneFromFace_)) setAddPlaneSource(false, addPlaneSourceIndex_);
+    if (!addPlaneFromFace_) {
+        ImGui::Indent();
+        for (int i = 0; i < (int)sketchPlanes_.size(); i++) {
+            if (!sketchPlanes_[i].isReferencePlane) continue;
+            if (ImGui::RadioButton(sketchPlanes_[i].name.c_str(), addPlaneSourceIndex_ == i))
+                setAddPlaneSource(false, i);
+        }
+        ImGui::Unindent();
+    }
+
+    if (ImGui::RadioButton("From Face", addPlaneFromFace_)) setAddPlaneSource(true, addPlaneSourceIndex_);
+    if (addPlaneFromFace_) {
+        ImGui::Indent();
+        if (addPlaneWaitingFace_) {
+            ImGui::TextColored({1.0f, 0.8f, 0.2f, 1.0f}, "Click a face in the viewport");
+        } else {
+            ImGui::TextColored({0.3f, 1.0f, 0.3f, 1.0f}, "Face selected");
+        }
+        ImGui::Unindent();
+    }
+
+    ImGui::Separator();
+
+    // Offset
+    ImGui::Text("Offset distance:");
+    ImGui::SetNextItemWidth(120);
+    if (ImGui::InputText("##offset", addPlaneOffsetBuf_, sizeof(addPlaneOffsetBuf_),
+            ImGuiInputTextFlags_EnterReturnsTrue)) {
+        addPlaneOffset_ = (float)atof(addPlaneOffsetBuf_);
+    }
+
+    // Name (optional)
+    ImGui::Text("Name (optional):");
+    ImGui::SetNextItemWidth(180);
+    ImGui::InputText("##name", addPlaneNameBuf_, sizeof(addPlaneNameBuf_));
+
+    ImGui::Separator();
+
+    bool canCreate = !addPlaneFromFace_ || !addPlaneWaitingFace_;
+    if (!canCreate) ImGui::BeginDisabled();
+    if (ImGui::Button("Create", {80, 0})) createOffsetPlane();
+    if (!canCreate) ImGui::EndDisabled();
+
+    ImGui::SameLine();
+    if (ImGui::Button("Cancel", {80, 0})) cancelAddPlane();
+
+    ImGui::End();
+}
+
+// ---- Tangent plane on a cylinder ------------------------------------------------
+
+App::TangentPlaneModel App::tangentPlaneModel() const {
+    TangentPlaneModel m;
+    m.open = cylPlaneDialogOpen_;
+    if (!m.open) return m;
+    m.angleDeg = cylPlaneAngle_;
+    m.name = cylPlaneNameBuf_;
+    return m;
+}
+
+void App::setTangentPlaneAngle(float degrees) {
+    cylPlaneAngle_ = degrees;
+    snprintf(cylPlaneAngleBuf_, sizeof(cylPlaneAngleBuf_), "%.1f", cylPlaneAngle_);
+}
+
+void App::setTangentPlaneName(const std::string& name) {
+    snprintf(cylPlaneNameBuf_, sizeof(cylPlaneNameBuf_), "%s", name.c_str());
+}
+
+void App::createTangentPlane() {
+    if (!cylPlaneDialogOpen_) return;
+    SketchPlane newPlane;
+    if (!buildCylinderTangentPlane(cylPlaneFace_, cylPlaneAngle_, cylPlaneHitWorld_, newPlane)) return;
+    newPlane.sourceBodyIndex = cylPlaneBodyIndex_;
+    newPlane.name = strlen(cylPlaneNameBuf_) > 0 ? cylPlaneNameBuf_ : "CylPlane";
+    newPlane.isReferencePlane = true;
+    newPlane.color[0] = 0.2f; newPlane.color[1] = 0.7f;
+    newPlane.color[2] = 0.5f; newPlane.color[3] = 0.15f;
+    projectFaceOntoSketch(cylPlaneFace_, newPlane, newPlane.sketch);
+    newPlane.planeID = nextPlaneID_++;
+    sketchPlanes_.push_back(std::move(newPlane));
+    cylPlaneDialogOpen_ = false;
+    enterSketchMode((int)sketchPlanes_.size() - 1);
+}
+
+void App::cancelTangentPlane() { cylPlaneDialogOpen_ = false; }
+
+// ImGui front end for TangentPlaneModel (the Qt one is src/qt/PlaneDialogs.cpp).
+void App::drawTangentPlaneDialog() {
+    if (!cylPlaneDialogOpen_) return;
+    ImGui::SetNextWindowSize({280, 0}, ImGuiCond_Always);
+    ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Appearing, {0.5f, 0.5f});
+    ImGui::Begin("Tangent Plane", &cylPlaneDialogOpen_,
+        ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_AlwaysAutoResize);
+
+    ImGui::Text("Create a tangent plane on cylinder");
+    ImGui::Separator();
+
+    ImGui::Text("Name:");
+    ImGui::SetNextItemWidth(-1);
+    ImGui::InputText("##cylname", cylPlaneNameBuf_, sizeof(cylPlaneNameBuf_));
+
+    ImGui::Text("Angle (degrees from click point):");
+    ImGui::SetNextItemWidth(-1);
+    if (ImGui::InputText("##cylangle", cylPlaneAngleBuf_, sizeof(cylPlaneAngleBuf_),
+                         ImGuiInputTextFlags_EnterReturnsTrue)) {
+        cylPlaneAngle_ = (float)atof(cylPlaneAngleBuf_);
+    }
+    ImGui::SliderFloat("##cylangleslider", &cylPlaneAngle_, -180.0f, 180.0f, "%.1f deg");
+    snprintf(cylPlaneAngleBuf_, sizeof(cylPlaneAngleBuf_), "%.1f", cylPlaneAngle_);
+
+    ImGui::Separator();
+    if (ImGui::Button("Create & Sketch", {-1, 0})) createTangentPlane();
+    if (ImGui::Button("Cancel", {-1, 0})) cancelTangentPlane();
+
+    ImGui::End();
 }
 
 } // namespace shitcad

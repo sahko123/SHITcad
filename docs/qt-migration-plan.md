@@ -408,6 +408,13 @@ ratio and picking near the edges.
   drop to ground, Done and an undo. `src/qt/MeshDialogs.cpp` is the Qt front end.
   `App::validateMeshPlace` now runs every frame: dropping the panel when its feature is
   deleted or undone used to happen while the ImGui panel drew itself.
+- 5.4 plane dialogs: done. `AddPlaneModel` / `TangentPlaneModel` and their operations
+  (choose source, typed offset, name, create, cancel) back both front ends. The ImGui
+  Add Reference Plane dialog moved out of `drawObjectTree` into `drawAddPlaneDialog`
+  and the tangent one out of `renderFrame`, both unchanged on screen (checked through
+  source switching, a typed offset, Create and Cancel). `src/qt/PlaneDialogs.cpp` is
+  the Qt front end; its source list rebuilds when planes are added. Not yet exercised
+  live: the tangent-plane dialog, which needs a cylindrical face to open.
 
 ## Phase 6: remove ImGui and GLFW
 

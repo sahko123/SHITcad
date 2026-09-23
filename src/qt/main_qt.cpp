@@ -6,6 +6,7 @@
 #include "Toolbar.h"
 #include "PreferencesDialog.h"
 #include "MeshDialogs.h"
+#include "PlaneDialogs.h"
 
 #include <QApplication>
 #include <QMainWindow>
@@ -50,6 +51,14 @@ int main(int argc, char** argv) {
     viewport->app().setHostPanel(shitcad::App::HostMeshPlace);
     auto* meshPlace = new shitcad::MeshPlacePanel(viewport->app(), &window);
     QObject::connect(viewport, &shitcad::ViewportWidget::frameBuilt, meshPlace, &shitcad::MeshPlacePanel::refresh);
+
+    viewport->app().setHostPanel(shitcad::App::HostAddPlane);
+    auto* addPlane = new shitcad::AddPlaneDialog(viewport->app(), &window);
+    QObject::connect(viewport, &shitcad::ViewportWidget::frameBuilt, addPlane, &shitcad::AddPlaneDialog::refresh);
+
+    viewport->app().setHostPanel(shitcad::App::HostTangentPlane);
+    auto* tangentPlane = new shitcad::TangentPlaneDialog(viewport->app(), &window);
+    QObject::connect(viewport, &shitcad::ViewportWidget::frameBuilt, tangentPlane, &shitcad::TangentPlaneDialog::refresh);
     window.resize(1280, 720);
     window.showMaximized();
     viewport->setFocus();

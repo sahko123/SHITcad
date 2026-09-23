@@ -152,12 +152,45 @@ public:
     void meshPlaceResetPlacement();
     void finishMeshPlace(bool keep);
 
+    // ---- Add Reference Plane: offset from a plane, or from a picked face.
+    struct AddPlaneModel {
+        bool open = false;
+        bool fromFace = false;
+        bool waitingFace = false;      // told to click a face, none picked yet
+        int sourceIndex = 0;           // into the planes below
+        std::string offsetText, name;
+        struct Source { int index; std::string name; };
+        std::vector<Source> sources;   // reference planes to offset from
+        bool canCreate = false;
+    };
+    AddPlaneModel addPlaneModel() const;
+    void openAddPlaneDialog();
+    void setAddPlaneSource(bool fromFace, int planeIndex);
+    void setAddPlaneOffsetText(const std::string& text);
+    void setAddPlaneName(const std::string& name);
+    void createOffsetPlane();
+    void cancelAddPlane();
+
+    // ---- Tangent plane on a cylinder (opened by picking a cylindrical face).
+    struct TangentPlaneModel {
+        bool open = false;
+        float angleDeg = 0.0f;
+        std::string name;
+    };
+    TangentPlaneModel tangentPlaneModel() const;
+    void setTangentPlaneAngle(float degrees);
+    void setTangentPlaneName(const std::string& name);
+    void createTangentPlane();         // creates it and starts a sketch on it
+    void cancelTangentPlane();
+
     // Panels the host draws itself (Qt); App then skips their ImGui versions.
     enum HostPanel : uint32_t {
         HostToolbar     = 1u << 0,
         HostPreferences = 1u << 1,
         HostMeshImport  = 1u << 2,
         HostMeshPlace   = 1u << 3,
+        HostAddPlane    = 1u << 4,
+        HostTangentPlane = 1u << 5,
     };
     void setHostPanel(HostPanel p, bool on = true) { hostPanels_ = on ? (hostPanels_ | p) : (hostPanels_ & ~p); }
     bool hostHas(HostPanel p) const { return (hostPanels_ & p) != 0; }
@@ -442,6 +475,8 @@ private:
     void drawDimensionPanel(Sketch& sketch);
     void handleDimToolClick(Sketch& sketch);
     void drawPreferencesWindow();
+    void drawAddPlaneDialog();
+    void drawTangentPlaneDialog();
     void drawTimeline(float panelW);
     void replayAllFeatures();
     void globalUndo();

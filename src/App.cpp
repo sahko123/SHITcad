@@ -549,51 +549,7 @@ void App::renderFrame() {
     if (prefsOpen_ && !hostHas(HostPreferences)) drawPreferencesWindow();
 
     // Cylinder tangent plane dialog
-    if (cylPlaneDialogOpen_) {
-        ImGui::SetNextWindowSize({280, 0}, ImGuiCond_Always);
-        ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Appearing, {0.5f, 0.5f});
-        ImGui::Begin("Tangent Plane", &cylPlaneDialogOpen_,
-            ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_AlwaysAutoResize);
-
-        ImGui::Text("Create a tangent plane on cylinder");
-        ImGui::Separator();
-
-        ImGui::Text("Name:");
-        ImGui::SetNextItemWidth(-1);
-        ImGui::InputText("##cylname", cylPlaneNameBuf_, sizeof(cylPlaneNameBuf_));
-
-        ImGui::Text("Angle (degrees from click point):");
-        ImGui::SetNextItemWidth(-1);
-        if (ImGui::InputText("##cylangle", cylPlaneAngleBuf_, sizeof(cylPlaneAngleBuf_),
-                             ImGuiInputTextFlags_EnterReturnsTrue)) {
-            cylPlaneAngle_ = (float)atof(cylPlaneAngleBuf_);
-        }
-        ImGui::SliderFloat("##cylangleslider", &cylPlaneAngle_, -180.0f, 180.0f, "%.1f deg");
-        snprintf(cylPlaneAngleBuf_, sizeof(cylPlaneAngleBuf_), "%.1f", cylPlaneAngle_);
-
-        ImGui::Separator();
-        if (ImGui::Button("Create & Sketch", {-1, 0})) {
-            SketchPlane newPlane;
-            if (buildCylinderTangentPlane(cylPlaneFace_, cylPlaneAngle_, cylPlaneHitWorld_, newPlane)) {
-                newPlane.sourceBodyIndex = cylPlaneBodyIndex_;
-                newPlane.name = strlen(cylPlaneNameBuf_) > 0 ? cylPlaneNameBuf_ : "CylPlane";
-                newPlane.isReferencePlane = true;
-                newPlane.color[0] = 0.2f; newPlane.color[1] = 0.7f;
-                newPlane.color[2] = 0.5f; newPlane.color[3] = 0.15f;
-                projectFaceOntoSketch(cylPlaneFace_, newPlane, newPlane.sketch);
-                newPlane.planeID = nextPlaneID_++;
-                sketchPlanes_.push_back(std::move(newPlane));
-                cylPlaneDialogOpen_ = false;
-                enterSketchMode((int)sketchPlanes_.size() - 1);
-            }
-        }
-        if (ImGui::Button("Cancel", {-1, 0})) {
-            cylPlaneDialogOpen_ = false;
-        }
-
-        ImGui::End();
-    }
-
+    if (!hostHas(HostTangentPlane)) drawTangentPlaneDialog();
     if (sectionWindowOpen_ && workspace_ == Workspace::Model) {
         ImGui::SetNextWindowSize({300, 0}, ImGuiCond_Appearing);
         ImGui::SetNextWindowPos({vpW - 320, 60}, ImGuiCond_Appearing);
