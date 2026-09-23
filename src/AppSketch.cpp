@@ -1010,7 +1010,7 @@ void App::handleSketchInput(float vpW, float vpH) {
         }
     }
 
-    drawInlineDimInput(sketch);
+    if (!hostHas(HostInViewport)) drawInlineDimInput(sketch);
     drawSketchMessage();
 
     // Keyboard shortcuts
@@ -1338,101 +1338,116 @@ void App::handleSketchInput(float vpW, float vpH) {
 // Value box for a circle diameter or fillet radius, opened by typing a digit
 // while the tool is waiting (see handleSketchInput). Called from the same point
 // in the frame as before, so submit and Escape happen in the same order.
-void App::drawInlineDimInput(Sketch& sketch) {
-    // Show inline dimension input floating window
-    if (tool_.inlineInputActive) {
-        ImVec2 mouse(in_.mouseX, in_.mouseY);
-        ImGui::SetNextWindowPos(ImVec2(mouse.x + 20, mouse.y - 10), ImGuiCond_Always);
-        ImGui::SetNextWindowSize(ImVec2(120, 0));
-        ImGui::Begin("##InlineDim", nullptr,
-            ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
-            ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoScrollbar |
-            ImGuiWindowFlags_AlwaysAutoResize);
+App::InlineInputModel App::inlineInputModel() const {
+    InlineInputModel m;
+    m.active = tool_.inlineInputActive && mode_ == InteractionMode::Sketching;
+    if (!m.active) return m;
+    m.x = in_.mouseX + 20.0f;
+    m.y = in_.mouseY - 10.0f;
+    m.text = tool_.inlineInputBuf;
+    return m;
+}
 
-        ImGui::SetNextItemWidth(100);
-        if (tool_.inlineInputFocus) {
-            ImGui::SetKeyboardFocusHere();
-            tool_.inlineInputFocus = false;
+void App::setInlineInputText(const std::string& text) {
+    snprintf(tool_.inlineInputBuf, sizeof(tool_.inlineInputBuf), "%s", text.c_str());
+}
+
+// Enter in the inline input: the typed diameter makes the circle, or the
+// typed radius the fillet.
+void App::submitInlineInput() {
+    if (!tool_.inlineInputActive || !hasActiveSketch()) return;
+    Sketch& sketch = activeSketch();
+    std::string unit;
+    float inputVal = 0;
+    float valueMm = parseUnitInput(tool_.inlineInputBuf, unit, inputVal);
+    if (tool_.type == ToolType::Circle) {
+        if (valueMm > 0.001f) {
+            float radius = valueMm * 0.5f;
+            EntityID circID = sketch.addCircle(tool_.firstPointID, radius);
+            sketch.addConstraint(ConstraintType::Diameter, circID, NullID, valueMm, false);
+            lastSketchDof_ = solver_.solve(sketch).dof;
+            history_.pushState(sketch);
+            tool_.reset();
+        } else {
+            snprintf(sketchMsg_, sizeof(sketchMsg_), "Enter a positive diameter");
+            sketchMsgTimer_ = 2.0f;
+            tool_.inlineInputActive = false;
+            tool_.inlineInputBuf[0] = '\0';
         }
-
-        // Callback to move cursor to end and clear selection on first focus
-        auto cursorEndCb = [](ImGuiInputTextCallbackData* data) -> int {
-            data->CursorPos = data->BufTextLen;
-            data->SelectionStart = data->SelectionEnd = data->BufTextLen;
-            return 0;
-        };
-
-        bool submitted = ImGui::InputText("##inlineDimInput", tool_.inlineInputBuf,
-            sizeof(tool_.inlineInputBuf),
-            ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_CallbackAlways,
-            cursorEndCb);
-
-        if (submitted) {
-            std::string unit;
-            float inputVal = 0;
-            float valueMm = parseUnitInput(tool_.inlineInputBuf, unit, inputVal);
-            if (tool_.type == ToolType::Circle) {
-                if (valueMm > 0.001f) {
-                    float radius = valueMm * 0.5f;
-                    EntityID circID = sketch.addCircle(tool_.firstPointID, radius);
-                    sketch.addConstraint(ConstraintType::Diameter, circID, NullID, valueMm, false);
-                    lastSketchDof_ = solver_.solve(sketch).dof;
-                    history_.pushState(sketch);
-                    tool_.reset();
-                } else {
-                    snprintf(sketchMsg_, sizeof(sketchMsg_), "Enter a positive diameter");
-                    sketchMsgTimer_ = 2.0f;
-                    tool_.inlineInputActive = false;
-                    tool_.inlineInputBuf[0] = '\0';
-                }
-            } else if (tool_.type == ToolType::Fillet) {
-                if (valueMm > 0.001f) {
-                    bool ok = applyFillet(sketch, filletTool_, tool_.firstPointID, valueMm);
-                    if (ok) {
-                        lastSketchDof_ = solver_.solve(sketch).dof;
-                        history_.pushState(sketch);
-                    }
-                    tool_.reset();
-                    filletTool_.reset();
-                } else {
-                    tool_.inlineInputActive = false;
-                    tool_.inlineInputBuf[0] = '\0';
-                }
+    } else if (tool_.type == ToolType::Fillet) {
+        if (valueMm > 0.001f) {
+            bool ok = applyFillet(sketch, filletTool_, tool_.firstPointID, valueMm);
+            if (ok) {
+                lastSketchDof_ = solver_.solve(sketch).dof;
+                history_.pushState(sketch);
             }
+            tool_.reset();
+            filletTool_.reset();
+        } else {
+            tool_.inlineInputActive = false;
+            tool_.inlineInputBuf[0] = '\0';
         }
-
-        if (in_.keyPressed(Key::Escape)) {
-            if (tool_.type == ToolType::Fillet && tool_.hasFirstPoint) {
-                // Cancel the whole fillet vertex selection, stay in fillet tool
-                switchTool(ToolType::Fillet);
-            } else {
-                tool_.inlineInputActive = false;
-                tool_.inlineInputBuf[0] = '\0';
-            }
-        }
-
-        ImGui::End();
     }
 }
 
-void App::drawSketchMessage() {
-    // Sketch status message overlay (warnings, constraint feedback, etc.)
-    if (sketchMsgTimer_ > 0.0f) {
-        sketchMsgTimer_ -= in_.dt;
-        ImVec2 displaySize = ImGui::GetIO().DisplaySize;
-        ImGui::SetNextWindowPos(ImVec2(displaySize.x * 0.5f, displaySize.y - 60.0f),
-                                ImGuiCond_Always, ImVec2(0.5f, 0.5f));
-        ImGui::SetNextWindowBgAlpha(0.78f);
-        ImGui::Begin("##SketchMsg", nullptr,
-            ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
-            ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoScrollbar |
-            ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoFocusOnAppearing |
-            ImGuiWindowFlags_NoInputs);
-        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.85f, 0.3f, 1.0f));
-        ImGui::Text("%s", sketchMsg_);
-        ImGui::PopStyleColor();
-        ImGui::End();
+// Escape in the inline input.
+void App::cancelInlineInput() {
+    if (!tool_.inlineInputActive) return;
+    if (tool_.type == ToolType::Fillet && tool_.hasFirstPoint) {
+        // Cancel the whole fillet vertex selection, stay in fillet tool
+        switchTool(ToolType::Fillet);
+    } else {
+        tool_.inlineInputActive = false;
+        tool_.inlineInputBuf[0] = '\0';
     }
+}
+
+// ImGui front end for InlineInputModel (the Qt one is src/qt/InViewport.cpp).
+void App::drawInlineDimInput(Sketch& sketch) {
+    (void)sketch;
+    const InlineInputModel m = inlineInputModel();
+    if (!m.active) return;
+    ImGui::SetNextWindowPos(ImVec2(m.x, m.y), ImGuiCond_Always);
+    ImGui::SetNextWindowSize(ImVec2(120, 0));
+    ImGui::Begin("##InlineDim", nullptr,
+        ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
+        ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoScrollbar |
+        ImGuiWindowFlags_AlwaysAutoResize);
+
+    ImGui::SetNextItemWidth(100);
+    if (tool_.inlineInputFocus) {
+        ImGui::SetKeyboardFocusHere();
+        tool_.inlineInputFocus = false;
+    }
+
+    // Callback to move cursor to end and clear selection on first focus
+    auto cursorEndCb = [](ImGuiInputTextCallbackData* data) -> int {
+        data->CursorPos = data->BufTextLen;
+        data->SelectionStart = data->SelectionEnd = data->BufTextLen;
+        return 0;
+    };
+
+    if (ImGui::InputText("##inlineDimInput", tool_.inlineInputBuf, sizeof(tool_.inlineInputBuf),
+            ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_CallbackAlways, cursorEndCb))
+        submitInlineInput();
+
+    if (in_.keyPressed(Key::Escape)) cancelInlineInput();
+
+    ImGui::End();
+}
+
+void App::drawSketchMessage() {
+    // Sketch status message (warnings, constraint feedback, etc.), drawn over
+    // the view near the bottom for sketchMsgTimer_ seconds.
+    if (sketchMsgTimer_ <= 0.0f) return;
+    sketchMsgTimer_ -= in_.dt;
+    Overlay2D& ov = overlay_;
+    const OvVec2 ts = ov.textSize(sketchMsg_);
+    const float cx = in_.screenW * 0.5f;
+    const float cy = in_.screenH - 60.0f - hostTimelineH_;
+    const OvVec2 pos(cx - ts.x * 0.5f, cy - ts.y * 0.5f);
+    ov.addRectFilled({pos.x - 8, pos.y - 6}, {pos.x + ts.x + 8, pos.y + ts.y + 6}, rgba32(20, 20, 24, 200), 4.0f);
+    ov.addText(pos, rgba32(255, 217, 77, 255), sketchMsg_);
 }
 
 void App::handleToolAction(Sketch& sketch, Point2D localPos) {

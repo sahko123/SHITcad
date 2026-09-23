@@ -554,6 +554,198 @@ void App::handleDimToolClick(Sketch& sketch) {
     }
 }
 
+// ---- Dimension panel: model and operations ------------------------------------
+
+App::DimensionPanelModel App::dimensionPanelModel() const {
+    DimensionPanelModel m;
+    m.open = tool_.type == ToolType::Dimension && activeSketchPlane_ >= 0;
+    if (!m.open) return m;
+    if (dimTool_.warningTimer > 0) m.warning = dimTool_.warningMsg;
+    m.editing = dimTool_.phase == DimToolState::Editing || dimTool_.phase == DimToolState::EditingAndPlacing;
+    if (!m.editing) {
+        m.hint = (dimTool_.selType == HitType::Point && dimTool_.entityA != NullID)
+            ? "Select second point or a line" : "Select a line, circle, or two points";
+        return m;
+    }
+    // findConstraint has no const overload; this only reads.
+    Sketch& sketch = const_cast<Sketch&>(sketchPlanes_[activeSketchPlane_].sketch);
+    bool isAngle = false, isPointLine = false, isRadius = false;
+    if (dimTool_.constraintID != NullID) {
+        if (const Constraint* c = sketch.findConstraint(dimTool_.constraintID)) {
+            isAngle = c->type == ConstraintType::Angle;
+            isPointLine = c->type == ConstraintType::PointLineDistance;
+            isRadius = c->type == ConstraintType::Radius;
+        }
+    }
+    if (isAngle) m.kind = "Angle:";
+    else if (isPointLine) m.kind = "Point-Line Distance:";
+    else if (isRadius) m.kind = "Circle Radius:";
+    else if (dimTool_.selType == HitType::Line) m.kind = "Line Distance:";
+    else if (dimTool_.selType == HitType::Circle) m.kind = "Circle Diameter:";
+    else if (dimTool_.selType == HitType::Point) m.kind = "Point Distance:";
+    if (dimTool_.phase == DimToolState::EditingAndPlacing) {
+        if (isAngle) m.placeHint = "Click to place label";
+        else if (dimTool_.selType == HitType::Line && dimTool_.entityB == NullID)
+            m.placeHint = "Click to place, or click another line for angle";
+        else if (dimTool_.selType == HitType::Circle && !isRadius)
+            m.placeHint = "Click to place, or click center for radius";
+        else m.placeHint = "Click to place label";
+    }
+    m.text = dimTool_.inputBuf;
+    m.driven = dimTool_.driven;
+    m.editingExisting = dimTool_.editingExisting;
+    m.takeFocus = dimTool_.focusNeeded || dimTool_.phase == DimToolState::EditingAndPlacing;
+    return m;
+}
+
+void App::setDimensionText(const std::string& text) {
+    snprintf(dimTool_.inputBuf, sizeof(dimTool_.inputBuf), "%s", text.c_str());
+    dimTool_.angleAutoSide = false;   // typing takes over from the mouse side
+}
+
+// Mirrors the typed value into the constraint every frame, so the label
+// follows what is being typed.
+void App::syncDimensionLive() {
+    if (dimTool_.constraintID == NullID) return;
+    Constraint* cc = activeSketch().findConstraint(dimTool_.constraintID);
+    if (!cc) return;
+    if (cc->type == ConstraintType::Angle && dimTool_.angleAutoSide) {
+        // Auto-side mode: handleSketchInput controls the value, skip live sync
+        cc->driven = dimTool_.driven;
+    } else if (cc->type == ConstraintType::Angle) {
+        float liveDeg = parseAngleInput(dimTool_.inputBuf);
+        if (liveDeg >= 0.001f && liveDeg <= 359.999f) {
+            cc->value = liveDeg;
+            cc->driven = dimTool_.driven;
+        }
+    } else {
+        std::string liveUnit;
+        float liveInput = 0;
+        float liveMm = parseUnitInput(dimTool_.inputBuf, liveUnit, liveInput);
+        bool allowNeg = (cc->type == ConstraintType::PointLineDistance);
+        if (allowNeg ? (std::fabs(liveMm) > 0.0001f || liveMm == 0.0f) : (liveMm > 0.001f)) {
+            cc->value = liveMm;
+            cc->inputUnit = liveUnit;
+            cc->inputValue = liveInput;
+            cc->driven = dimTool_.driven;
+        }
+    }
+}
+
+void App::applyDimension() {
+    Sketch& sketch = activeSketch();
+    bool valueOk = false;
+    Constraint* cc = sketch.findConstraint(dimTool_.constraintID);
+    if (cc) {
+        if (cc->type == ConstraintType::Angle) {
+            float deg = parseAngleInput(dimTool_.inputBuf);
+            if (deg >= 0.001f && deg <= 359.999f) {
+                // Determine correct sector (CW/CCW) for the new value
+                LineEntity* l1 = sketch.findLine(cc->entityA);
+                LineEntity* l2 = sketch.findLine(cc->entityB);
+                if (l1 && l2) {
+                    PointEntity* pa1 = sketch.findPoint(l1->startPt);
+                    PointEntity* pb1 = sketch.findPoint(l1->endPt);
+                    PointEntity* pa2 = sketch.findPoint(l2->startPt);
+                    PointEntity* pb2 = sketch.findPoint(l2->endPt);
+                    if (pa1 && pb1 && pa2 && pb2) {
+                        float eps = 1e-3f;
+                        auto pEq = [eps](PointEntity* p, PointEntity* q) {
+                            return std::fabs(p->x-q->x)<eps && std::fabs(p->y-q->y)<eps;
+                        };
+                        double vx = 0.0, vy = 0.0;
+                        bool hasV = false;
+                        if (pEq(pa1,pa2)||pEq(pa1,pb2))      { vx=pa1->x; vy=pa1->y; hasV=true; }
+                        else if (pEq(pb1,pa2)||pEq(pb1,pb2)) { vx=pb1->x; vy=pb1->y; hasV=true; }
+                        else {
+                            double ldx1=pb1->x-pa1->x, ldy1=pb1->y-pa1->y;
+                            double ldx2=pb2->x-pa2->x, ldy2=pb2->y-pa2->y;
+                            double denom=ldx1*ldy2-ldy1*ldx2;
+                            if (std::fabs(denom)>1e-6) {
+                                double t=((pa2->x-pa1->x)*ldy2-(pa2->y-pa1->y)*ldx2)/denom;
+                                vx=pa1->x+t*ldx1; vy=pa1->y+t*ldy1; hasV=true;
+                            }
+                        }
+                        if (hasV) {
+                            auto d2 = [](double ax,double ay,double bx,double by){ double dx=ax-bx,dy=ay-by; return dx*dx+dy*dy; };
+                            PointEntity* f1=(d2(vx,vy,pb1->x,pb1->y)>=d2(vx,vy,pa1->x,pa1->y))?pb1:pa1;
+                            PointEntity* f2=(d2(vx,vy,pb2->x,pb2->y)>=d2(vx,vy,pa2->x,pa2->y))?pb2:pa2;
+                            double dx1=f1->x-vx, dy1=f1->y-vy;
+                            double dx2=f2->x-vx, dy2=f2->y-vy;
+                            double cross=dx1*dy2-dy1*dx2, dot=dx1*dx2+dy1*dy2;
+                            double ccwRad=std::atan2(cross,dot);
+                            if (ccwRad<0) ccwRad+=kTwoPi;
+                            double ccwDeg=ccwRad*180.0/kPi;
+                            double cwDeg=360.0-ccwDeg;
+                            // Pick the sector closest to the user's typed value
+                            cc->angleCW = (std::fabs(cwDeg-deg) < std::fabs(ccwDeg-deg));
+                        }
+                    }
+                }
+                cc->value = deg;
+                cc->driven = dimTool_.driven;
+                valueOk = true;
+            }
+        } else {
+            std::string unitName;
+            float inputValue = 0;
+            float valueMm = parseUnitInput(dimTool_.inputBuf, unitName, inputValue);
+            bool allowNeg = (cc->type == ConstraintType::PointLineDistance);
+            if (allowNeg ? true : (valueMm > 0.001f)) {
+                cc->value = valueMm;
+                cc->inputUnit = unitName;
+                cc->inputValue = inputValue;
+                cc->driven = dimTool_.driven;
+                valueOk = true;
+            }
+        }
+
+        if (valueOk && !cc->driven) {
+            auto geoBak = sketch.captureGeometry();
+            PointEntity* pinA = nullptr, *pinB = nullptr;
+            bool wasA = false, wasB = false;
+            if (cc->type == ConstraintType::PointLineDistance) {
+                LineEntity* refLine = sketch.findLine(cc->entityB);
+                if (refLine) {
+                    pinA = sketch.findPoint(refLine->startPt);
+                    pinB = sketch.findPoint(refLine->endPt);
+                    if (pinA) { wasA = pinA->projected; pinA->projected = true; }
+                    if (pinB) { wasB = pinB->projected; pinB->projected = true; }
+                }
+            }
+            auto res = solver_.solve(sketch);
+            lastSketchDof_ = res.dof;
+            if (pinA) pinA->projected = wasA;
+            if (pinB) pinB->projected = wasB;
+            if (!res.ok) {
+                sketch.restoreGeometry(geoBak);
+                cc->driven = true;
+                dimTool_.driven = true;
+            }
+        }
+    }
+
+    if (valueOk) {
+        history_.pushState(sketch);
+        dimTool_.reset();
+        selection_.clear();
+    }
+}
+
+void App::cancelDimension() {
+    Sketch& sketch = activeSketch();
+    if (dimTool_.phase == DimToolState::EditingAndPlacing && dimTool_.constraintID != NullID) {
+        sketch.removeConstraint(dimTool_.constraintID);
+    } else if (dimTool_.editingExisting && dimTool_.constraintID != NullID) {
+        // Restore original value that live-sync may have changed
+        Constraint* cc = sketch.findConstraint(dimTool_.constraintID);
+        if (cc) cc->value = dimTool_.measuredMm;
+    }
+    dimTool_.reset();
+    selection_.clear();
+}
+
+// ImGui front end for DimensionPanelModel (the Qt one is src/qt/InViewport.cpp).
 void App::drawDimensionPanel(Sketch& sketch) {
     ImGuiIO& io = ImGui::GetIO();
     float panelW = 220.0f;
@@ -565,59 +757,25 @@ void App::drawDimensionPanel(Sketch& sketch) {
         ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
         ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_AlwaysAutoResize);
 
+    const DimensionPanelModel m = dimensionPanelModel();
+
     // Show warning if duplicate dimension was attempted
-    if (dimTool_.warningTimer > 0) {
-        dimTool_.warningTimer -= io.DeltaTime;
+    if (!m.warning.empty()) {
         ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.8f, 0.2f, 1.0f));
-        ImGui::TextWrapped("%s", dimTool_.warningMsg);
+        ImGui::TextWrapped("%s", m.warning.c_str());
         ImGui::PopStyleColor();
         ImGui::Separator();
     }
 
-    if (dimTool_.phase == DimToolState::Selecting) {
-        if (dimTool_.selType == HitType::Point && dimTool_.entityA != NullID) {
-            ImGui::TextWrapped("Select second point or a line");
-        } else {
-            ImGui::TextWrapped("Select a line, circle, or two points");
-        }
-    } else if (dimTool_.phase == DimToolState::Editing || dimTool_.phase == DimToolState::EditingAndPlacing) {
-        // Show what's selected
-        bool isAngleConstraint = false;
-        bool isPointLineDistance = false;
-        bool isRadiusConstraint = false;
-        if (dimTool_.constraintID != NullID) {
-            Constraint* chk = sketch.findConstraint(dimTool_.constraintID);
-            if (chk && chk->type == ConstraintType::Angle) isAngleConstraint = true;
-            if (chk && chk->type == ConstraintType::PointLineDistance) isPointLineDistance = true;
-            if (chk && chk->type == ConstraintType::Radius) isRadiusConstraint = true;
-        }
-        if (isAngleConstraint)
-            ImGui::Text("Angle:");
-        else if (isPointLineDistance)
-            ImGui::Text("Point-Line Distance:");
-        else if (isRadiusConstraint)
-            ImGui::Text("Circle Radius:");
-        else if (dimTool_.selType == HitType::Line)
-            ImGui::Text("Line Distance:");
-        else if (dimTool_.selType == HitType::Circle)
-            ImGui::Text("Circle Diameter:");
-        else if (dimTool_.selType == HitType::Point)
-            ImGui::Text("Point Distance:");
-
-        if (dimTool_.phase == DimToolState::EditingAndPlacing) {
-            if (isAngleConstraint)
-                ImGui::TextColored({0.6f, 0.8f, 1.0f, 1.0f}, "Click to place label");
-            else if (dimTool_.selType == HitType::Line && dimTool_.entityB == NullID)
-                ImGui::TextColored({0.6f, 0.8f, 1.0f, 1.0f}, "Click to place, or click another line for angle");
-            else if (dimTool_.selType == HitType::Circle && !isRadiusConstraint)
-                ImGui::TextColored({0.6f, 0.8f, 1.0f, 1.0f}, "Click to place, or click center for radius");
-            else
-                ImGui::TextColored({0.6f, 0.8f, 1.0f, 1.0f}, "Click to place label");
-        }
+    if (!m.editing) {
+        ImGui::TextWrapped("%s", m.hint.c_str());
+    } else {
+        if (!m.kind.empty()) ImGui::TextUnformatted(m.kind.c_str());
+        if (!m.placeHint.empty()) ImGui::TextColored({0.6f, 0.8f, 1.0f, 1.0f}, "%s", m.placeHint.c_str());
 
         ImGui::SetNextItemWidth(-1);
         // During EditingAndPlacing, always keep input focused so user can type while placing
-        if (dimTool_.focusNeeded || dimTool_.phase == DimToolState::EditingAndPlacing) {
+        if (m.takeFocus) {
             ImGui::SetKeyboardFocusHere();
             dimTool_.focusNeeded = false;
         }
@@ -625,162 +783,27 @@ void App::drawDimensionPanel(Sketch& sketch) {
         bool entered = ImGui::InputText("##dimval", dimTool_.inputBuf, sizeof(dimTool_.inputBuf),
             ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_AutoSelectAll);
 
-        ImGui::Checkbox("Driven (reference only)", &dimTool_.driven);
+        bool driven = dimTool_.driven;
+        if (ImGui::Checkbox("Driven (reference only)", &driven)) setDimensionDriven(driven);
 
         // Sync input value to constraint live (so label updates in real-time)
-        if (dimTool_.constraintID != NullID) {
-            Constraint* cc = sketch.findConstraint(dimTool_.constraintID);
-            if (cc) {
-                if (isAngleConstraint && dimTool_.angleAutoSide) {
-                    // Auto-side mode: handleSketchInput controls the value, skip live sync
-                    cc->driven = dimTool_.driven;
-                } else if (isAngleConstraint) {
-                    float liveDeg = parseAngleInput(dimTool_.inputBuf);
-                    if (liveDeg >= 0.001f && liveDeg <= 359.999f) {
-                        cc->value = liveDeg;
-                        cc->driven = dimTool_.driven;
-                    }
-                } else {
-                    std::string liveUnit;
-                    float liveInput = 0;
-                    float liveMm = parseUnitInput(dimTool_.inputBuf, liveUnit, liveInput);
-                    bool allowNeg = (cc->type == ConstraintType::PointLineDistance);
-                    if (allowNeg ? (std::fabs(liveMm) > 0.0001f || liveMm == 0.0f) : (liveMm > 0.001f)) {
-                        cc->value = liveMm;
-                        cc->inputUnit = liveUnit;
-                        cc->inputValue = liveInput;
-                        cc->driven = dimTool_.driven;
-                    }
-                }
-            }
-        }
+        syncDimensionLive();
 
         ImGui::Separator();
-        const char* applyLabel = dimTool_.editingExisting ? "Update [Enter]" : "Apply [Enter]";
+        const char* applyLabel = m.editingExisting ? "Update [Enter]" : "Apply [Enter]";
         bool apply = ImGui::Button(applyLabel, {95, 0});
         ImGui::SameLine();
+        bool cancelled = false;
         if (ImGui::Button("Cancel [Esc]", {95, 0})) {
-            if (dimTool_.phase == DimToolState::EditingAndPlacing && dimTool_.constraintID != NullID) {
-                sketch.removeConstraint(dimTool_.constraintID);
-            } else if (dimTool_.editingExisting && dimTool_.constraintID != NullID) {
-                // Restore original value that live-sync may have changed
-                Constraint* cc = sketch.findConstraint(dimTool_.constraintID);
-                if (cc) cc->value = dimTool_.measuredMm;
-            }
-            dimTool_.reset();
-            selection_.clear();
+            cancelDimension();
+            cancelled = true;
         }
 
-        if (entered || apply) {
-            bool valueOk = false;
-            Constraint* cc = sketch.findConstraint(dimTool_.constraintID);
-            if (cc) {
-                if (isAngleConstraint) {
-                    float deg = parseAngleInput(dimTool_.inputBuf);
-                    if (deg >= 0.001f && deg <= 359.999f) {
-                        // Determine correct sector (CW/CCW) for the new value
-                        LineEntity* l1 = sketch.findLine(cc->entityA);
-                        LineEntity* l2 = sketch.findLine(cc->entityB);
-                        if (l1 && l2) {
-                            PointEntity* pa1 = sketch.findPoint(l1->startPt);
-                            PointEntity* pb1 = sketch.findPoint(l1->endPt);
-                            PointEntity* pa2 = sketch.findPoint(l2->startPt);
-                            PointEntity* pb2 = sketch.findPoint(l2->endPt);
-                            if (pa1 && pb1 && pa2 && pb2) {
-                                float eps = 1e-3f;
-                                auto pEq = [eps](PointEntity* p, PointEntity* q) {
-                                    return std::fabs(p->x-q->x)<eps && std::fabs(p->y-q->y)<eps;
-                                };
-                                double vx = 0.0, vy = 0.0;
-                                bool hasV = false;
-                                if (pEq(pa1,pa2)||pEq(pa1,pb2))      { vx=pa1->x; vy=pa1->y; hasV=true; }
-                                else if (pEq(pb1,pa2)||pEq(pb1,pb2)) { vx=pb1->x; vy=pb1->y; hasV=true; }
-                                else {
-                                    double ldx1=pb1->x-pa1->x, ldy1=pb1->y-pa1->y;
-                                    double ldx2=pb2->x-pa2->x, ldy2=pb2->y-pa2->y;
-                                    double denom=ldx1*ldy2-ldy1*ldx2;
-                                    if (std::fabs(denom)>1e-6) {
-                                        double t=((pa2->x-pa1->x)*ldy2-(pa2->y-pa1->y)*ldx2)/denom;
-                                        vx=pa1->x+t*ldx1; vy=pa1->y+t*ldy1; hasV=true;
-                                    }
-                                }
-                                if (hasV) {
-                                    auto d2 = [](double ax,double ay,double bx,double by){ double dx=ax-bx,dy=ay-by; return dx*dx+dy*dy; };
-                                    PointEntity* f1=(d2(vx,vy,pb1->x,pb1->y)>=d2(vx,vy,pa1->x,pa1->y))?pb1:pa1;
-                                    PointEntity* f2=(d2(vx,vy,pb2->x,pb2->y)>=d2(vx,vy,pa2->x,pa2->y))?pb2:pa2;
-                                    double dx1=f1->x-vx, dy1=f1->y-vy;
-                                    double dx2=f2->x-vx, dy2=f2->y-vy;
-                                    double cross=dx1*dy2-dy1*dx2, dot=dx1*dx2+dy1*dy2;
-                                    double ccwRad=std::atan2(cross,dot);
-                                    if (ccwRad<0) ccwRad+=kTwoPi;
-                                    double ccwDeg=ccwRad*180.0/kPi;
-                                    double cwDeg=360.0-ccwDeg;
-                                    // Pick the sector closest to the user's typed value
-                                    cc->angleCW = (std::fabs(cwDeg-deg) < std::fabs(ccwDeg-deg));
-                                }
-                            }
-                        }
-                        cc->value = deg;
-                        cc->driven = dimTool_.driven;
-                        valueOk = true;
-                    }
-                } else {
-                    std::string unitName;
-                    float inputValue = 0;
-                    float valueMm = parseUnitInput(dimTool_.inputBuf, unitName, inputValue);
-                    bool allowNeg = (cc->type == ConstraintType::PointLineDistance);
-                    if (allowNeg ? true : (valueMm > 0.001f)) {
-                        cc->value = valueMm;
-                        cc->inputUnit = unitName;
-                        cc->inputValue = inputValue;
-                        cc->driven = dimTool_.driven;
-                        valueOk = true;
-                    }
-                }
+        if (!cancelled && (entered || apply)) applyDimension();
 
-                if (valueOk && !cc->driven) {
-                    auto geoBak = sketch.captureGeometry();
-                    PointEntity* pinA = nullptr, *pinB = nullptr;
-                    bool wasA = false, wasB = false;
-                    if (cc->type == ConstraintType::PointLineDistance) {
-                        LineEntity* refLine = sketch.findLine(cc->entityB);
-                        if (refLine) {
-                            pinA = sketch.findPoint(refLine->startPt);
-                            pinB = sketch.findPoint(refLine->endPt);
-                            if (pinA) { wasA = pinA->projected; pinA->projected = true; }
-                            if (pinB) { wasB = pinB->projected; pinB->projected = true; }
-                        }
-                    }
-                    auto res = solver_.solve(sketch);
-                    lastSketchDof_ = res.dof;
-                    if (pinA) pinA->projected = wasA;
-                    if (pinB) pinB->projected = wasB;
-                    if (!res.ok) {
-                        sketch.restoreGeometry(geoBak);
-                        cc->driven = true;
-                        dimTool_.driven = true;
-                    }
-                }
-            }
-
-            if (valueOk) {
-                history_.pushState(sketch);
-                dimTool_.reset();
-                selection_.clear();
-            }
-        }
-
-        if (ImGui::IsKeyPressed(ImGuiKey_Escape)) {
-            if (dimTool_.phase == DimToolState::EditingAndPlacing && dimTool_.constraintID != NullID) {
-                sketch.removeConstraint(dimTool_.constraintID);
-            } else if (dimTool_.editingExisting && dimTool_.constraintID != NullID) {
-                Constraint* cc = sketch.findConstraint(dimTool_.constraintID);
-                if (cc) cc->value = dimTool_.measuredMm;
-            }
-            dimTool_.reset();
-            selection_.clear();
-        }
+        if (ImGui::IsKeyPressed(ImGuiKey_Escape)) cancelDimension();
     }
+    (void)sketch;
 
     ImGui::End();
     ImGui::PopStyleVar();

@@ -12,6 +12,7 @@
 #include "SectionControls.h"
 #include "Timeline.h"
 #include "SimulationPanel.h"
+#include "InViewport.h"
 #include "KeyRouting.h"
 
 #include <QApplication>
@@ -90,6 +91,12 @@ int main(int argc, char** argv) {
     auto* simulation = new shitcad::SimulationPanel(viewport->app(), &window);
     window.addDockWidget(Qt::RightDockWidgetArea, simulation);
     QObject::connect(viewport, &shitcad::ViewportWidget::frameBuilt, simulation, &shitcad::SimulationPanel::refresh);
+
+    viewport->app().setHostPanel(shitcad::App::HostInViewport);
+    auto* inlineInput = new shitcad::InlineInput(viewport->app(), viewport);
+    auto* dimension = new shitcad::DimensionPanel(viewport->app(), viewport);
+    QObject::connect(viewport, &shitcad::ViewportWidget::frameBuilt, inlineInput, &shitcad::InlineInput::refresh);
+    QObject::connect(viewport, &shitcad::ViewportWidget::frameBuilt, dimension, &shitcad::DimensionPanel::refresh);
 
     // Docks can take the keyboard; shortcuts still reach the viewport.
     qapp.installEventFilter(new shitcad::KeyRouting(&window, viewport));

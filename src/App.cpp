@@ -547,7 +547,16 @@ void App::renderFrame() {
     }
 
     // Dimension panel
-    if (tool_.type == ToolType::Dimension && activeSketchPlane_ >= 0) drawDimensionPanel(activeSketch());
+    if (tool_.type == ToolType::Dimension && activeSketchPlane_ >= 0) {
+        if (dimTool_.warningTimer > 0) dimTool_.warningTimer -= in_.dt;
+        if (!hostHas(HostInViewport)) {
+            drawDimensionPanel(activeSketch());
+        } else if (dimTool_.phase != DimToolState::Selecting) {
+            // What the ImGui panel does besides drawing itself
+            syncDimensionLive();
+            if (in_.keyPressed(Key::Escape)) cancelDimension();
+        }
+    }
 
     // Preferences window
     if (prefsOpen_ && !hostHas(HostPreferences)) drawPreferencesWindow();

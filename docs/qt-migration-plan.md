@@ -483,6 +483,17 @@ ratio and picking near the edges.
   shown in the Simulation workspace (a workspace switch is a deliberate mode change, so
   the view may resize there); it holds the Section controls from 5.7. Checked by a
   launch into the workspace; nozzle editing and a real run not exercised in Qt.
+- 5.10 inputs over the viewport: done, which finishes Phase 5: the Qt build draws no
+  ImGui widget now (ImGui still hosts them in the GLFW build until Phase 6).
+  `InlineInputModel` (submit, cancel, text) and `DimensionPanelModel` (text, driven,
+  apply, cancel, with the per-frame live sync and warning timer moved to App) back both
+  front ends. The sketch message is Overlay2D drawing now, and the mesh hover readout
+  already was. `src/qt/InViewport.cpp` has the inline box (a `QLineEdit` in the
+  viewport beside the cursor, placed from Qt's cursor because the view stops tracking
+  the mouse once the field has the keyboard) and the Dimension panel, whose value field
+  takes the keyboard back whenever the model asks, as ImGui's does. Typing into it ends
+  the angle's mouse-side mode, which ImGui detected through the typed characters.
+  Checked: a circle by typed diameter, and a line dimension typed while placing.
 
 ## Phase 6: remove ImGui and GLFW
 

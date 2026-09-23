@@ -412,6 +412,37 @@ public:
     void openResultsInParaView();
     void openRunFolder();
 
+    // ---- Inputs over the viewport while sketching.
+    // The inline value box beside the cursor (typing a digit while drawing a
+    // circle or picking a fillet corner opens it).
+    struct InlineInputModel {
+        bool active = false;
+        float x = 0, y = 0;            // where it goes, in view coordinates
+        std::string text;
+    };
+    InlineInputModel inlineInputModel() const;
+    void setInlineInputText(const std::string& text);
+    void submitInlineInput();          // Enter
+    void cancelInlineInput();          // Escape
+
+    // The Dimension tool's panel. Its value field keeps the keyboard while
+    // the label is being placed with the mouse (takeFocus).
+    struct DimensionPanelModel {
+        bool open = false;
+        std::string warning;           // e.g. a duplicate dimension was refused
+        bool editing = false;          // false: still selecting (see hint)
+        std::string hint, kind, placeHint;
+        std::string text;              // the value as typed
+        bool driven = false, editingExisting = false;
+        bool takeFocus = false;
+    };
+    DimensionPanelModel dimensionPanelModel() const;
+    void setDimensionText(const std::string& text);   // typing; ends the angle's mouse-side mode
+    void setDimensionDriven(bool driven) { dimTool_.driven = driven; }
+    void dimensionFieldFocused() { dimTool_.focusNeeded = false; }
+    void applyDimension();             // Enter / Apply
+    void cancelDimension();            // Escape / Cancel
+
     // Panels the host draws itself (Qt); App then skips their ImGui versions.
     enum HostPanel : uint32_t {
         HostToolbar     = 1u << 0,
@@ -425,6 +456,7 @@ public:
         HostSection     = 1u << 8,     // the Model workspace's Section window
         HostTimeline    = 1u << 9,
         HostSimulation  = 1u << 10,
+        HostInViewport  = 1u << 11,    // inline value box and dimension panel
     };
     void setHostPanel(HostPanel p, bool on = true) { hostPanels_ = on ? (hostPanels_ | p) : (hostPanels_ & ~p); }
     bool hostHas(HostPanel p) const { return (hostPanels_ & p) != 0; }
@@ -709,6 +741,7 @@ private:
     void handleDrag(Sketch& sketch);
     void handleDeletion(Sketch& sketch);
     void drawDimensionPanel(Sketch& sketch);
+    void syncDimensionLive();          // typed dimension value into its constraint, every frame
     void handleDimToolClick(Sketch& sketch);
     void drawPreferencesWindow();
     void drawAddPlaneDialog();
