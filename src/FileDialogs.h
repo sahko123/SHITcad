@@ -3,9 +3,8 @@
 
 namespace shitcad {
 
-// Every file / folder chooser the app opens, described portably so a host can
-// show its own dialog (QFileDialog in the Qt build). The GLFW build keeps the
-// Win32 dialogs in Serialization.cpp.
+// Every file / folder chooser the app opens, described so the host can show
+// its own dialog (QFileDialog, through AppHost::chooseFile).
 enum class FileDialog : uint8_t {
     OpenProject, SaveProject,
     OpenImport,                   // STEP, IGES or STL

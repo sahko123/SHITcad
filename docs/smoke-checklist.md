@@ -1,18 +1,18 @@
 # Smoke checklist
 
-A manual pass over every way of using the app, for the Qt migration
-(`docs/qt-migration-plan.md`). The automated tests (`ReplayTest`, `MeshImportTest`,
-`SimulationTest`) cover what lies under the UI; this list covers what they cannot:
-input, panels, and what shows in the viewport.
+A manual pass over every way of using the app. The automated tests (`ReplayTest`,
+`MeshImportTest`, `SimulationTest`) cover what lies under the UI; this list covers
+what they cannot: input, panels, and what shows in the viewport. It was written for
+the Qt migration (`docs/qt-migration-plan.md`) and is the check to run after changing
+the UI or the viewport's input.
 
-**How to use it:** run the whole list once on the build before a phase starts, to
-record the baseline, and again when the phase is done. After each commit inside a
-phase, run the sections that commit touches. Anything that behaves differently from
-the baseline is a failure, even if the new behaviour looks better. Record it and
-decide on it separately.
+**How to use it:** run the whole list before a UI change to know what to expect, and
+the sections the change touches afterwards. Anything that behaves differently is a
+failure, even if the new behaviour looks better. Record it and decide on it separately.
 
-Where a key is listed, test it twice once Qt docks exist: after clicking in the
-viewport, and after clicking in a dock (object tree, timeline).
+Where a key is listed, test it twice: after clicking in the viewport, and after
+clicking in a dock or panel (object tree, Simulation panel, tool panel). Shortcuts
+must work from both.
 
 ## 1. Camera and view
 

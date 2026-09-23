@@ -126,7 +126,7 @@ Global undo stack with typed commands: `AddFeature`, `DeleteFeature`, `SuppressF
 - Controls appear in the Simulation panel under "View" and, in the Model workspace, from the toolbar's Section button. The plane is a view setting: not saved in the project.
 
 ### Fixes from the 2026-09-16 review (read before touching these)
-- **Paths are stored as UTF-8.** The native dialogs return the ANSI code page; `ansiToUtf8` converts at the boundary. An accented character used to throw out of `dump()` inside a UI draw and terminate the app. JSON dumps also use `error_handler_t::replace`.
+- **Paths are stored as UTF-8.** The file dialogs hand back UTF-8 (the old Win32 dialogs returned the ANSI code page, and an accented character threw out of `dump()` and terminated the app). JSON dumps also use `error_handler_t::replace`.
 - **Open files through `Utf8Path.h`, never with a raw `std::string`.** `std::ofstream(str)`, `fs::path(str)`, `path::string()`, `CreateProcessA` and `ShellExecuteA` all read ANSI on Windows, so a UTF-8 path fails to open anything outside ASCII (and `path::string()` throws). Use `fsPath(str)` to open and `utf8(path)` to get a string back; start processes with the W APIs. OCCT's `const char*` file functions take UTF-8, so pass them the string directly. `testNonAsciiPaths` covers import, save/load, results and the engine launch.
 - **State that can go stale is the main hazard here**, not the maths. `App::runInputs()` is the single definition of what a run depended on - spec + rays/bounces (which are argv, not in the spec) + a size/mtime stamp of every STL - and the Results panel compares it. `clearSimulationRun()` is called when a project is opened; `simSummary_` is cleared on start and on cancel, so a previous run's numbers can never be attributed to a later one.
 - **A mesh's unit change rescales its nozzles** (`setMeshImportData`), since they are stored in the host's scaled frame.
@@ -141,7 +141,7 @@ Global undo stack with typed commands: `AddFeature`, `DeleteFeature`, `SuppressF
 - Project format: JSON (nlohmann/json), stores full feature history + plane definitions
 - Export: STL, STEP, IGES, OBJ, DXF (via OCCT)
 - Import: STL (as a MeshImport feature, above), STEP, IGES
-- File dialogs go through `AppHost::chooseFile` (`FileDialogs.h` lists them): `QFileDialog`, native on Windows, with Unicode paths. App falls back to its Win32 dialogs only if a host provides none.
+- File dialogs go through `AppHost::chooseFile` (`FileDialogs.h` lists them): `QFileDialog`, native on Windows, with Unicode paths.
 
 ## Conventions
 

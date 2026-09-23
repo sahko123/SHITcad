@@ -488,7 +488,7 @@ void App::updateMeshHover(float vpW, float vpH) {
         const auto& b = scene_.getBody(i);
         if (b.visible && b.isMeshOnly()) { anyMesh = true; break; }
     }
-    if (!anyMesh || in_.uiWantsMouse || in_.mouseY < in_.viewY) {
+    if (!anyMesh || in_.mouseY < in_.viewY) {
         meshHover_ = {};
         return;
     }
@@ -683,7 +683,7 @@ static void featureColor(const Feature& feat, bool grayed, float rgb[3]) {
 
 App::TimelineModel App::timelineModel() const {
     TimelineModel m;
-    m.visible = timelineOpen_ && !featureHistory_.empty();
+    m.visible = !featureHistory_.empty();
     if (!m.visible) return m;
     const auto& features = featureHistory_.features();
     for (int i = 0; i < (int)features.size(); i++) {
@@ -1101,7 +1101,6 @@ App::TangentPlaneModel App::tangentPlaneModel() const {
 
 void App::setTangentPlaneAngle(float degrees) {
     cylPlaneAngle_ = degrees;
-    snprintf(cylPlaneAngleBuf_, sizeof(cylPlaneAngleBuf_), "%.1f", cylPlaneAngle_);
 }
 
 void App::setTangentPlaneName(const std::string& name) {

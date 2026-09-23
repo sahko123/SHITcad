@@ -31,16 +31,14 @@ void App::enterLoftMode() {
 void App::handleLoftInput(float vpW, float vpH) {
     (void)vpW; (void)vpH;
 
-    if (!in_.uiWantsKeyboard) {
-        if (in_.keyPressed(Key::Escape)) {
-            cancelLoft();
+    if (in_.keyPressed(Key::Escape)) {
+        cancelLoft();
+        return;
+    }
+    if (in_.keyPressed(Key::Enter) || in_.keyPressed(Key::KeypadEnter)) {
+        if (loftTool_.canCommit()) {
+            commitLoft();
             return;
-        }
-        if (in_.keyPressed(Key::Enter) || in_.keyPressed(Key::KeypadEnter)) {
-            if (loftTool_.canCommit()) {
-                commitLoft();
-                return;
-            }
         }
     }
 }

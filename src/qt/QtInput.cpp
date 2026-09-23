@@ -252,8 +252,6 @@ void InputCollector::frame(float dt, float screenW, float screenH, InputFrame& i
     in.shift = shift_;
     in.ctrl = ctrl_;
     in.alt = alt_;
-    in.uiWantsMouse = false;      // panels are Qt widgets: their input never reaches here
-    in.uiWantsKeyboard = false;
 
     for (int b = 0; b < (int)MouseButton::Count; b++) {
         if (down_[b] && valid(x_)) {

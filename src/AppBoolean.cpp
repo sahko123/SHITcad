@@ -27,7 +27,7 @@ void App::handleBooleanInput(float vpW, float vpH) {
     }
 
     // Click to pick bodies
-    if (in_.mouseClicked(MouseButton::Left) && !in_.uiWantsMouse) {
+    if (in_.mouseClicked(MouseButton::Left)) {
         float mx = in_.mouseX;
         float my = in_.mouseY;
 

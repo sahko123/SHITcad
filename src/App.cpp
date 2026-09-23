@@ -120,23 +120,8 @@ void App::post(std::function<void()> fn) {
 
 std::string App::chooseFile(FileDialog kind, const char* title) {
     std::string path;
-    if (host_ && host_->chooseFile(kind, title, path)) return path;
-    switch (kind) {
-        case FileDialog::OpenProject: return openNativeOpenDialog();
-        case FileDialog::SaveProject: return openNativeSaveDialog();
-        case FileDialog::OpenImport:  return openNativeImportDialog();
-        case FileDialog::OpenStl:     return openNativeStlOpenDialog();
-        case FileDialog::SaveStl:     return openNativeStlSaveDialog();
-        case FileDialog::OpenStep:    return openNativeStepOpenDialog();
-        case FileDialog::SaveStep:    return openNativeStepSaveDialog();
-        case FileDialog::OpenIges:    return openNativeIgesOpenDialog();
-        case FileDialog::SaveIges:    return openNativeIgesSaveDialog();
-        case FileDialog::SaveObj:     return openNativeObjSaveDialog();
-        case FileDialog::SaveDxf:     return openNativeDxfSaveDialog();
-        case FileDialog::SaveJson:    return openNativeJsonSaveDialog();
-        case FileDialog::PickFolder:  return openNativeFolderDialog(title ? title : "Select a folder");
-    }
-    return {};
+    if (host_) host_->chooseFile(kind, title, path);
+    return path;
 }
 
 double App::nowSeconds() const {
@@ -372,13 +357,13 @@ void App::renderFrame() {
     }
 
     // Toggle object tree with T key (only in navigate mode)
-    if (!in_.uiWantsKeyboard && mode_ == InteractionMode::Navigate &&
+    if (mode_ == InteractionMode::Navigate &&
         in_.keyPressed(Key::T)) {
         objectTreeOpen_ = !objectTreeOpen_;
     }
 
     // Toggle ortho/perspective with O key
-    if (!in_.uiWantsKeyboard && in_.keyPressed(Key::O)) {
+    if (in_.keyPressed(Key::O)) {
         viewport3D_.camera().orthographic = !viewport3D_.camera().orthographic;
     }
 
@@ -433,9 +418,9 @@ void App::renderFrame() {
 
     // Timeline: the playhead's deferred replay, and Delete on its selection
     const float timelineH = hostTimelineH_;
-    if (timelineOpen_ && !featureHistory_.empty()) {
+    if (!featureHistory_.empty()) {
         if (playheadDragging_) tickPlayhead();
-        if (in_.keyPressed(Key::Delete) && !in_.uiWantsKeyboard) deleteSelectedFeature();
+        if (in_.keyPressed(Key::Delete)) deleteSelectedFeature();
     }
 
     // FPS / frametime overlay
@@ -517,22 +502,20 @@ void App::renderFrame() {
 void App::handleNavigateInput(float vpW, float vpH) {
 
     // Global undo/redo in navigate mode
-    if (!in_.uiWantsKeyboard) {
-        if (in_.ctrl && in_.keyPressed(Key::Z) && !in_.shift) globalUndo();
-        if (in_.ctrl && in_.keyPressed(Key::Y)) globalRedo();
-        if (in_.ctrl && in_.keyPressed(Key::Z) && in_.shift) globalRedo();
-        if (in_.ctrl && in_.keyPressed(Key::S)) saveProjectDialog();
-        if (in_.ctrl && in_.keyPressed(Key::O)) openProjectDialog();
-        if (in_.ctrl && in_.keyPressed(Key::E)) exportStlDialog();
-    }
+    if (in_.ctrl && in_.keyPressed(Key::Z) && !in_.shift) globalUndo();
+    if (in_.ctrl && in_.keyPressed(Key::Y)) globalRedo();
+    if (in_.ctrl && in_.keyPressed(Key::Z) && in_.shift) globalRedo();
+    if (in_.ctrl && in_.keyPressed(Key::S)) saveProjectDialog();
+    if (in_.ctrl && in_.keyPressed(Key::O)) openProjectDialog();
+    if (in_.ctrl && in_.keyPressed(Key::E)) exportStlDialog();
 
     // E key: enter extrude mode from navigate mode
-    if (!in_.uiWantsKeyboard && in_.keyPressed(Key::E)) {
+    if (in_.keyPressed(Key::E)) {
         enterExtrudeMode();
         return;
     }
     // V key: enter revolve mode from navigate mode
-    if (!in_.uiWantsKeyboard && in_.keyPressed(Key::V)) {
+    if (in_.keyPressed(Key::V)) {
         enterRevolveMode();
         return;
     }
@@ -541,7 +524,7 @@ void App::handleNavigateInput(float vpW, float vpH) {
     if (in_.mouseY < in_.viewY) return;
 
     // Face pick for "Add Reference Plane" dialog
-    if (addPlaneWaitingFace_ && in_.mouseClicked(MouseButton::Left) && !in_.uiWantsMouse) {
+    if (addPlaneWaitingFace_ && in_.mouseClicked(MouseButton::Left)) {
         int w, h;
         framebufferSize(w, h);
         float view[16], proj[16];
@@ -563,7 +546,7 @@ void App::handleNavigateInput(float vpW, float vpH) {
     }
 
     // Double-click: start sketch on a reference plane or body face
-    if (in_.mouseDoubleClicked(MouseButton::Left) && !in_.uiWantsMouse) {
+    if (in_.mouseDoubleClicked(MouseButton::Left)) {
         int w, h;
         framebufferSize(w, h);
         float view[16], proj[16];
@@ -597,7 +580,6 @@ void App::handleNavigateInput(float vpW, float vpH) {
                 // Open tangent plane dialog for cylinders
                 cylPlaneDialogOpen_ = true;
                 cylPlaneAngle_ = 0.0f;
-                snprintf(cylPlaneAngleBuf_, sizeof(cylPlaneAngleBuf_), "0");
                 snprintf(cylPlaneNameBuf_, sizeof(cylPlaneNameBuf_), "CylPlane");
                 cylPlaneFace_ = faceHit.face;
                 cylPlaneHitWorld_[0] = faceHit.hitWorld[0];

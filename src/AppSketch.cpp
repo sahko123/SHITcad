@@ -146,7 +146,6 @@ void App::handleSketchInput(float vpW, float vpH) {
 
     Sketch& sketch = activeSketch();
     const SketchPlane& plane = activePlane();
-    bool mouseOverUI = in_.uiWantsMouse;
 
     int w, h;
     framebufferSize(w, h);
@@ -156,7 +155,7 @@ void App::handleSketchInput(float vpW, float vpH) {
     float apparentScale = computeApparentScale(plane, view, proj, vpW, vpH);
     if (apparentScale < 1e-9f) apparentScale = 1e-9f; // guard against degenerate projection
 
-    if (!mouseOverUI) {
+    {
         // Project mouse to sketch plane
         float rayOrig[3], rayDir[3];
         screenToRay(in_.mouseX, in_.mouseY, 0, 0, vpW, vpH, view, proj, rayOrig, rayDir);
@@ -312,7 +311,7 @@ void App::handleSketchInput(float vpW, float vpH) {
         (dimTool_.phase == DimToolState::Editing || dimTool_.phase == DimToolState::EditingAndPlacing)) {
         // Escape during EditingAndPlacing cancels label placement, removing the constraint
         if (dimTool_.phase == DimToolState::EditingAndPlacing &&
-            in_.keyPressed(Key::Escape) && !in_.uiWantsKeyboard) {
+            in_.keyPressed(Key::Escape)) {
             sketch.removeConstraint(dimTool_.constraintID);
             dimTool_.reset();
             tool_.type = ToolType::Dimension;
@@ -322,7 +321,7 @@ void App::handleSketchInput(float vpW, float vpH) {
         }
         // Delete key removes the dimension being edited
         if (dimTool_.phase == DimToolState::Editing &&
-            in_.keyPressed(Key::Delete) && !in_.uiWantsKeyboard) {
+            in_.keyPressed(Key::Delete)) {
             sketch.removeConstraint(dimTool_.constraintID);
             dimTool_.reset();
             selection_.clear();
@@ -439,7 +438,7 @@ void App::handleSketchInput(float vpW, float vpH) {
             // Left click finalizes placement (skip the frame we entered this phase)
             if (dimTool_.placingFirstFrame) {
                 dimTool_.placingFirstFrame = false;
-            } else if (in_.mouseClicked(MouseButton::Left) && !mouseOverUI) {
+            } else if (in_.mouseClicked(MouseButton::Left)) {
                 // If placing a line length and user clicks a second line → switch to angle
                 if (dimTool_.selType == HitType::Line && dimTool_.entityB == NullID) {
                     HitResult hit2 = hitTest(cursorLocal_, apparentScale, sketch, 10.0f);
@@ -808,7 +807,7 @@ void App::handleSketchInput(float vpW, float vpH) {
     // Also snaps to intersections of the H/V rail with existing geometry.
     // Tangent snap takes priority (more specific geometric lock).
     hvCrossEntityID_ = NullID;
-    if (tool_.type == ToolType::Line && tool_.hasFirstPoint && !mouseOverUI &&
+    if (tool_.type == ToolType::Line && tool_.hasFirstPoint &&
         currentSnap_.type != SnapType::Tangent) {
         float dx = (float)(cursorLocal_.x - tool_.firstPoint.x);
         float dy = (float)(cursorLocal_.y - tool_.firstPoint.y);
@@ -977,7 +976,7 @@ void App::handleSketchInput(float vpW, float vpH) {
 
     // Inline dimension input — intercept number keys when circle tool has center placed
     // or fillet tool has vertex placed
-    if (!in_.uiWantsKeyboard && !tool_.inlineInputActive &&
+    if (!tool_.inlineInputActive &&
         ((tool_.type == ToolType::Circle && tool_.hasFirstPoint) ||
          (tool_.type == ToolType::Fillet && tool_.hasFirstPoint))) {
         // Check for number, decimal key press to activate inline input (main + numpad)
@@ -985,7 +984,6 @@ void App::handleSketchInput(float vpW, float vpH) {
             tool_.inlineInputActive = true;
             tool_.inlineInputBuf[0] = ch;
             tool_.inlineInputBuf[1] = '\0';
-            tool_.inlineInputFocus = true;
         };
         for (int d = 0; d <= 9; d++) {
             if (in_.keyPressed(digitKey(d))) { activateInline((char)('0' + d)); break; }
@@ -1003,7 +1001,7 @@ void App::handleSketchInput(float vpW, float vpH) {
     drawSketchMessage();
 
     // Keyboard shortcuts
-    if (!in_.uiWantsKeyboard && !tool_.inlineInputActive) {
+    if (!tool_.inlineInputActive) {
         // Undo/redo
         if (in_.ctrl && in_.keyPressed(Key::Z)) {
             if (in_.shift) { history_.redo(sketch); }
@@ -1053,7 +1051,6 @@ void App::handleSketchInput(float vpW, float vpH) {
         }
     }
 
-    if (mouseOverUI) return;
 
     // Active point drag
     if (selection_.dragMode == SelectionDragMode::PointDrag) {
@@ -1484,7 +1481,6 @@ void App::handleToolAction(Sketch& sketch, Point2D localPos) {
                     tool_.firstPoint = sketch.getPointPos(snapPtID);
                     tool_.hasFirstPoint = true;
                     tool_.inlineInputActive = true;
-                    tool_.inlineInputFocus = true;
                 } else {
                     snprintf(sketchMsg_, sizeof(sketchMsg_),
                              "Vertex must connect exactly 2 lines or arcs");

@@ -535,7 +535,6 @@ private:
     // Feature history
     FeatureHistory featureHistory_;
     UndoStack globalUndo_;
-    bool timelineOpen_ = true;
     int dragStartRollbackPos_ = -1; // for playhead drag undo
     bool playheadReplayPending_ = false; // deferred replay during drag
     std::chrono::steady_clock::time_point playheadLastMoveTime_; // for idle detection
@@ -563,7 +562,6 @@ private:
     // Cylinder tangent plane dialog
     bool cylPlaneDialogOpen_ = false;
     float cylPlaneAngle_ = 0.0f;
-    char cylPlaneAngleBuf_[32] = "0";
     char cylPlaneNameBuf_[64] = "";
     TopoDS_Face cylPlaneFace_;
     float cylPlaneHitWorld_[3] = {};

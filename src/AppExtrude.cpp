@@ -96,7 +96,7 @@ void App::handleExtrudeInput(float vpW, float vpH) {
     const SketchPlane& plane = extrudePlane();
 
     // Project mouse to sketch plane
-    if (!in_.uiWantsMouse) {
+    {
         int w, h;
         framebufferSize(w, h);
         float view[16], proj[16];
@@ -112,20 +112,17 @@ void App::handleExtrudeInput(float vpW, float vpH) {
     }
 
     // Keyboard
-    if (!in_.uiWantsKeyboard) {
-        if (in_.keyPressed(Key::Escape)) {
-            cancelExtrude();
+    if (in_.keyPressed(Key::Escape)) {
+        cancelExtrude();
+        return;
+    }
+    if (in_.keyPressed(Key::Enter) || in_.keyPressed(Key::KeypadEnter)) {
+        if (extrudeTool_.hasSelectedProfiles()) {
+            commitExtrude();
             return;
-        }
-        if (in_.keyPressed(Key::Enter) || in_.keyPressed(Key::KeypadEnter)) {
-            if (extrudeTool_.hasSelectedProfiles()) {
-                commitExtrude();
-                return;
-            }
         }
     }
 
-    if (in_.uiWantsMouse) return;
 
     // Profile selection: click to toggle (disabled during handle drag)
     if (!extrudeTool_.isDragging) {

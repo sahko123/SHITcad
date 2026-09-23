@@ -75,25 +75,23 @@ float App::simulationSceneExtent() {
 
 void App::handleSimulationInput(float vpW, float vpH) {
 
-    if (!in_.uiWantsKeyboard) {
-        if (in_.ctrl && in_.keyPressed(Key::Z) && !in_.shift) globalUndo();
-        if (in_.ctrl && in_.keyPressed(Key::Y)) globalRedo();
-        if (in_.ctrl && in_.keyPressed(Key::Z) && in_.shift) globalRedo();
-        if (in_.ctrl && in_.keyPressed(Key::S)) saveProjectDialog();
-        if (in_.ctrl && in_.keyPressed(Key::O)) openProjectDialog();
-        if (in_.keyPressed(Key::Escape)) {
-            if (simUi_.placing) simUi_.placing = false;
-            else simUi_.selectedNozzle = 0;
-        }
-        if (in_.keyPressed(Key::Delete) && simUi_.selectedNozzle &&
-            simulation_.findNozzle(simUi_.selectedNozzle)) {
-            simulation_.removeNozzle(simUi_.selectedNozzle);
-            simUi_.selectedNozzle = 0;
-            commitSimulationEdit();
-        }
+    if (in_.ctrl && in_.keyPressed(Key::Z) && !in_.shift) globalUndo();
+    if (in_.ctrl && in_.keyPressed(Key::Y)) globalRedo();
+    if (in_.ctrl && in_.keyPressed(Key::Z) && in_.shift) globalRedo();
+    if (in_.ctrl && in_.keyPressed(Key::S)) saveProjectDialog();
+    if (in_.ctrl && in_.keyPressed(Key::O)) openProjectDialog();
+    if (in_.keyPressed(Key::Escape)) {
+        if (simUi_.placing) simUi_.placing = false;
+        else simUi_.selectedNozzle = 0;
+    }
+    if (in_.keyPressed(Key::Delete) && simUi_.selectedNozzle &&
+        simulation_.findNozzle(simUi_.selectedNozzle)) {
+        simulation_.removeNozzle(simUi_.selectedNozzle);
+        simUi_.selectedNozzle = 0;
+        commitSimulationEdit();
     }
 
-    if (in_.mouseY < in_.viewY || in_.uiWantsMouse) return;
+    if (in_.mouseY < in_.viewY) return;
     if (!in_.mouseClicked(MouseButton::Left)) return;
 
     if (simUi_.placing) {

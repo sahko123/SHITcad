@@ -79,7 +79,7 @@ void App::handleRevolveInput(float vpW, float vpH) {
 
     const SketchPlane& plane = revolvePlane();
 
-    if (!in_.uiWantsMouse) {
+    {
         int w, h;
         framebufferSize(w, h);
         float view[16], proj[16];
@@ -94,20 +94,17 @@ void App::handleRevolveInput(float vpW, float vpH) {
         }
     }
 
-    if (!in_.uiWantsKeyboard) {
-        if (in_.keyPressed(Key::Escape)) {
-            cancelRevolve();
+    if (in_.keyPressed(Key::Escape)) {
+        cancelRevolve();
+        return;
+    }
+    if (in_.keyPressed(Key::Enter) || in_.keyPressed(Key::KeypadEnter)) {
+        if (revolveTool_.hasSelectedProfiles() && revolveTool_.axisLineID != NullID) {
+            commitRevolve();
             return;
-        }
-        if (in_.keyPressed(Key::Enter) || in_.keyPressed(Key::KeypadEnter)) {
-            if (revolveTool_.hasSelectedProfiles() && revolveTool_.axisLineID != NullID) {
-                commitRevolve();
-                return;
-            }
         }
     }
 
-    if (in_.uiWantsMouse) return;
 
     if (in_.mouseClicked(MouseButton::Left)) {
         if (revolveTool_.phase == RevolvePhase::SelectingProfiles) {

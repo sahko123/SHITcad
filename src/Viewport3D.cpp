@@ -300,7 +300,6 @@ void Viewport3D::drawGrid(const float* view, const float* proj) {
 
 void Viewport3D::handleInput(const InputFrame& in, float canvasX, float canvasY, float canvasW, float canvasH) {
     // Don't handle input when a panel wants the mouse (e.g., scrolling in a panel)
-    if (in.uiWantsMouse) return;
 
     // Check if mouse is within the viewport area
     bool hovered = in.mouseX >= canvasX && in.mouseX < canvasX + canvasW &&

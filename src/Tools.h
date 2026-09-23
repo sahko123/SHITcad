@@ -31,7 +31,6 @@ struct ToolState {
     // Inline dimension input (active during tool use)
     bool inlineInputActive = false;
     char inlineInputBuf[64] = {};
-    bool inlineInputFocus = false; // request focus on next frame
 
     void reset() {
         hasFirstPoint = false;
@@ -40,7 +39,6 @@ struct ToolState {
         tangentSourceID = NullID;
         inlineInputActive = false;
         inlineInputBuf[0] = '\0';
-        inlineInputFocus = false;
     }
 };
 

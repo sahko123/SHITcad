@@ -20,9 +20,9 @@ public:
     // Ask for another frame. A no-op while the host renders continuously;
     // an on-demand host must honour it (see App::post).
     virtual void requestRedraw() {}
-    // Show a file or folder chooser. Return false to let App use its Win32
-    // fallback dialogs; otherwise `utf8Path` is the choice, empty if cancelled.
-    virtual bool chooseFile(FileDialog /*kind*/, const char* /*title*/, std::string& /*utf8Path*/) { return false; }
+    // Show a file or folder chooser; `utf8Path` is the choice, empty if
+    // cancelled. The return value is unused.
+    virtual bool chooseFile(FileDialog kind, const char* title, std::string& utf8Path) = 0;
 };
 
 } // namespace shitcad

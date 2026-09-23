@@ -29,8 +29,6 @@ inline Key keypadDigitKey(int d) { return (Key)((int)Key::Keypad0 + d); }
 //  - dragging() compares the *furthest* the mouse has been from the press
 //    position, not the current distance, so a drag stays a drag.
 //  - typed holds the characters typed this frame.
-// uiWantsMouse/uiWantsKeyboard are false with the Qt host: its panels are
-// separate widgets whose input never reaches the viewport.
 // Coordinates are in the window space the projection and picking code uses.
 struct InputFrame {
     float mouseX = 0, mouseY = 0;
@@ -38,16 +36,14 @@ struct InputFrame {
     float wheel = 0;
     float dt = 0;
 
-    // Where the 3D view takes input: below the toolbar, the full window width.
-    // Panels drawn over it are excluded through uiWantsMouse, not this rect.
+    // Where the 3D view takes input. Panels are separate widgets, so their
+    // input never arrives here.
     float viewX = 0, viewY = 0, viewW = 0, viewH = 0;
     // Size of the whole space the coordinates are in (the window), which is
     // what projection and picking are computed against.
     float screenW = 0, screenH = 0;
 
     bool shift = false, ctrl = false, alt = false;
-    bool uiWantsMouse = false;     // a panel or widget has the mouse
-    bool uiWantsKeyboard = false;  // a text field or widget has the keyboard
 
     bool down[(int)MouseButton::Count] = {};
     bool clicked[(int)MouseButton::Count] = {};

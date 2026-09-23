@@ -179,8 +179,8 @@ uint64_t sampleHash(const std::filesystem::path& path, uintmax_t size) {
 
 std::shared_ptr<const CachedMesh> readCached(const std::string& path, std::string& error) {
     std::error_code ec;
-    // Paths are stored as UTF-8 (see Serialization.h ansiToUtf8), so they have
-    // to be converted back rather than handed to the narrow constructor.
+    // Paths are stored as UTF-8 (see Utf8Path.h), so they have to be
+    // converted rather than handed to the narrow constructor.
     const std::filesystem::path file = fsPath(path);
     uintmax_t size = std::filesystem::file_size(file, ec);
     if (ec) {
