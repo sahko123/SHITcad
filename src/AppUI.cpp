@@ -304,6 +304,60 @@ void App::beginMeshImport(const std::string& path) {
     d.open = true;
 }
 
+// ---- Mesh import dialog model ---------------------------------------------------
+
+App::MeshImportModel App::meshImportModel() const {
+    const auto& d = meshImportDialog_;
+    MeshImportModel m;
+    m.open = d.open;
+    if (!d.open) return m;
+    m.path = d.path;
+    m.error = d.error;
+    m.name = d.nameBuf;
+    m.triangles = d.info.triangleCount;
+    m.unitIndex = d.unitIndex;
+    const float toMm = kUnits[d.unitIndex].toMm;
+    for (int k = 0; k < 3; k++) {
+        m.extMm[k] = (d.info.rawMax[k] - d.info.rawMin[k]) * toMm;
+        m.maxExtMm = std::max(m.maxExtMm, m.extMm[k]);
+    }
+    // Same bounds cip-sim refuses to trace outside of: unit mix-ups are factors
+    // of 1000 or 25.4, so a size check catches them where nothing else can.
+    m.sizeSuspicious = m.maxExtMm < 20.0f || m.maxExtMm > 100000.0f;
+    return m;
+}
+
+void App::setMeshImportName(const std::string& name) {
+    snprintf(meshImportDialog_.nameBuf, sizeof(meshImportDialog_.nameBuf), "%s", name.c_str());
+}
+
+void App::setMeshImportUnit(int unitIndex) {
+    if (unitIndex >= 0 && unitIndex < kUnitCount) meshImportDialog_.unitIndex = unitIndex;
+}
+
+void App::confirmMeshImport() {
+    auto& d = meshImportDialog_;
+    if (!d.open || !d.error.empty()) return;
+    MeshImportFeatureData md;
+    md.sourcePath = d.path;
+    md.unit = kUnits[d.unitIndex].name;
+    std::string name = d.nameBuf[0] ? d.nameBuf : "Mesh";
+
+    FeatureID fid = featureHistory_.addMeshImportFeature(md, name);
+    UndoCommand cmd;
+    cmd.type = UndoActionType::AddFeature;
+    cmd.addedFeature = *featureHistory_.findFeature(fid);
+    globalUndo_.push(std::move(cmd));
+    markDirty();
+    replayAllFeatures();
+    // Straight into placement: an export is rarely the right way up.
+    editMeshImportFeature(fid);
+    d.reset();
+}
+
+void App::cancelMeshImport() { meshImportDialog_.reset(); }
+
+// ImGui front end for MeshImportModel (the Qt one is src/qt/MeshDialogs.cpp).
 void App::drawMeshImportDialog() {
     auto& d = meshImportDialog_;
     if (!d.open) return;
@@ -321,7 +375,7 @@ void App::drawMeshImportDialog() {
         ImGui::TextColored({1.0f, 0.4f, 0.4f, 1.0f}, "%s", d.error.c_str());
         if (ImGui::Button("Close", {-1, 0})) keepOpen = false;
         ImGui::End();
-        if (!keepOpen) d.reset();
+        if (!keepOpen) cancelMeshImport();
         return;
     }
 
@@ -338,51 +392,30 @@ void App::drawMeshImportDialog() {
     ImGui::Combo("##meshunit", &d.unitIndex,
         [](void*, int i) { return kUnits[i].name; }, nullptr, kUnitCount);
 
-    const float toMm = kUnits[d.unitIndex].toMm;
-    float ext[3];
-    float maxExt = 0.0f;
-    for (int k = 0; k < 3; k++) {
-        ext[k] = (d.info.rawMax[k] - d.info.rawMin[k]) * toMm;
-        maxExt = std::max(maxExt, ext[k]);
-    }
-    if (maxExt >= 1000.0f)
-        ImGui::Text("Size: %.4g x %.4g x %.4g m", ext[0] / 1000.0f, ext[1] / 1000.0f, ext[2] / 1000.0f);
+    const MeshImportModel m = meshImportModel();
+    if (m.maxExtMm >= 1000.0f)
+        ImGui::Text("Size: %.4g x %.4g x %.4g m", m.extMm[0] / 1000.0f, m.extMm[1] / 1000.0f, m.extMm[2] / 1000.0f);
     else
-        ImGui::Text("Size: %.4g x %.4g x %.4g mm", ext[0], ext[1], ext[2]);
+        ImGui::Text("Size: %.4g x %.4g x %.4g mm", m.extMm[0], m.extMm[1], m.extMm[2]);
 
-    // Same bounds cip-sim refuses to trace outside of: unit mix-ups are factors
-    // of 1000 or 25.4, so a size check catches them where nothing else can.
-    if (maxExt < 20.0f || maxExt > 100000.0f) {
+    if (m.sizeSuspicious) {
         ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + 360.0f);
         ImGui::TextColored({1.0f, 0.85f, 0.2f, 1.0f},
             "That is %.4g mm across. If the real part is not that size, the unit "
-            "above is wrong.", maxExt);
+            "above is wrong.", m.maxExtMm);
         ImGui::PopTextWrapPos();
     }
 
     ImGui::Separator();
-    if (ImGui::Button("Import", {-1, 0})) {
-        MeshImportFeatureData md;
-        md.sourcePath = d.path;
-        md.unit = kUnits[d.unitIndex].name;
-        std::string name = d.nameBuf[0] ? d.nameBuf : "Mesh";
-
-        FeatureID fid = featureHistory_.addMeshImportFeature(md, name);
-        UndoCommand cmd;
-        cmd.type = UndoActionType::AddFeature;
-        cmd.addedFeature = *featureHistory_.findFeature(fid);
-        globalUndo_.push(std::move(cmd));
-        markDirty();
-        replayAllFeatures();
-        keepOpen = false;
-        // Straight into placement: an export is rarely the right way up.
-        editMeshImportFeature(fid);
-    }
+    bool confirmed = false;
+    if (ImGui::Button("Import", {-1, 0})) confirmed = true;
     if (ImGui::Button("Cancel", {-1, 0})) keepOpen = false;
 
     ImGui::End();
-    if (!keepOpen) d.reset();
+    if (confirmed) confirmMeshImport();
+    else if (!keepOpen) cancelMeshImport();
 }
+
 
 static bool sameMeshImportData(const MeshImportFeatureData& a, const MeshImportFeatureData& b) {
     if (a.sourcePath != b.sourcePath || a.unit != b.unit) return false;
@@ -449,49 +482,31 @@ void App::finishMeshPlace(bool keep) {
     meshPlace_.reset();
 }
 
-void App::drawMeshPlacePanel() {
+// ---- Mesh placement model -------------------------------------------------------
+
+void App::validateMeshPlace() {
     if (!meshPlace_.active()) return;
     const Feature* f = featureHistory_.findFeature(meshPlace_.featureID);
-    if (!f || f->type != FeatureType::MeshImport) { // deleted or undone underneath us
-        meshPlace_.reset();
-        return;
-    }
-    MeshImportFeatureData data = std::get<MeshImportFeatureData>(f->data);
+    if (!f || f->type != FeatureType::MeshImport) meshPlace_.reset(); // deleted or undone underneath us
+}
 
-    ImGuiViewport* vp = ImGui::GetMainViewport();
-    ImGui::SetNextWindowPos({vp->WorkPos.x + vp->WorkSize.x - 290, vp->WorkPos.y + 60}, ImGuiCond_Appearing);
-    ImGui::SetNextWindowSize({280, 0}, ImGuiCond_Always);
-    char title[160];
-    snprintf(title, sizeof(title), "Place: %s###meshplace", f->name.c_str());
-    bool open = true;
-    ImGui::Begin(title, &open, ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_AlwaysAutoResize);
+bool App::meshPlaceBounds(MeshImportFeatureData& data, double lo[3], double hi[3], std::string* error) const {
+    const Feature* f = featureHistory_.findFeature(meshPlace_.featureID);
+    if (!f || f->type != FeatureType::MeshImport) return false;
+    data = std::get<MeshImportFeatureData>(f->data);
 
     MeshFileInfo info;
     std::string err;
     const UnitInfo* unit = findLengthUnit(data.unit);
     if (!probeMeshFile(data.sourcePath, info, err) || !unit) {
-        ImGui::TextColored({1.0f, 0.4f, 0.4f, 1.0f}, "%s", unit ? err.c_str() : "Unknown unit");
-        if (ImGui::Button("Close", {-1, 0})) open = false;
-        ImGui::End();
-        if (!open) finishMeshPlace(false);
-        return;
-    }
-
-    // ---- unit (fixable here if the import dialog got it wrong)
-    int unitIndex = (int)(unit - kUnits);
-    ImGui::Text("File unit");
-    ImGui::SameLine(90);
-    ImGui::SetNextItemWidth(-1);
-    if (ImGui::Combo("##placeunit", &unitIndex, [](void*, int i) { return kUnits[i].name; }, nullptr, kUnitCount)) {
-        data.unit = kUnits[unitIndex].name;
-        setMeshImportData(data);
+        if (error) *error = unit ? err : "Unknown unit";
+        return false;
     }
 
     // Exact bounds from the triangles actually drawn, when they are on hand.
     // placedBounds transforms the raw bounding box, which is exact only for
     // quarter turns: a 500 mm sphere turned 45 degrees twice reported its
     // bottom 353 mm too low, so "Drop to ground" left it floating.
-    double lo[3], hi[3];
     bool exact = false;
     for (int i = 0; i < (int)scene_.bodyCount() && !exact; i++) {
         const Body3D& b = scene_.getBody(i);
@@ -503,8 +518,113 @@ void App::drawMeshPlacePanel() {
         }
         exact = true;
     }
-    if (!exact) placedBounds(info, kUnits[unitIndex].toMm, data.transform, lo, hi);
+    if (!exact) placedBounds(info, unit->toMm, data.transform, lo, hi);
+    return true;
+}
+
+App::MeshPlaceModel App::meshPlaceModel() const {
+    MeshPlaceModel m;
+    if (!meshPlace_.active()) return m;
+    const Feature* f = featureHistory_.findFeature(meshPlace_.featureID);
+    if (!f || f->type != FeatureType::MeshImport) return m;
+    m.active = true;
+    m.name = f->name;
+    MeshImportFeatureData data;
+    if (!meshPlaceBounds(data, m.lo, m.hi, &m.error)) {
+        if (m.error.empty()) m.error = "Mesh not found";
+        return m;
+    }
+    m.unitIndex = (int)(findLengthUnit(data.unit) - kUnits);
+    for (int k = 0; k < 3; k++) m.pos[k] = meshPlace_.posBuf[k];
+    m.angleDeg = meshPlace_.angleDeg;
+    m.angleAxis = meshPlace_.angleAxis;
+    return m;
+}
+
+void App::meshPlaceSetUnit(int unitIndex) {
+    MeshImportFeatureData data;
+    double lo[3], hi[3];
+    if (unitIndex < 0 || unitIndex >= kUnitCount || !meshPlaceBounds(data, lo, hi, nullptr)) return;
+    data.unit = kUnits[unitIndex].name;
+    setMeshImportData(data);
+}
+
+void App::meshPlaceRotate(int axis, double degrees) {
+    MeshImportFeatureData data;
+    double lo[3], hi[3];
+    if (axis < 0 || axis > 2 || !meshPlaceBounds(data, lo, hi, nullptr)) return;
     const double pivot[3] = {(lo[0] + hi[0]) * 0.5, (lo[1] + hi[1]) * 0.5, (lo[2] + hi[2]) * 0.5};
+    double q[9];
+    axisRotation(axis, degrees, q);
+    rotateAbout(data.transform, q, pivot);
+    setMeshImportData(data);
+}
+
+void App::meshPlaceSetPosition(const double pos[3]) {
+    MeshImportFeatureData data;
+    double lo[3], hi[3];
+    if (!meshPlaceBounds(data, lo, hi, nullptr)) return;
+    for (int a = 0; a < 3; a++) data.transform.t[a] = pos[a];
+    setMeshImportData(data);
+}
+
+void App::meshPlaceDropToGround() {
+    MeshImportFeatureData data;
+    double lo[3], hi[3];
+    if (!meshPlaceBounds(data, lo, hi, nullptr)) return;
+    data.transform.t[1] -= lo[1];   // the viewport is Y-up, so "bottom" is along Y
+    setMeshImportData(data);
+}
+
+void App::meshPlaceCentreOnOrigin() {
+    MeshImportFeatureData data;
+    double lo[3], hi[3];
+    if (!meshPlaceBounds(data, lo, hi, nullptr)) return;
+    data.transform.t[0] -= (lo[0] + hi[0]) * 0.5;
+    data.transform.t[2] -= (lo[2] + hi[2]) * 0.5;
+    setMeshImportData(data);
+}
+
+void App::meshPlaceResetPlacement() {
+    MeshImportFeatureData data;
+    double lo[3], hi[3];
+    if (!meshPlaceBounds(data, lo, hi, nullptr)) return;
+    data.transform = MeshTransform{};
+    setMeshImportData(data);
+}
+
+// ImGui front end for MeshPlaceModel (the Qt one is src/qt/MeshDialogs.cpp).
+void App::drawMeshPlacePanel() {
+    if (!meshPlace_.active()) return;
+    const MeshPlaceModel m = meshPlaceModel();
+    if (!m.active) return;
+
+    ImGuiViewport* vp = ImGui::GetMainViewport();
+    ImGui::SetNextWindowPos({vp->WorkPos.x + vp->WorkSize.x - 290, vp->WorkPos.y + 60}, ImGuiCond_Appearing);
+    ImGui::SetNextWindowSize({280, 0}, ImGuiCond_Always);
+    char title[160];
+    snprintf(title, sizeof(title), "Place: %s###meshplace", m.name.c_str());
+    bool open = true;
+    ImGui::Begin(title, &open, ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_AlwaysAutoResize);
+
+    if (!m.error.empty()) {
+        ImGui::TextColored({1.0f, 0.4f, 0.4f, 1.0f}, "%s", m.error.c_str());
+        if (ImGui::Button("Close", {-1, 0})) open = false;
+        ImGui::End();
+        if (!open) finishMeshPlace(false);
+        return;
+    }
+
+    // ---- unit (fixable here if the import dialog got it wrong)
+    int unitIndex = m.unitIndex;
+    ImGui::Text("File unit");
+    ImGui::SameLine(90);
+    ImGui::SetNextItemWidth(-1);
+    if (ImGui::Combo("##placeunit", &unitIndex, [](void*, int i) { return kUnits[i].name; }, nullptr, kUnitCount))
+        meshPlaceSetUnit(unitIndex);
+
+    const double* lo = m.lo;
+    const double* hi = m.hi;
     const double big = std::max({hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]});
     const double s = big >= 1000.0 ? 0.001 : 1.0;
     const char* su = big >= 1000.0 ? "m" : "mm";
@@ -515,28 +635,22 @@ void App::drawMeshPlacePanel() {
     // ---- rotation: always about the mesh's own centre
     ImGui::Separator();
     ImGui::Text("Rotate 90 deg about its centre");
-    auto quarterTurn = [&](int axis, double deg) {
-        double q[9];
-        axisRotation(axis, deg, q);
-        rotateAbout(data.transform, q, pivot);
-        setMeshImportData(data);
-    };
     const char* axisNames[3] = {"X", "Y", "Z"};
     for (int a = 0; a < 3; a++) {
         ImGui::PushID(a);
         ImGui::AlignTextToFramePadding();
         ImGui::Text("%s", axisNames[a]);
         ImGui::SameLine(30);
-        if (ImGui::Button("-90", {60, 0})) quarterTurn(a, -90.0);
+        if (ImGui::Button("-90", {60, 0})) meshPlaceRotate(a, -90.0);
         ImGui::SameLine();
-        if (ImGui::Button("+90", {60, 0})) quarterTurn(a, 90.0);
+        if (ImGui::Button("+90", {60, 0})) meshPlaceRotate(a, 90.0);
         ImGui::SameLine();
-        if (ImGui::Button("180", {60, 0})) quarterTurn(a, 180.0);
+        if (ImGui::Button("180", {60, 0})) meshPlaceRotate(a, 180.0);
         ImGui::PopID();
     }
     // This viewport is Y-up. CAD packages including Onshape export Z-up, which
     // lands on its side here; Rx(-90) takes +Z to +Y.
-    if (ImGui::Button("Z-up file (Onshape) -> stand upright", {-1, 0})) quarterTurn(0, -90.0);
+    if (ImGui::Button("Z-up file (Onshape) -> stand upright", {-1, 0})) meshPlaceRotate(0, -90.0);
 
     ImGui::SetNextItemWidth(70);
     ImGui::InputFloat("deg##angle", &meshPlace_.angleDeg, 0, 0, "%.2f");
@@ -544,7 +658,7 @@ void App::drawMeshPlacePanel() {
     ImGui::SetNextItemWidth(50);
     ImGui::Combo("##angleaxis", &meshPlace_.angleAxis, axisNames, 3);
     ImGui::SameLine();
-    if (ImGui::Button("Rotate", {-1, 0})) quarterTurn(meshPlace_.angleAxis, meshPlace_.angleDeg);
+    if (ImGui::Button("Rotate", {-1, 0})) meshPlaceRotate(meshPlace_.angleAxis, meshPlace_.angleDeg);
 
     // ---- position
     ImGui::Separator();
@@ -565,23 +679,10 @@ void App::drawMeshPlacePanel() {
         // the whole model.
         if (ImGui::IsItemDeactivatedAfterEdit()) posEdited = true;
     }
-    if (posEdited) {
-        for (int a = 0; a < 3; a++) data.transform.t[a] = meshPlace_.posBuf[a];
-        setMeshImportData(data);
-    }
-    if (ImGui::Button("Drop to ground (Y = 0)", {-1, 0})) {
-        data.transform.t[1] -= lo[1];
-        setMeshImportData(data);
-    }
-    if (ImGui::Button("Centre on origin (X, Z)", {-1, 0})) {
-        data.transform.t[0] -= pivot[0];
-        data.transform.t[2] -= pivot[2];
-        setMeshImportData(data);
-    }
-    if (ImGui::Button("Reset placement", {-1, 0})) {
-        data.transform = MeshTransform{};
-        setMeshImportData(data);
-    }
+    if (posEdited) meshPlaceSetPosition(meshPlace_.posBuf);
+    if (ImGui::Button("Drop to ground (Y = 0)", {-1, 0})) meshPlaceDropToGround();
+    if (ImGui::Button("Centre on origin (X, Z)", {-1, 0})) meshPlaceCentreOnOrigin();
+    if (ImGui::Button("Reset placement", {-1, 0})) meshPlaceResetPlacement();
 
     ImGui::Separator();
     if (ImGui::Button("Done", {-1, 0})) {

@@ -601,10 +601,11 @@ void App::renderFrame() {
         drawSectionControls();
         ImGui::End();
     }
-    drawMeshImportDialog();
+    if (!hostHas(HostMeshImport)) drawMeshImportDialog();
     pollSimulationRun(); // every frame, whichever workspace is showing
     drawSimulationPanel();
-    drawMeshPlacePanel();
+    validateMeshPlace();
+    if (!hostHas(HostMeshPlace)) drawMeshPlacePanel();
     drawMeshHoverReadout();
 
     // Timeline

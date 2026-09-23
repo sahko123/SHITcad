@@ -5,6 +5,7 @@
 #include "ViewportWidget.h"
 #include "Toolbar.h"
 #include "PreferencesDialog.h"
+#include "MeshDialogs.h"
 
 #include <QApplication>
 #include <QMainWindow>
@@ -41,6 +42,14 @@ int main(int argc, char** argv) {
     viewport->app().setHostPanel(shitcad::App::HostPreferences);
     auto* prefs = new shitcad::PreferencesDialog(viewport->app(), &window);
     QObject::connect(viewport, &shitcad::ViewportWidget::frameBuilt, prefs, &shitcad::PreferencesDialog::refresh);
+
+    viewport->app().setHostPanel(shitcad::App::HostMeshImport);
+    auto* meshImport = new shitcad::MeshImportDialog(viewport->app(), &window);
+    QObject::connect(viewport, &shitcad::ViewportWidget::frameBuilt, meshImport, &shitcad::MeshImportDialog::refresh);
+
+    viewport->app().setHostPanel(shitcad::App::HostMeshPlace);
+    auto* meshPlace = new shitcad::MeshPlacePanel(viewport->app(), &window);
+    QObject::connect(viewport, &shitcad::ViewportWidget::frameBuilt, meshPlace, &shitcad::MeshPlacePanel::refresh);
     window.resize(1280, 720);
     window.showMaximized();
     viewport->setFocus();

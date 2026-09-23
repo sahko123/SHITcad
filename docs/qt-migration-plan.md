@@ -401,6 +401,13 @@ ratio and picking near the edges.
   once it closed (Ctrl+O reopened Open). `ImGuiQt::releaseAll` now runs before a dialog
   and whenever the window deactivates, as GLFW does on focus loss. Pre-existing and
   left alone: `O` toggles the projection even with Ctrl held, so Ctrl+O also flips it.
+- 5.4 mesh dialogs: done (the two plane dialogs are still to come). `MeshImportModel`
+  and `MeshPlaceModel` plus named operations (rotate about the centre, drop to ground,
+  centre on origin, set unit/position) hold what those panels do; the ImGui panels were
+  rewritten onto them and stayed pixel-identical through an import, a rotation, a
+  drop to ground, Done and an undo. `src/qt/MeshDialogs.cpp` is the Qt front end.
+  `App::validateMeshPlace` now runs every frame: dropping the panel when its feature is
+  deleted or undone used to happen while the ImGui panel drew itself.
 
 ## Phase 6: remove ImGui and GLFW
 

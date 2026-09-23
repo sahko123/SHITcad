@@ -116,10 +116,48 @@ public:
     bool preferencesOpen() const { return prefsOpen_; }
     void setPreferencesOpen(bool open) { prefsOpen_ = open; }
 
+    // ---- Mesh import dialog: STL has no units, so the user confirms one.
+    struct MeshImportModel {
+        bool open = false;
+        std::string path, error, name;
+        size_t triangles = 0;
+        int unitIndex = 1;               // into kUnits
+        float extMm[3] = {};             // size in the chosen unit, in mm
+        float maxExtMm = 0.0f;
+        bool sizeSuspicious = false;     // outside what cip-sim will trace
+    };
+    MeshImportModel meshImportModel() const;
+    void setMeshImportName(const std::string& name);
+    void setMeshImportUnit(int unitIndex);
+    void confirmMeshImport();            // adds the feature, then opens placement
+    void cancelMeshImport();
+
+    // ---- Mesh placement panel: edits apply live, Done records one undo step.
+    struct MeshPlaceModel {
+        bool active = false;
+        std::string name, error;         // error: file unreadable / unit unknown
+        int unitIndex = 1;
+        double lo[3] = {}, hi[3] = {};   // placed bounds, mm
+        double pos[3] = {};              // translation being edited
+        float angleDeg = 45.0f;
+        int angleAxis = 2;
+    };
+    MeshPlaceModel meshPlaceModel() const;
+    void meshPlaceSetUnit(int unitIndex);
+    void meshPlaceRotate(int axis, double degrees);   // about the mesh's centre
+    void meshPlaceSetAngle(float degrees, int axis) { meshPlace_.angleDeg = degrees; meshPlace_.angleAxis = axis; }
+    void meshPlaceSetPosition(const double pos[3]);
+    void meshPlaceDropToGround();
+    void meshPlaceCentreOnOrigin();
+    void meshPlaceResetPlacement();
+    void finishMeshPlace(bool keep);
+
     // Panels the host draws itself (Qt); App then skips their ImGui versions.
     enum HostPanel : uint32_t {
         HostToolbar     = 1u << 0,
         HostPreferences = 1u << 1,
+        HostMeshImport  = 1u << 2,
+        HostMeshPlace   = 1u << 3,
     };
     void setHostPanel(HostPanel p, bool on = true) { hostPanels_ = on ? (hostPanels_ | p) : (hostPanels_ & ~p); }
     bool hostHas(HostPanel p) const { return (hostPanels_ & p) != 0; }
@@ -453,7 +491,9 @@ private:
     void editMeshImportFeature(FeatureID id);
     void drawMeshPlacePanel();
     void setMeshImportData(const MeshImportFeatureData& data); // live edit + replay
-    void finishMeshPlace(bool keep);
+    // Bounds of the mesh being placed, from its drawn triangles when available.
+    bool meshPlaceBounds(MeshImportFeatureData& data, double lo[3], double hi[3], std::string* error) const;
+    void validateMeshPlace();             // drop the panel if its feature went away
     void updateMeshHover(float vpW, float vpH);
     // Simulation workspace (AppSimulation.cpp)
     bool canSwitchWorkspace() const;
