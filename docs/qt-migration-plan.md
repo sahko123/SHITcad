@@ -521,6 +521,14 @@ ratio and picking near the edges.
   its own frame rate. Checked: double-click into a sketch, clicks, O, Ctrl+Z/Y, L,
   Escape, T, a typed circle diameter, a dimension typed while placing, dragging a
   sketch corner, orbit and zoom.
+- 6.2 overlay: done. `src/qt/QtOverlay.cpp` draws the recorded list with QPainter after
+  the 3D pass and measures overlay text with the same font (Segoe UI, 15 px times the
+  display scale); App skips its ImGui flush when the host sets `HostOverlay`. The host
+  saves the GL state before painting and restores it after, as ImGui's GL backend did,
+  and resets GL to its defaults for QPainter: with the 3D pass's depth and stencil state
+  left on, QPainter's fills and strokes vanished and only text drew. Checked: dimension
+  lines, arrows and label boxes, constraint badges, the ruler, the FPS box, and a
+  section cut across frames.
 
 ## Phase 7: platform layer and cross-platform build (can start after Phase 4)
 

@@ -459,7 +459,11 @@ public:
         HostTimeline    = 1u << 9,
         HostSimulation  = 1u << 10,
         HostInViewport  = 1u << 11,    // inline value box and dimension panel
+        HostOverlay     = 1u << 12,    // the host draws overlay_ after paint()
     };
+    // Screen-space drawing recorded this frame, for a host that draws it.
+    const Overlay2D& overlay() const { return overlay_; }
+    void setOverlayMeasure(Overlay2D::MeasureFn fn) { overlay_.setMeasure(fn); }
     void setHostPanel(HostPanel p, bool on = true) { hostPanels_ = on ? (hostPanels_ | p) : (hostPanels_ & ~p); }
     bool hostHas(HostPanel p) const { return (hostPanels_ & p) != 0; }
 

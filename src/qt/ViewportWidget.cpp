@@ -1,5 +1,6 @@
 #include "ViewportWidget.h"
 #include "ImGuiFonts.h"
+#include "QtOverlay.h"
 
 #include <imgui.h>
 #include <imgui_impl_opengl3.h>
@@ -11,6 +12,7 @@
 #include <QStandardPaths>
 #include <QMouseEvent>
 #include <QOpenGLContext>
+#include <QPainter>
 #include <QWheelEvent>
 
 #include <algorithm>
@@ -18,6 +20,93 @@
 #include <cstdio>
 
 namespace shitcad {
+
+namespace {
+
+// The GL state QPainter's GL engine may change, saved before the overlay is
+// painted and put back after it, so App's 3D pass starts each frame from the
+// state it left (as it did when ImGui drew the overlay: its GL backend
+// restores what it touches).
+struct GlStateGuard {
+    GLint program, vao, arrayBuffer, activeTexture, texture2D, unpackAlign;
+    GLint viewport[4], scissorBox[4];
+    GLint blendSrcRgb, blendDstRgb, blendSrcAlpha, blendDstAlpha, blendEqRgb, blendEqAlpha;
+    GLint depthFunc, cullMode, frontFace, stencilFunc, stencilRef, stencilValueMask, stencilWriteMask;
+    GLint stencilFail, stencilPassDepthFail, stencilPassDepthPass;
+    GLboolean depthMask, colorMask[4];
+    GLboolean blend, depthTest, cullFace, scissorTest, stencilTest, polygonOffsetFill;
+    GLfloat polygonOffsetFactor, polygonOffsetUnits;
+
+    GlStateGuard() {
+        glGetIntegerv(GL_CURRENT_PROGRAM, &program);
+        glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &vao);
+        glGetIntegerv(GL_ARRAY_BUFFER_BINDING, &arrayBuffer);
+        glGetIntegerv(GL_ACTIVE_TEXTURE, &activeTexture);
+        glActiveTexture(GL_TEXTURE0);
+        glGetIntegerv(GL_TEXTURE_BINDING_2D, &texture2D);
+        glGetIntegerv(GL_UNPACK_ALIGNMENT, &unpackAlign);
+        glGetIntegerv(GL_VIEWPORT, viewport);
+        glGetIntegerv(GL_SCISSOR_BOX, scissorBox);
+        glGetIntegerv(GL_BLEND_SRC_RGB, &blendSrcRgb);
+        glGetIntegerv(GL_BLEND_DST_RGB, &blendDstRgb);
+        glGetIntegerv(GL_BLEND_SRC_ALPHA, &blendSrcAlpha);
+        glGetIntegerv(GL_BLEND_DST_ALPHA, &blendDstAlpha);
+        glGetIntegerv(GL_BLEND_EQUATION_RGB, &blendEqRgb);
+        glGetIntegerv(GL_BLEND_EQUATION_ALPHA, &blendEqAlpha);
+        glGetIntegerv(GL_DEPTH_FUNC, &depthFunc);
+        glGetIntegerv(GL_CULL_FACE_MODE, &cullMode);
+        glGetIntegerv(GL_FRONT_FACE, &frontFace);
+        glGetIntegerv(GL_STENCIL_FUNC, &stencilFunc);
+        glGetIntegerv(GL_STENCIL_REF, &stencilRef);
+        glGetIntegerv(GL_STENCIL_VALUE_MASK, &stencilValueMask);
+        glGetIntegerv(GL_STENCIL_WRITEMASK, &stencilWriteMask);
+        glGetIntegerv(GL_STENCIL_FAIL, &stencilFail);
+        glGetIntegerv(GL_STENCIL_PASS_DEPTH_FAIL, &stencilPassDepthFail);
+        glGetIntegerv(GL_STENCIL_PASS_DEPTH_PASS, &stencilPassDepthPass);
+        glGetBooleanv(GL_DEPTH_WRITEMASK, &depthMask);
+        glGetBooleanv(GL_COLOR_WRITEMASK, colorMask);
+        blend = glIsEnabled(GL_BLEND);
+        depthTest = glIsEnabled(GL_DEPTH_TEST);
+        cullFace = glIsEnabled(GL_CULL_FACE);
+        scissorTest = glIsEnabled(GL_SCISSOR_TEST);
+        stencilTest = glIsEnabled(GL_STENCIL_TEST);
+        polygonOffsetFill = glIsEnabled(GL_POLYGON_OFFSET_FILL);
+        glGetFloatv(GL_POLYGON_OFFSET_FACTOR, &polygonOffsetFactor);
+        glGetFloatv(GL_POLYGON_OFFSET_UNITS, &polygonOffsetUnits);
+    }
+
+    ~GlStateGuard() {
+        auto set = [](GLenum cap, GLboolean on) { if (on) glEnable(cap); else glDisable(cap); };
+        glUseProgram(program);
+        glBindVertexArray(vao);
+        glBindBuffer(GL_ARRAY_BUFFER, arrayBuffer);
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, texture2D);
+        glActiveTexture(activeTexture);
+        glPixelStorei(GL_UNPACK_ALIGNMENT, unpackAlign);
+        glViewport(viewport[0], viewport[1], viewport[2], viewport[3]);
+        glScissor(scissorBox[0], scissorBox[1], scissorBox[2], scissorBox[3]);
+        glBlendFuncSeparate(blendSrcRgb, blendDstRgb, blendSrcAlpha, blendDstAlpha);
+        glBlendEquationSeparate(blendEqRgb, blendEqAlpha);
+        glDepthFunc(depthFunc);
+        glCullFace(cullMode);
+        glFrontFace(frontFace);
+        glStencilFunc(stencilFunc, stencilRef, stencilValueMask);
+        glStencilMask(stencilWriteMask);
+        glStencilOp(stencilFail, stencilPassDepthFail, stencilPassDepthPass);
+        glDepthMask(depthMask);
+        glColorMask(colorMask[0], colorMask[1], colorMask[2], colorMask[3]);
+        set(GL_BLEND, blend);
+        set(GL_DEPTH_TEST, depthTest);
+        set(GL_CULL_FACE, cullFace);
+        set(GL_SCISSOR_TEST, scissorTest);
+        set(GL_STENCIL_TEST, stencilTest);
+        set(GL_POLYGON_OFFSET_FILL, polygonOffsetFill);
+        glPolygonOffset(polygonOffsetFactor, polygonOffsetUnits);
+    }
+};
+
+} // namespace
 
 ViewportWidget::ViewportWidget(QWidget* parent) : QOpenGLWidget(parent) {
     setFocusPolicy(Qt::StrongFocus);
@@ -105,6 +194,11 @@ void ViewportWidget::initializeGL() {
     imgui_.init(this);
     ImGui_ImplOpenGL3_Init("#version 330");
 
+    // The overlay is drawn with QPainter, and its text measured with the same font.
+    setOverlayScale(dpi);
+    app_.setOverlayMeasure(overlayMeasure);
+    app_.setHostPanel(App::HostOverlay);
+
     // The context dies with the widget's window; tear down while it exists.
     connect(context(), &QOpenGLContext::aboutToBeDestroyed, this, [this] { teardown(); });
     clock_.start();
@@ -142,6 +236,28 @@ void ViewportWidget::paintGL() {
 
     profiler.begin("Render3D");
     app_.paint();
+    profiler.end();
+
+    profiler.begin("Overlay");
+    {
+        const GlStateGuard keep;
+        // QPainter's GL engine expects GL's defaults, not what the 3D pass
+        // left (depth and stencil tests, masks): without this its fills and
+        // strokes vanish and only text draws.
+        glDisable(GL_DEPTH_TEST);
+        glDisable(GL_STENCIL_TEST);
+        glDisable(GL_SCISSOR_TEST);
+        glDisable(GL_CULL_FACE);
+        glDisable(GL_POLYGON_OFFSET_FILL);
+        glDepthMask(GL_TRUE);
+        glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+        glStencilMask(0xFF);
+        glUseProgram(0);
+        glBindVertexArray(0);
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
+        QPainter painter(this);
+        drawOverlay(painter, app_.overlay(), (float)devicePixelRatioF());
+    }
     profiler.end();
 
     ImGui::Render();

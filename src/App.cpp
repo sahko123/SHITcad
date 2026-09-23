@@ -204,7 +204,7 @@ void App::paint() {
 
     // After the 3D pass, which records overlays too (extrude handle, box
     // select, simulation labels), and before ImGui builds its draw data.
-    flushOverlayToImGui(overlay_);
+    if (!hostHas(HostOverlay)) flushOverlayToImGui(overlay_);
 }
 
 void App::post(std::function<void()> fn) {
