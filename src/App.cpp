@@ -157,7 +157,7 @@ void App::render3DScene(int w, int h) {
 
     // Ground grid — hidden in sketch mode since the adaptive sketch grid takes over
     if (mode_ != InteractionMode::Sketching)
-        viewport3D_.drawGroundGrid(view, proj);
+        viewport3D_.drawGroundGrid(view, proj, (float)w, (float)h);
 
     // Bodies — push faces back slightly so wireframe edges render cleanly on top
     float eye[3];

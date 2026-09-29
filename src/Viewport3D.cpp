@@ -221,12 +221,12 @@ void main() {
 static const char* kGridVertSrc = R"(
 #version 330 core
 layout(location = 0) in vec3 aPos;
-layout(location = 1) in vec3 aColor;
+layout(location = 1) in vec4 aColor;
 
 uniform mat4 uView;
 uniform mat4 uProj;
 
-out vec3 vColor;
+out vec4 vColor;
 out vec3 vWorldPos;
 
 void main() {
@@ -238,7 +238,7 @@ void main() {
 
 static const char* kGridFragSrc = R"(
 #version 330 core
-in vec3 vColor;
+in vec4 vColor;
 in vec3 vWorldPos;
 uniform float uClipOn;
 uniform vec3 uClipNormal;
@@ -247,7 +247,7 @@ out vec4 FragColor;
 
 void main() {
     if (uClipOn > 0.5 && dot(vWorldPos, uClipNormal) > uClipOffset) discard;
-    FragColor = vec4(vColor, 1.0);
+    FragColor = vColor;
 }
 )";
 
@@ -352,60 +352,85 @@ void Viewport3D::shutdown() {
 }
 
 void Viewport3D::buildGrid() {
-    struct GridVert { float x, y, z, r, g, b; };
-    std::vector<GridVert> verts;
-
-    float extent = 100.0f;
-    float step = 1.0f;
-    const float axisColor[3][3] = {{0.7f, 0.2f, 0.2f}, {0.2f, 0.7f, 0.2f}, {0.2f, 0.2f, 0.7f}};
-    const auto& theme = activeTheme();
-
-    for (int normal = 0; normal < 3; normal++) {
-        // The plane's two axes, in the order X, Y, Z.
-        const int u = normal == 0 ? 1 : 0;
-        const int v = normal == 2 ? 1 : 2;
-        auto line = [&](float u0, float v0, float u1, float v1, const float* col) {
-            float a[3] = {}, b[3] = {};
-            a[u] = u0; a[v] = v0;
-            b[u] = u1; b[v] = v1;
-            verts.push_back({a[0], a[1], a[2], col[0], col[1], col[2]});
-            verts.push_back({b[0], b[1], b[2], col[0], col[1], col[2]});
-        };
-
-        for (float i = -extent; i <= extent; i += step) {
-            if (std::fabs(i) < 0.001f) continue; // skip axes
-            bool major = (std::fabs(std::fmod(i, 10.0f)) < 0.001f);
-            float c = major ? theme.gridMajor[0] : theme.gridMinor[0];
-            const float col[3] = {c, c, c};
-            line(i, -extent, i, extent, col);
-            line(-extent, i, extent, i, col);
-        }
-
-        // The plane's axes in their colours: X red, Y green, Z blue
-        line(-extent, 0, extent, 0, axisColor[u]);
-        line(0, -extent, 0, extent, axisColor[v]);
-
-        if (normal == 0) gridVertCount_ = (int)verts.size();
-    }
-
+    // Empty dynamic buffer: drawGrid rebuilds the lines every frame, since
+    // their spacing and extent follow the zoom.
     glGenVertexArrays(1, &gridVAO_);
     glGenBuffers(1, &gridVBO_);
 
     glBindVertexArray(gridVAO_);
     glBindBuffer(GL_ARRAY_BUFFER, gridVBO_);
-    glBufferData(GL_ARRAY_BUFFER, verts.size() * sizeof(GridVert), verts.data(), GL_STATIC_DRAW);
-
     glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(GridVert), (void*)0);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 7 * sizeof(float), (void*)0);
     glEnableVertexAttribArray(1);
-    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(GridVert), (void*)(3 * sizeof(float)));
-
+    glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, 7 * sizeof(float), (void*)(3 * sizeof(float)));
     glBindVertexArray(0);
 }
 
-void Viewport3D::drawGrid(const float* view, const float* proj) {
-    const int axis = camera_.viewAxis();
-    if (axis < 0) return;
+void Viewport3D::drawGrid(const float* view, const float* proj, float viewportW, float viewportH) {
+    const int normal = camera_.viewAxis();
+    if (normal < 0 || viewportW < 1.0f || viewportH < 1.0f) return;
+
+    // World size of a pixel at the orbit target.
+    const float mmPerPx = camera_.orthographic
+        ? 2.0f * camera_.distance / viewportH
+        : 2.0f * camera_.distance * std::tan(toRad(45.0f) * 0.5f) / viewportH;
+
+    const float axisColor[3][3] = {{0.7f, 0.2f, 0.2f}, {0.2f, 0.7f, 0.2f}, {0.2f, 0.2f, 0.7f}};
+    const auto& theme = activeTheme();
+    // The plane's two axes, in the order X, Y, Z.
+    const int u = normal == 0 ? 1 : 0;
+    const int v = normal == 2 ? 1 : 2;
+    const float target[3] = {camera_.targetX, camera_.targetY, camera_.targetZ};
+
+    // Cover the viewport around the target (generously, for perspective).
+    const float half = 0.5f * std::sqrt(viewportW * viewportW + viewportH * viewportH) * mmPerPx
+                       * (camera_.orthographic ? 1.1f : 3.0f);
+    const float cu = target[u], cv = target[v];
+
+    // Line colour: the theme's minor->major direction pushed further, so
+    // the lines stay visible against the sky/ground.
+    const float lineC = std::clamp(theme.gridMinor[0] + (theme.gridMajor[0] - theme.gridMinor[0]) * 1.8f, 0.0f, 1.0f);
+
+    std::vector<float> verts;
+    auto push = [&](float pu, float pv, const float* col, float a) {
+        float p[3] = {};
+        p[u] = pu; p[v] = pv;
+        verts.insert(verts.end(), {p[0], p[1], p[2], col[0], col[1], col[2], a});
+    };
+    auto line = [&](float u0, float v0, float u1, float v1, const float* col, float a) {
+        push(u0, v0, col, a); push(u1, v1, col, a);
+    };
+
+    // One level per power of ten. A level fades in as its lines spread from
+    // kMinPx to kFullPx apart, so zooming crossfades between levels; the
+    // lines every tenth step belong to the next coarser level.
+    constexpr float kMinPx = 6.0f, kFullPx = 60.0f;
+    constexpr int kLevels = 4;
+    const float firstStep = std::pow(10.0f, std::ceil(std::log10(std::max(mmPerPx * kMinPx, 1e-6f))));
+    for (int lvl = 0; lvl < kLevels; lvl++) {
+        const float step = firstStep * std::pow(10.0f, (float)lvl);
+        const float t = std::clamp((step / mmPerPx - kMinPx) / (kFullPx - kMinPx), 0.0f, 1.0f);
+        const float alpha = 0.85f * t * t * (3.0f - 2.0f * t);
+        if (alpha <= 0.0f) continue;
+        const bool coarserDrawn = lvl + 1 < kLevels;
+        const float col[3] = {lineC, lineC, lineC};
+        auto family = [&](float centre, float across, bool alongU) {
+            const long lo = (long)std::floor((centre - half) / step);
+            const long hi = (long)std::ceil((centre + half) / step);
+            for (long i = lo; i <= hi; i++) {
+                if (i == 0) continue; // the axis is drawn below
+                if (coarserDrawn && i % 10 == 0) continue;
+                const float pos = (float)i * step;
+                if (alongU) line(pos, across - half, pos, across + half, col, alpha);
+                else        line(across - half, pos, across + half, pos, col, alpha);
+            }
+        };
+        family(cu, cv, true);
+        family(cv, cu, false);
+    }
+    // The plane's axes in their colours: X red, Y green, Z blue
+    line(cu - half, 0, cu + half, 0, axisColor[u], 1.0f);
+    line(0, cv - half, 0, cv + half, axisColor[v], 1.0f);
 
     gridShader_.use();
     gridShader_.setMat4("uView", view);
@@ -414,10 +439,16 @@ void Viewport3D::drawGrid(const float* view, const float* proj) {
 
     GLboolean depthMask = GL_TRUE;
     glGetBooleanv(GL_DEPTH_WRITEMASK, &depthMask);
+    const GLboolean blendWas = glIsEnabled(GL_BLEND);
     glDepthMask(GL_FALSE);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     glBindVertexArray(gridVAO_);
-    glDrawArrays(GL_LINES, axis * gridVertCount_, gridVertCount_);
+    glBindBuffer(GL_ARRAY_BUFFER, gridVBO_);
+    glBufferData(GL_ARRAY_BUFFER, verts.size() * sizeof(float), verts.data(), GL_STREAM_DRAW);
+    glDrawArrays(GL_LINES, 0, (GLsizei)(verts.size() / 7));
     glBindVertexArray(0);
+    if (!blendWas) glDisable(GL_BLEND);
     glDepthMask(depthMask);
 }
 
@@ -459,13 +490,13 @@ void Viewport3D::render(float x, float y, float w, float h) {
     camera_.getProjection(proj, aspect);
 
     drawBackground(view, aspect);
-    drawGrid(view, proj);
+    drawGrid(view, proj, w, h);
 
     glDisable(GL_DEPTH_TEST);
 }
 
-void Viewport3D::drawGroundGrid(const float* view, const float* proj) {
-    drawGrid(view, proj);
+void Viewport3D::drawGroundGrid(const float* view, const float* proj, float viewportW, float viewportH) {
+    drawGrid(view, proj, viewportW, viewportH);
 }
 
 } // namespace shitcad

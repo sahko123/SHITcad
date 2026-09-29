@@ -50,7 +50,7 @@ public:
     // The grid in the plane facing the camera, drawn only while the view
     // looks straight along an axis (viewAxis()). A backdrop: it writes no
     // depth, so everything drawn after it is in front.
-    void drawGroundGrid(const float* view, const float* proj);
+    void drawGroundGrid(const float* view, const float* proj, float viewportW, float viewportH);
 
     OrbitCamera& camera() { return camera_; }
     const OrbitCamera& camera() const { return camera_; }
@@ -67,14 +67,12 @@ private:
     ShaderProgram backgroundShader_;
     GLuint backgroundVAO_ = 0;   // empty: the triangle comes from gl_VertexID
 
-    // Three grids back to back, one per axis the view can look along: the YZ
-    // plane (looking along X), XZ (along Y, the ground) and XY (along Z).
+    // Dynamic line buffer, refilled each frame by drawGrid.
     GLuint gridVAO_ = 0;
     GLuint gridVBO_ = 0;
-    int gridVertCount_ = 0;   // per grid
 
     void buildGrid();
-    void drawGrid(const float* view, const float* proj);
+    void drawGrid(const float* view, const float* proj, float viewportW, float viewportH);
 };
 
 } // namespace shitcad
