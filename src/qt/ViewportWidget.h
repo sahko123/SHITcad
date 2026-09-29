@@ -41,6 +41,9 @@ protected:
     void mouseDoubleClickEvent(QMouseEvent* e) override;
     void mouseMoveEvent(QMouseEvent* e) override;
     void wheelEvent(QWheelEvent* e) override;
+    // STEP, IGES and STL files dropped on the view are imported.
+    void dragEnterEvent(QDragEnterEvent* e) override;
+    void dropEvent(QDropEvent* e) override;
     void keyPressEvent(QKeyEvent* e) override;
     void keyReleaseEvent(QKeyEvent* e) override;
     void focusInEvent(QFocusEvent* e) override;

@@ -2,7 +2,11 @@
 #include "QtOverlay.h"
 
 
+#include <QDragEnterEvent>
+#include <QDropEvent>
 #include <QFileDialog>
+#include <QMimeData>
+#include <QUrl>
 #include <QFileInfo>
 #include <QGuiApplication>
 #include <QKeyEvent>
@@ -111,6 +115,40 @@ ViewportWidget::ViewportWidget(QWidget* parent) : QOpenGLWidget(parent) {
     // Render continuously, as the GLFW host does: each finished frame asks
     // for the next. On-demand rendering can come later (see App::post).
     connect(this, &QOpenGLWidget::frameSwapped, this, qOverload<>(&QWidget::update));
+    setAcceptDrops(true);
+}
+
+namespace {
+
+// Local files among a drag's URLs that App can import, as UTF-8.
+std::vector<std::string> importablePaths(const QMimeData* mime) {
+    std::vector<std::string> out;
+    if (!mime || !mime->hasUrls()) return out;
+    for (const QUrl& url : mime->urls()) {
+        if (!url.isLocalFile()) continue;
+        const QString suffix = QFileInfo(url.toLocalFile()).suffix().toLower();
+        if (suffix == "step" || suffix == "stp" || suffix == "igs" || suffix == "iges" || suffix == "stl")
+            out.push_back(url.toLocalFile().toUtf8().toStdString());
+    }
+    return out;
+}
+
+} // namespace
+
+void ViewportWidget::dragEnterEvent(QDragEnterEvent* e) {
+    // Refused (the no-drop cursor) while sketching or running a tool: the
+    // import would replay the model under it. App::importFile checks again.
+    if (app_.canImport() && !importablePaths(e->mimeData()).empty()) e->acceptProposedAction();
+}
+
+void ViewportWidget::dropEvent(QDropEvent* e) {
+    const std::vector<std::string> paths = importablePaths(e->mimeData());
+    if (paths.empty()) return;
+    e->acceptProposedAction();
+    // One import dialog at a time: the first file. The rest would replace it.
+    const std::string path = paths.front();
+    App* a = &app_;
+    app_.post([a, path] { a->importFile(path); });
 }
 
 ViewportWidget::~ViewportWidget() {

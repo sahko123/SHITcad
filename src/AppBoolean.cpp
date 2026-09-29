@@ -149,6 +149,11 @@ void App::commitBoolean() {
     bd.operation = booleanTool_.operation;
     bd.targetBodyIndex = booleanTool_.targetBodyIndex;
     bd.toolBodyIndex = booleanTool_.toolBodyIndex;
+    // By identity, which survives earlier features making more or fewer bodies.
+    const Body3D& target = scene_.getBody(bd.targetBodyIndex);
+    const Body3D& tool = scene_.getBody(bd.toolBodyIndex);
+    bd.targetBody = {target.sourceFeature, target.sourceIndex};
+    bd.toolBody = {tool.sourceFeature, tool.sourceIndex};
 
     FeatureID fid = featureHistory_.addBooleanFeature(bd);
 
@@ -159,11 +164,7 @@ void App::commitBoolean() {
     markDirty();
 
     // Reset body colors before replay
-    for (size_t i = 0; i < scene_.bodyCount(); i++) {
-        scene_.getBodyMut((int)i).colorR = 0.6f;
-        scene_.getBodyMut((int)i).colorG = 0.6f;
-        scene_.getBodyMut((int)i).colorB = 0.65f;
-    }
+    scene_.resetBodyColors();
 
     replayAllFeatures();
 
@@ -173,12 +174,8 @@ void App::commitBoolean() {
 }
 
 void App::cancelBoolean() {
-    // Reset body colors
-    for (size_t i = 0; i < scene_.bodyCount(); i++) {
-        scene_.getBodyMut((int)i).colorR = 0.6f;
-        scene_.getBodyMut((int)i).colorG = 0.6f;
-        scene_.getBodyMut((int)i).colorB = 0.65f;
-    }
+    // Reset body colors (the theme's, or an imported part's own)
+    scene_.resetBodyColors();
 
     booleanTool_.reset();
     tool_.type = ToolType::None;

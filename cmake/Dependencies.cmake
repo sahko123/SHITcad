@@ -57,8 +57,10 @@ target_link_libraries(occt_libs INTERFACE
     TKBRep TKPrim TKTopAlgo TKShHealing TKMesh TKBO TKBool TKOffset
 )
 
-# Data exchange libraries (not part of core components, link directly)
-foreach(_lib TKDESTL TKXSBase TKDEStep TKDEIges)
+# Data exchange libraries (not part of core components, link directly).
+# TKXCAF / TKLCAF / TKCDF / TKCAF are the XCAF document the STEP and IGES
+# readers fill with part names, colours and assembly placements (CadImport.cpp).
+foreach(_lib TKDESTL TKXSBase TKDEStep TKDEIges TKXCAF TKLCAF TKCDF TKCAF)
     find_library(${_lib}_LIB NAMES ${_lib} PATHS "${OpenCASCADE_LIBRARY_DIR}" NO_DEFAULT_PATH)
     find_library(${_lib}_LIB_DEBUG NAMES ${_lib} PATHS "${OpenCASCADE_LIBRARY_DIR}/../debug/lib" NO_DEFAULT_PATH)
     if(${_lib}_LIB)

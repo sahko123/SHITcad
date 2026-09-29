@@ -27,6 +27,7 @@ set(SHITCAD_CORE_SOURCES
     src/SketchRenderer.cpp
     src/FacePicker.cpp
     src/MeshImport.cpp
+    src/CadImport.cpp
     src/Simulation.cpp
     src/SimProcess.cpp
     src/SimResults.cpp

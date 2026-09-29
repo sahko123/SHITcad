@@ -10,10 +10,7 @@
 #include <BRep_Builder.hxx>
 #include <TopoDS_Compound.hxx>
 #include <STEPControl_Writer.hxx>
-#include <STEPControl_Reader.hxx>
 #include <IGESControl_Writer.hxx>
-#include <IGESControl_Reader.hxx>
-#include <Interface_Static.hxx>
 #include <XSControl_WorkSession.hxx>
 
 using json = nlohmann::json;
@@ -82,6 +79,7 @@ static const char* featureTypeToStr(FeatureType t) {
         case FeatureType::Loft:    return "Loft";
         case FeatureType::Boolean: return "Boolean";
         case FeatureType::MeshImport: return "MeshImport";
+        case FeatureType::CadImport: return "CadImport";
     }
     return "Sketch";
 }
@@ -92,6 +90,7 @@ static FeatureType featureTypeFromStr(const std::string& s) {
     if (s == "Loft")    return FeatureType::Loft;
     if (s == "Boolean") return FeatureType::Boolean;
     if (s == "MeshImport") return FeatureType::MeshImport;
+    if (s == "CadImport") return FeatureType::CadImport;
     return FeatureType::Sketch;
 }
 
@@ -503,6 +502,11 @@ static json booleanFeatureDataToJson(const BooleanFeatureData& bd) {
     j["operation"] = (bd.operation == BooleanOperation::Subtract) ? "Subtract" : "Union";
     j["targetBodyIndex"] = bd.targetBodyIndex;
     j["toolBodyIndex"] = bd.toolBodyIndex;
+    // Optional: files from before body identities have only the indices.
+    if (bd.targetBody.isSet() && bd.toolBody.isSet()) {
+        j["targetBody"] = {{"feature", bd.targetBody.feature}, {"index", bd.targetBody.index}};
+        j["toolBody"] = {{"feature", bd.toolBody.feature}, {"index", bd.toolBody.index}};
+    }
     return j;
 }
 
@@ -512,6 +516,10 @@ static BooleanFeatureData booleanFeatureDataFromJson(const json& j) {
     bd.operation = (op == "Subtract") ? BooleanOperation::Subtract : BooleanOperation::Union;
     bd.targetBodyIndex = j.value("targetBodyIndex", -1);
     bd.toolBodyIndex = j.value("toolBodyIndex", -1);
+    if (j.contains("targetBody") && j.contains("toolBody")) {
+        bd.targetBody = {j.at("targetBody").at("feature").get<FeatureID>(), j.at("targetBody").at("index").get<int>()};
+        bd.toolBody = {j.at("toolBody").at("feature").get<FeatureID>(), j.at("toolBody").at("index").get<int>()};
+    }
     return bd;
 }
 
@@ -547,6 +555,33 @@ static MeshImportFeatureData meshImportFeatureDataFromJson(const json& j) {
     return md;
 }
 
+static json cadImportFeatureDataToJson(const CadImportFeatureData& cd) {
+    json j;
+    j["sourcePath"] = cd.sourcePath;
+    if (!cd.transform.isIdentity()) {
+        j["transform"] = {
+            {"rotation", std::vector<double>(cd.transform.r, cd.transform.r + 9)},
+            {"translationMm", std::vector<double>(cd.transform.t, cd.transform.t + 3)},
+        };
+    }
+    return j;
+}
+
+static CadImportFeatureData cadImportFeatureDataFromJson(const json& j) {
+    CadImportFeatureData cd;
+    cd.sourcePath = j.at("sourcePath").get<std::string>();
+    if (j.contains("transform")) {
+        const auto& xj = j.at("transform");
+        auto rot = xj.at("rotation").get<std::vector<double>>();
+        auto tr = xj.at("translationMm").get<std::vector<double>>();
+        if (rot.size() != 9 || tr.size() != 3)
+            throw json::other_error::create(501, "CadImport transform must have 9 rotation and 3 translation values", &xj);
+        for (int i = 0; i < 9; i++) cd.transform.r[i] = rot[i];
+        for (int i = 0; i < 3; i++) cd.transform.t[i] = tr[i];
+    }
+    return cd;
+}
+
 // ─── Feature ────────────────────────────────────────────────────────
 
 static json featureToJson(const Feature& f) {
@@ -568,6 +603,8 @@ static json featureToJson(const Feature& f) {
         j["data"] = booleanFeatureDataToJson(std::get<BooleanFeatureData>(f.data));
     } else if (f.type == FeatureType::MeshImport) {
         j["data"] = meshImportFeatureDataToJson(std::get<MeshImportFeatureData>(f.data));
+    } else if (f.type == FeatureType::CadImport) {
+        j["data"] = cadImportFeatureDataToJson(std::get<CadImportFeatureData>(f.data));
     }
     return j;
 }
@@ -591,6 +628,8 @@ static Feature featureFromJson(const json& j) {
         f.data = booleanFeatureDataFromJson(j.at("data"));
     } else if (f.type == FeatureType::MeshImport) {
         f.data = meshImportFeatureDataFromJson(j.at("data"));
+    } else if (f.type == FeatureType::CadImport) {
+        f.data = cadImportFeatureDataFromJson(j.at("data"));
     }
     return f;
 }
@@ -680,13 +719,18 @@ bool saveProject(const std::string& filepath,
     // builds. An older build refuses a v2 file with a clear message, rather
     // than failing on an unknown feature type or - worse, for the simulation
     // block it would not read - silently dropping it on the next save.
+    //
+    // Version 3 = may contain CadImport (STEP/IGES) features. A v2 build would
+    // read one as an unknown type, so it has to refuse the file instead.
     bool needsV2 = simulation && !simulation->empty();
+    bool needsV3 = false;
     for (const auto& f : history.features()) {
-        if (f.type == FeatureType::MeshImport) { needsV2 = true; break; }
+        if (f.type == FeatureType::MeshImport) needsV2 = true;
+        if (f.type == FeatureType::CadImport) needsV3 = true;
     }
 
     json doc;
-    doc["version"] = needsV2 ? 2 : 1;
+    doc["version"] = needsV3 ? 3 : needsV2 ? 2 : 1;
     doc["app"] = "SHITcad";
     doc["featureHistory"] = featureHistoryToJson(history);
     if (simulation && !simulation->empty()) {
@@ -733,7 +777,7 @@ bool loadProject(const std::string& filepath,
 
     try {
         int version = doc.at("version").get<int>();
-        if (version > 2) {
+        if (version > 3) {
             s_lastError = "File was created with a newer version of SHITcad (version " +
                           std::to_string(version) + ")";
             return false;
@@ -832,11 +876,13 @@ bool exportSTEP(const std::string& filepath, const Scene3D& scene) {
     TopoDS_Compound compound;
     if (!buildVisibleCompound(scene, compound)) return false;
 
-    Interface_Static::SetCVal("xstep.cascade.unit", "MM");
-    Interface_Static::SetCVal("write.step.unit", "MM");
+    // Written in mm. OCCT 8 ignores Interface_Static("write.step.unit"); the
+    // unit goes in the transfer parameters.
+    DESTEP_Parameters params;
+    params.WriteUnit = UnitsMethods_LengthUnit_Millimeter;
 
     STEPControl_Writer writer;
-    IFSelect_ReturnStatus status = writer.Transfer(compound, STEPControl_AsIs);
+    IFSelect_ReturnStatus status = writer.Transfer(compound, STEPControl_AsIs, params);
     if (status != IFSelect_RetDone) {
         s_lastError = "STEP transfer failed";
         return false;
@@ -845,30 +891,6 @@ bool exportSTEP(const std::string& filepath, const Scene3D& scene) {
     if (status != IFSelect_RetDone) {
         s_lastError = "STEP write failed";
         return false;
-    }
-    return true;
-}
-
-bool importSTEP(const std::string& filepath, Scene3D& scene) {
-    STEPControl_Reader reader;
-    IFSelect_ReturnStatus status = reader.ReadFile(filepath.c_str());
-    if (status != IFSelect_RetDone) {
-        s_lastError = "Failed to read STEP file";
-        return false;
-    }
-
-    reader.TransferRoots();
-    int nbShapes = reader.NbShapes();
-    if (nbShapes == 0) {
-        s_lastError = "STEP file contains no shapes";
-        return false;
-    }
-
-    for (int i = 1; i <= nbShapes; i++) {
-        TopoDS_Shape shape = reader.Shape(i);
-        if (!shape.IsNull()) {
-            scene.addBody(shape);
-        }
     }
     return true;
 }
@@ -890,30 +912,6 @@ bool exportIGES(const std::string& filepath, const Scene3D& scene) {
     if (!writer.Write(filepath.c_str())) {
         s_lastError = "IGES write failed";
         return false;
-    }
-    return true;
-}
-
-bool importIGES(const std::string& filepath, Scene3D& scene) {
-    IGESControl_Reader reader;
-    IFSelect_ReturnStatus status = reader.ReadFile(filepath.c_str());
-    if (status != IFSelect_RetDone) {
-        s_lastError = "Failed to read IGES file";
-        return false;
-    }
-
-    reader.TransferRoots();
-    int nbShapes = reader.NbShapes();
-    if (nbShapes == 0) {
-        s_lastError = "IGES file contains no shapes";
-        return false;
-    }
-
-    for (int i = 1; i <= nbShapes; i++) {
-        TopoDS_Shape shape = reader.Shape(i);
-        if (!shape.IsNull()) {
-            scene.addBody(shape);
-        }
     }
     return true;
 }

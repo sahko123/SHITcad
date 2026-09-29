@@ -22,6 +22,7 @@ enum class FeatureType : uint8_t {
     Loft,
     Boolean,
     MeshImport,
+    CadImport,
 };
 
 // Signature for matching profiles across sketch edits
@@ -81,13 +82,25 @@ struct LoftFeatureData {
 
 // BooleanOperation is declared in ExtrudeTool.h (alongside ExtrudeOperation)
 
+// A body by identity (Body3D::sourceFeature / sourceIndex): the feature that
+// created it and which of that feature's bodies it is.
+struct BodyRef {
+    FeatureID feature = NullFeatureID;
+    int index = 0;
+    bool isSet() const { return feature != NullFeatureID; }
+    bool operator==(const BodyRef& o) const { return feature == o.feature && index == o.index; }
+};
+
 struct BooleanFeatureData {
     BooleanOperation operation = BooleanOperation::Union;
-    // Body identification by feature ID chain: we store the feature IDs that
-    // created the bodies, which is stable across replays (body indices change).
-    std::vector<FeatureID> targetBodyFeatures;  // features that produced the target body
-    std::vector<FeatureID> toolBodyFeatures;     // features that produced the tool body
-    // Fallback: body indices at commit time (used if feature matching fails)
+    // The bodies, by identity. Indices shift whenever an earlier feature makes
+    // a different number of bodies - a re-exported STEP with one more solid
+    // made every later Boolean act on the wrong body, with no error.
+    BodyRef targetBody;
+    BodyRef toolBody;
+    // Body indices as last resolved. Only read when the refs are unset
+    // (projects saved before them; replay then fills the refs in), and still
+    // written so older builds can open the file.
     int targetBodyIndex = -1;
     int toolBodyIndex = -1;
 };
@@ -102,13 +115,21 @@ struct MeshImportFeatureData {
     MeshTransform transform;  // placement in the model, applied after unit scaling
 };
 
+// A STEP or IGES file referenced from disk, like MeshImportFeatureData. Its
+// bodies are real solids (or surfaces), one per solid in the file. The file
+// declares its own unit and OCCT converts it to mm, so there is no unit here.
+struct CadImportFeatureData {
+    std::string sourcePath;   // absolute path to the .step/.stp/.igs/.iges
+    MeshTransform transform;  // placement in the model (mm)
+};
+
 struct Feature {
     FeatureID id = NullFeatureID;
     FeatureType type = FeatureType::Sketch;
     std::string name;
     bool suppressed = false;
     std::variant<SketchFeatureData, ExtrudeFeatureData, RevolveFeatureData, LoftFeatureData,
-                 BooleanFeatureData, MeshImportFeatureData> data;
+                 BooleanFeatureData, MeshImportFeatureData, CadImportFeatureData> data;
     bool hasError = false;
     std::string errorMsg;
 };
@@ -121,6 +142,7 @@ public:
     FeatureID addLoftFeature(const LoftFeatureData& params);
     FeatureID addBooleanFeature(const BooleanFeatureData& params);
     FeatureID addMeshImportFeature(const MeshImportFeatureData& params, const std::string& name);
+    FeatureID addCadImportFeature(const CadImportFeatureData& params, const std::string& name);
 
     void updateSketchSnapshot(FeatureID id, const Sketch& snapshot);
     void updateExtrudeData(FeatureID id, const ExtrudeFeatureData& data);
@@ -128,6 +150,7 @@ public:
     void updateLoftData(FeatureID id, const LoftFeatureData& data);
     void updateBooleanData(FeatureID id, const BooleanFeatureData& data);
     void updateMeshImportData(FeatureID id, const MeshImportFeatureData& data);
+    void updateCadImportData(FeatureID id, const CadImportFeatureData& data);
     FeatureID findSketchFeatureForPlane(int planeIndex) const;
 
     std::vector<FeatureID> getDependents(FeatureID id) const;

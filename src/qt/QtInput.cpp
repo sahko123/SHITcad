@@ -61,6 +61,7 @@ int toKey(int k, bool keypad) {
         case Qt::Key_Escape: return (int)Key::Escape;
         case Qt::Key_Delete: return (int)Key::Delete;
         case Qt::Key_Backspace: return (int)Key::Backspace;
+        case Qt::Key_Home: return (int)Key::Home; // the keypad's Home is Keypad7, above
         // Shifted digits on a US layout arrive as their symbol: the key is still the digit.
         case Qt::Key_Exclam: return (int)Key::Num1;
         case Qt::Key_At: return (int)Key::Num2;

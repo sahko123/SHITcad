@@ -10,6 +10,7 @@ class QComboBox;
 class QDoubleSpinBox;
 class QLabel;
 class QLineEdit;
+class QPushButton;
 
 namespace shitcad {
 
@@ -36,11 +37,39 @@ private:
     QComboBox* unit_ = nullptr;
     QLabel* size_ = nullptr;
     QLabel* warning_ = nullptr;
+    QLabel* blocked_ = nullptr;        // why Import is disabled
+    QPushButton* import_ = nullptr;
     QWidget* form_ = nullptr;          // everything hidden when the file failed to read
 };
 
+// Qt front end for CadImportModel: what a STEP / IGES file holds, and which
+// way is up in it.
+class CadImportDialog : public QDialog {
+    Q_OBJECT
+public:
+    CadImportDialog(App& app, QWidget* parent = nullptr);
+    void refresh();
+
+protected:
+    void reject() override;            // as MeshImportDialog
+
+private:
+    App& app_;
+    std::string shownPath_;
+    QLabel* path_ = nullptr;
+    QLabel* error_ = nullptr;
+    QLabel* contents_ = nullptr;       // format, unit, solid / surface counts
+    QLabel* size_ = nullptr;
+    QLabel* warning_ = nullptr;        // curves that make no body
+    QLabel* blocked_ = nullptr;        // why Import is disabled
+    QPushButton* import_ = nullptr;
+    QLineEdit* name_ = nullptr;
+    QComboBox* up_ = nullptr;
+    QWidget* form_ = nullptr;
+};
+
 // Qt front end for MeshPlaceModel:
-// rotate and move an imported mesh into place, applied live.
+// rotate and move an import (STL, STEP or IGES) into place, applied live.
 class MeshPlacePanel : public QDialog {
     Q_OBJECT
 public:
@@ -59,6 +88,7 @@ private:
     QLabel* error_ = nullptr;
     QWidget* form_ = nullptr;
     QComboBox* unit_ = nullptr;
+    QWidget* unitRow_ = nullptr;       // hidden for STEP / IGES, which carry their unit
     QLabel* size_ = nullptr;
     QLabel* bottom_ = nullptr;
     QDoubleSpinBox* angle_ = nullptr;

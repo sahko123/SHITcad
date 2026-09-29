@@ -19,6 +19,7 @@
 #include "FrameProfiler.h"
 #include "FacePicker.h"
 #include "MeshImport.h"
+#include "CadImport.h"
 #include "SimProcess.h"
 #include "SimResults.h"
 #include "ViewportInput.h"
@@ -124,6 +125,7 @@ public:
         float extMm[3] = {};             // size in the chosen unit, in mm
         float maxExtMm = 0.0f;
         bool sizeSuspicious = false;     // outside what cip-sim will trace
+        std::string blocked;             // why Import is unavailable right now, else empty
     };
     MeshImportModel meshImportModel() const;
     void setMeshImportName(const std::string& name);
@@ -131,10 +133,39 @@ public:
     void confirmMeshImport();            // adds the feature, then opens placement
     void cancelMeshImport();
 
-    // ---- Mesh placement panel: edits apply live, Done records one undo step.
+    // ---- STEP / IGES import dialog: shows what the file holds (its unit is
+    // in the file) and asks which way is up before the feature is created.
+    struct CadImportModel {
+        bool open = false;
+        std::string path, error, name;
+        std::string format, fileUnit;    // "STEP" / "IGES"; the file's declared unit
+        int solids = 0, surfaces = 0, skippedWires = 0;
+        double extMm[3] = {};            // size in mm, before placement
+        bool zUp = true;                 // stand a Z-up file upright in this Y-up view
+        std::string blocked;             // why Import is unavailable right now, else empty
+    };
+    CadImportModel cadImportModel() const;
+    void setCadImportName(const std::string& name);
+    void setCadImportZUp(bool zUp);
+    void confirmCadImport();             // adds the feature, frames it, opens placement
+    void cancelCadImport();
+
+    // Import any supported file by extension (STEP, IGES, STL): the Import
+    // menu's "All supported" and files dropped on the window.
+    void importFile(const std::string& path);
+    // An import replays the model, which restores every sketch from its last
+    // finished snapshot and rebuilds under an active tool: only from Navigate
+    // with no 3D tool running. A drop in the middle of a sketch lost it.
+    bool canImport() const { return canSwitchWorkspace(); }
+    // Point an import at a different file (the timeline's "Replace file...").
+    void replaceImportFile(FeatureID id);
+
+    // ---- Import placement panel (STL and STEP/IGES imports): edits apply
+    // live, Done records one undo step.
     struct MeshPlaceModel {
         bool active = false;
         std::string name, error;         // error: file unreadable / unit unknown
+        bool hasUnit = true;             // STL: the file's unit can be changed here
         int unitIndex = 1;
         double lo[3] = {}, hi[3] = {};   // placed bounds, mm
         double pos[3] = {};              // translation being edited
@@ -301,7 +332,8 @@ public:
             std::string name;
             float rgb[3];              // button colour (grey when suppressed or rolled back)
             bool grayed, error, selected, suppressed;
-            bool canPlace;             // a mesh import that can be rotated / moved
+            bool canPlace;             // an import that can be rotated / moved
+            bool canReplaceFile;       // an import, which references a file
             std::string errorMsg;
         };
         std::vector<Item> items;
@@ -580,11 +612,26 @@ private:
     };
     MeshImportDialogState meshImportDialog_;
 
-    // Placement panel for an imported mesh (rotate / move it into place).
-    // Edits apply live; Done records one undo step, Cancel restores.
+    // STEP / IGES import dialog. The file is read (and cached) when the
+    // dialog opens, so a failure shows there instead of only on stderr.
+    struct CadImportDialogState {
+        bool open = false;
+        std::string path;
+        char nameBuf[128] = {};
+        bool zUp = true;
+        CadFileInfo info;
+        std::string error;
+        void reset() { *this = {}; }
+    };
+    CadImportDialogState cadImportDialog_;
+
+    // Placement panel for an import, STL or STEP/IGES (rotate / move it into
+    // place). Edits apply live; Done records one undo step, Cancel restores.
     struct MeshPlaceState {
         FeatureID featureID = NullFeatureID;
+        FeatureType type = FeatureType::MeshImport; // or CadImport
         MeshImportFeatureData original;
+        CadImportFeatureData originalCad;
         double posBuf[3] = {0, 0, 0};
         float angleDeg = 45.0f;
         int angleAxis = 2; // 0 X, 1 Y, 2 Z
@@ -756,10 +803,30 @@ private:
     void exportDxfDialog();
     void importModelDialog();
     void beginMeshImport(const std::string& path);
-    void editMeshImportFeature(FeatureID id);
+    void beginCadImport(const std::string& path);
+    // A feature added while the playhead is rolled back lands after it,
+    // hidden: an import would frame and open placement for a part that is not
+    // drawn. Rolls forward first, as its own undo step.
+    void rollForwardForNewFeature();
+    void editImportPlacement(FeatureID id); // MeshImport or CadImport
     void setMeshImportData(const MeshImportFeatureData& data); // live edit + replay
     // Bounds of the mesh being placed, from its drawn triangles when available.
     bool meshPlaceBounds(MeshImportFeatureData& data, double lo[3], double hi[3], std::string* error) const;
+    // The placement being edited and the placed bounds, for either import type.
+    bool placeTransform(MeshTransform& xf, double lo[3], double hi[3], std::string* error) const;
+    void setPlaceTransform(const MeshTransform& xf); // live edit + replay
+    // Placed bounds of a STEP/IGES import, cached per placement: the panel
+    // asks every frame and a large model has a million triangles.
+    struct CadBoundsCache {
+        std::string path;
+        MeshTransform xf;
+        double lo[3] = {}, hi[3] = {};
+        bool valid = false;
+    };
+    mutable CadBoundsCache cadBoundsCache_;
+    // Point the camera at a box (animated), keeping the view direction.
+    void frameBounds(const double lo[3], const double hi[3]);
+    void frameScene();                     // Home: everything in view
     void validateMeshPlace();             // drop the panel if its feature went away
     void updateMeshHover(float vpW, float vpH);
     // Simulation workspace (AppSimulation.cpp)

@@ -11,6 +11,7 @@ enum class FileDialog : uint8_t {
     OpenStl, SaveStl, OpenStep, SaveStep, OpenIges, SaveIges,
     SaveObj, SaveDxf, SaveJson,
     PickFolder,
+    OpenCad,                      // STEP or IGES
 };
 
 struct FileDialogSpec {
@@ -37,6 +38,7 @@ inline const FileDialogSpec& fileDialogSpec(FileDialog d) {
         {true,  false, "Export DXF", "DXF Files (*.dxf);;All Files (*)", "dxf"},
         {true,  false, "Export JSON", "JSON Files (*.json);;All Files (*)", "json"},
         {false, true,  "Select Folder", "", ""},
+        {false, false, "Import STEP or IGES", "STEP / IGES Files (*.step *.stp *.igs *.iges);;All Files (*)", ""},
     };
     return kSpecs[(int)d];
 }

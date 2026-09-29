@@ -45,6 +45,18 @@ void App::setPreferences(const Preferences& p) {
 
 void App::replayAllFeatures() {
     shitcad::replayFeatures(featureHistory_, sketchPlanes_, scene_);
+    // Replay is where a re-exported import is re-read; the Place panel's
+    // bounds are keyed on the placement only, so they must be dropped here.
+    cadBoundsCache_.valid = false;
+}
+
+// Copy a UTF-8 name into a fixed buffer without cutting a character in half:
+// a long accented file name truncated at 127 bytes left a stray lead byte.
+static void copyUtf8(char* buf, size_t size, const std::string& s) {
+    size_t n = std::min(s.size(), size - 1);
+    while (n > 0 && n < s.size() && ((unsigned char)s[n] & 0xC0) == 0x80) n--; // s[n] continues a character
+    std::memcpy(buf, s.data(), n);
+    buf[n] = '\0';
 }
 
 void App::globalUndo() {
@@ -89,6 +101,9 @@ void App::globalUndo() {
             break;
         case UndoActionType::ModifyMeshImport:
             featureHistory_.updateMeshImportData(cmd.featureID, cmd.oldMeshImport);
+            break;
+        case UndoActionType::ModifyCadImport:
+            featureHistory_.updateCadImportData(cmd.featureID, cmd.oldCadImport);
             break;
         case UndoActionType::ModifySimulation:
             simulation_ = cmd.oldSimulation;
@@ -141,6 +156,9 @@ void App::globalRedo() {
             break;
         case UndoActionType::ModifyMeshImport:
             featureHistory_.updateMeshImportData(cmd.featureID, cmd.newMeshImport);
+            break;
+        case UndoActionType::ModifyCadImport:
+            featureHistory_.updateCadImportData(cmd.featureID, cmd.newCadImport);
             break;
         case UndoActionType::ModifySimulation:
             simulation_ = cmd.newSimulation;
@@ -199,6 +217,7 @@ void App::openProjectDialog() {
     simUndoBase_ = simulation_;
     simUi_ = {};
     meshPlace_.reset();
+    cadImportDialog_.reset();
     // Results belong to the project that produced them: without this, the
     // previous project's coverage table and coloured mesh stayed on screen
     // over the new project's geometry.
@@ -243,7 +262,7 @@ void App::beginMeshImport(const std::string& path) {
     std::string base = (slash == std::string::npos) ? path : path.substr(slash + 1);
     auto dot = base.rfind('.');
     std::string stem = (dot == std::string::npos) ? base : base.substr(0, dot);
-    snprintf(d.nameBuf, sizeof(d.nameBuf), "%s", stem.c_str());
+    copyUtf8(d.nameBuf, sizeof(d.nameBuf), stem);
 
     if (!probeMeshFile(path, d.info, d.error)) {
         fprintf(stderr, "Mesh import failed: %s\n", d.error.c_str());
@@ -271,11 +290,12 @@ App::MeshImportModel App::meshImportModel() const {
     // Same bounds cip-sim refuses to trace outside of: unit mix-ups are factors
     // of 1000 or 25.4, so a size check catches them where nothing else can.
     m.sizeSuspicious = m.maxExtMm < 20.0f || m.maxExtMm > 100000.0f;
+    if (!canImport()) m.blocked = "Finish the sketch or the active tool first.";
     return m;
 }
 
 void App::setMeshImportName(const std::string& name) {
-    snprintf(meshImportDialog_.nameBuf, sizeof(meshImportDialog_.nameBuf), "%s", name.c_str());
+    copyUtf8(meshImportDialog_.nameBuf, sizeof(meshImportDialog_.nameBuf), name);
 }
 
 void App::setMeshImportUnit(int unitIndex) {
@@ -284,12 +304,13 @@ void App::setMeshImportUnit(int unitIndex) {
 
 void App::confirmMeshImport() {
     auto& d = meshImportDialog_;
-    if (!d.open || !d.error.empty()) return;
+    if (!d.open || !d.error.empty() || !canImport()) return;
     MeshImportFeatureData md;
     md.sourcePath = d.path;
     md.unit = kUnits[d.unitIndex].name;
     std::string name = d.nameBuf[0] ? d.nameBuf : "Mesh";
 
+    rollForwardForNewFeature();
     FeatureID fid = featureHistory_.addMeshImportFeature(md, name);
     UndoCommand cmd;
     cmd.type = UndoActionType::AddFeature;
@@ -298,8 +319,156 @@ void App::confirmMeshImport() {
     markDirty();
     replayAllFeatures();
     // Straight into placement: an export is rarely the right way up.
-    editMeshImportFeature(fid);
+    editImportPlacement(fid);
+    MeshTransform xf;
+    double lo[3], hi[3];
+    if (placeTransform(xf, lo, hi, nullptr)) frameBounds(lo, hi);
     d.reset();
+}
+
+// ---- STEP / IGES import ---------------------------------------------------------
+
+void App::beginCadImport(const std::string& path) {
+    auto& d = cadImportDialog_;
+    d.reset();
+    d.path = path;
+    auto slash = path.find_last_of("/\\");
+    std::string base = (slash == std::string::npos) ? path : path.substr(slash + 1);
+    auto dot = base.rfind('.');
+    std::string stem = (dot == std::string::npos) ? base : base.substr(0, dot);
+    copyUtf8(d.nameBuf, sizeof(d.nameBuf), stem);
+
+    // Read now (it is cached for the replay that follows), so the dialog can
+    // say what the file holds - or why it could not be read.
+    std::vector<CadPart> parts;
+    if (!loadCadFile(path, parts, d.info, d.error)) {
+        fprintf(stderr, "Import failed: %s\n", d.error.c_str());
+    }
+    d.open = true;
+}
+
+App::CadImportModel App::cadImportModel() const {
+    const auto& d = cadImportDialog_;
+    CadImportModel m;
+    m.open = d.open;
+    if (!d.open) return m;
+    m.path = d.path;
+    m.error = d.error;
+    m.name = d.nameBuf;
+    m.format = d.info.format;
+    m.fileUnit = d.info.fileUnit;
+    m.solids = d.info.solids;
+    m.surfaces = d.info.surfaces;
+    m.skippedWires = d.info.skippedWires;
+    for (int k = 0; k < 3; k++) m.extMm[k] = d.info.hi[k] - d.info.lo[k];
+    m.zUp = d.zUp;
+    if (!canImport()) m.blocked = "Finish the sketch or the active tool first.";
+    return m;
+}
+
+void App::setCadImportName(const std::string& name) {
+    copyUtf8(cadImportDialog_.nameBuf, sizeof(cadImportDialog_.nameBuf), name);
+}
+
+void App::setCadImportZUp(bool zUp) { cadImportDialog_.zUp = zUp; }
+
+void App::cancelCadImport() { cadImportDialog_.reset(); }
+
+void App::confirmCadImport() {
+    auto& d = cadImportDialog_;
+    if (!d.open || !d.error.empty() || !canImport()) return;
+    CadImportFeatureData cd;
+    cd.sourcePath = d.path;
+    // This viewport is Y-up; most CAD (Onshape, Fusion, Inventor) is Z-up, and
+    // a Z-up file lies on its side here. Rx(-90) takes +Z to +Y. About the
+    // origin, not the part's centre, so parts from separate files that share
+    // a frame still line up.
+    if (d.zUp) axisRotation(0, -90.0, cd.transform.r);
+    std::string name = d.nameBuf[0] ? d.nameBuf : "Import";
+
+    rollForwardForNewFeature();
+    FeatureID fid = featureHistory_.addCadImportFeature(cd, name);
+    UndoCommand cmd;
+    cmd.type = UndoActionType::AddFeature;
+    cmd.addedFeature = *featureHistory_.findFeature(fid);
+    globalUndo_.push(std::move(cmd));
+    markDirty();
+    replayAllFeatures();
+    d.reset();
+
+    // The part is wherever the file put it, often nowhere near the origin the
+    // camera is looking at: show it, then open placement.
+    editImportPlacement(fid);
+    MeshTransform xf;
+    double lo[3], hi[3];
+    if (placeTransform(xf, lo, hi, nullptr)) frameBounds(lo, hi);
+}
+
+void App::rollForwardForNewFeature() {
+    const int pos = featureHistory_.rollbackPos();
+    if (pos < 0) return;
+    UndoCommand cmd;
+    cmd.type = UndoActionType::SetRollbackPos;
+    cmd.oldRollbackPos = pos;
+    cmd.newRollbackPos = -1;
+    featureHistory_.setRollbackPos(-1);
+    globalUndo_.push(std::move(cmd));
+}
+
+void App::importFile(const std::string& path) {
+    if (!canImport()) {
+        fprintf(stderr, "Import refused: finish the sketch or the active tool first (%s)\n", path.c_str());
+        return;
+    }
+    std::string ext;
+    auto dot = path.rfind('.');
+    if (dot != std::string::npos) {
+        ext = path.substr(dot);
+        for (auto& ch : ext) ch = (char)tolower((unsigned char)ch);
+    }
+    if (isCadFile(path)) {
+        beginCadImport(path);
+    } else if (ext == ".stl") {
+        beginMeshImport(path); // unit is confirmed in the dialog
+    } else {
+        fprintf(stderr, "Unsupported import format: %s\n", ext.c_str());
+    }
+}
+
+void App::replaceImportFile(FeatureID id) {
+    const Feature* f = featureHistory_.findFeature(id);
+    if (!f || (f->type != FeatureType::MeshImport && f->type != FeatureType::CadImport)) return;
+    const bool mesh = f->type == FeatureType::MeshImport;
+    std::string path = chooseFile(mesh ? FileDialog::OpenStl : FileDialog::OpenCad);
+    if (path.empty()) return;
+    f = featureHistory_.findFeature(id); // the dialog ran a nested event loop
+    if (!f) return;
+    if (!mesh && !isCadFile(path)) {
+        fprintf(stderr, "Not a STEP or IGES file: %s\n", path.c_str());
+        return;
+    }
+    // A placement edit in progress becomes its own undo step first.
+    if (meshPlace_.featureID == id) finishMeshPlace(true);
+    f = featureHistory_.findFeature(id);
+
+    UndoCommand cmd;
+    cmd.featureID = id;
+    if (mesh) {
+        cmd.type = UndoActionType::ModifyMeshImport;
+        cmd.oldMeshImport = std::get<MeshImportFeatureData>(f->data);
+        cmd.newMeshImport = cmd.oldMeshImport;
+        cmd.newMeshImport.sourcePath = path;
+        featureHistory_.updateMeshImportData(id, cmd.newMeshImport);
+    } else {
+        cmd.type = UndoActionType::ModifyCadImport;
+        cmd.oldCadImport = std::get<CadImportFeatureData>(f->data);
+        cmd.newCadImport = cmd.oldCadImport;
+        cmd.newCadImport.sourcePath = path;
+        featureHistory_.updateCadImportData(id, cmd.newCadImport);
+    }
+    globalUndo_.push(std::move(cmd));
+    markDirty();
+    replayAllFeatures();
 }
 
 void App::cancelMeshImport() { meshImportDialog_.reset(); }
@@ -312,14 +481,73 @@ static bool sameMeshImportData(const MeshImportFeatureData& a, const MeshImportF
     return true;
 }
 
-void App::editMeshImportFeature(FeatureID id) {
+void App::editImportPlacement(FeatureID id) {
     if (meshPlace_.active()) finishMeshPlace(true);
     const Feature* f = featureHistory_.findFeature(id);
-    if (!f || f->type != FeatureType::MeshImport) return;
+    if (!f || (f->type != FeatureType::MeshImport && f->type != FeatureType::CadImport)) return;
     meshPlace_.reset();
     meshPlace_.featureID = id;
-    meshPlace_.original = std::get<MeshImportFeatureData>(f->data);
-    for (int i = 0; i < 3; i++) meshPlace_.posBuf[i] = meshPlace_.original.transform.t[i];
+    meshPlace_.type = f->type;
+    const MeshTransform* xf;
+    if (f->type == FeatureType::MeshImport) {
+        meshPlace_.original = std::get<MeshImportFeatureData>(f->data);
+        xf = &meshPlace_.original.transform;
+    } else {
+        meshPlace_.originalCad = std::get<CadImportFeatureData>(f->data);
+        xf = &meshPlace_.originalCad.transform;
+    }
+    for (int i = 0; i < 3; i++) meshPlace_.posBuf[i] = xf->t[i];
+}
+
+static bool sameTransform(const MeshTransform& a, const MeshTransform& b) {
+    for (int i = 0; i < 9; i++) if (a.r[i] != b.r[i]) return false;
+    for (int i = 0; i < 3; i++) if (a.t[i] != b.t[i]) return false;
+    return true;
+}
+
+bool App::placeTransform(MeshTransform& xf, double lo[3], double hi[3], std::string* error) const {
+    const Feature* f = featureHistory_.findFeature(meshPlace_.featureID);
+    if (!f || f->type != meshPlace_.type) return false;
+    if (f->type == FeatureType::MeshImport) {
+        MeshImportFeatureData data;
+        if (!meshPlaceBounds(data, lo, hi, error)) return false;
+        xf = data.transform;
+        return true;
+    }
+    const auto& cd = std::get<CadImportFeatureData>(f->data);
+    xf = cd.transform;
+    auto& c = cadBoundsCache_;
+    if (!c.valid || c.path != cd.sourcePath || !sameTransform(c.xf, cd.transform)) {
+        std::vector<CadPart> parts;
+        CadFileInfo info;
+        std::string err;
+        if (!loadCadFile(cd.sourcePath, parts, info, err) || !cadPlacedBounds(parts, cd.transform, c.lo, c.hi)) {
+            c.valid = false;
+            if (error) *error = err.empty() ? "The file has no geometry" : err;
+            return false;
+        }
+        c.path = cd.sourcePath;
+        c.xf = cd.transform;
+        c.valid = true;
+    }
+    for (int k = 0; k < 3; k++) { lo[k] = c.lo[k]; hi[k] = c.hi[k]; }
+    return true;
+}
+
+void App::setPlaceTransform(const MeshTransform& xf) {
+    const Feature* f = featureHistory_.findFeature(meshPlace_.featureID);
+    if (!f || f->type != meshPlace_.type) return;
+    if (f->type == FeatureType::MeshImport) {
+        MeshImportFeatureData data = std::get<MeshImportFeatureData>(f->data);
+        data.transform = xf;
+        setMeshImportData(data);
+        return;
+    }
+    CadImportFeatureData data = std::get<CadImportFeatureData>(f->data);
+    data.transform = xf;
+    featureHistory_.updateCadImportData(meshPlace_.featureID, data);
+    for (int i = 0; i < 3; i++) meshPlace_.posBuf[i] = xf.t[i];
+    replayAllFeatures();
 }
 
 void App::setMeshImportData(const MeshImportFeatureData& data) {
@@ -350,7 +578,24 @@ void App::setMeshImportData(const MeshImportFeatureData& data) {
 void App::finishMeshPlace(bool keep) {
     if (!meshPlace_.active()) return;
     const Feature* f = featureHistory_.findFeature(meshPlace_.featureID);
-    if (f && f->type == FeatureType::MeshImport) {
+    if (f && f->type == FeatureType::CadImport && meshPlace_.type == FeatureType::CadImport) {
+        const auto& current = std::get<CadImportFeatureData>(f->data);
+        const auto& original = meshPlace_.originalCad;
+        if (current.sourcePath != original.sourcePath || !sameTransform(current.transform, original.transform)) {
+            if (keep) {
+                UndoCommand cmd;
+                cmd.type = UndoActionType::ModifyCadImport;
+                cmd.featureID = meshPlace_.featureID;
+                cmd.oldCadImport = original;
+                cmd.newCadImport = current;
+                globalUndo_.push(std::move(cmd));
+                markDirty();
+            } else {
+                featureHistory_.updateCadImportData(meshPlace_.featureID, original);
+                replayAllFeatures();
+            }
+        }
+    } else if (f && f->type == FeatureType::MeshImport && meshPlace_.type == FeatureType::MeshImport) {
         const auto& current = std::get<MeshImportFeatureData>(f->data);
         if (!sameMeshImportData(current, meshPlace_.original)) {
             if (keep) {
@@ -375,7 +620,7 @@ void App::finishMeshPlace(bool keep) {
 void App::validateMeshPlace() {
     if (!meshPlace_.active()) return;
     const Feature* f = featureHistory_.findFeature(meshPlace_.featureID);
-    if (!f || f->type != FeatureType::MeshImport) meshPlace_.reset(); // deleted or undone underneath us
+    if (!f || f->type != meshPlace_.type) meshPlace_.reset(); // deleted or undone underneath us
 }
 
 bool App::meshPlaceBounds(MeshImportFeatureData& data, double lo[3], double hi[3], std::string* error) const {
@@ -414,15 +659,17 @@ App::MeshPlaceModel App::meshPlaceModel() const {
     MeshPlaceModel m;
     if (!meshPlace_.active()) return m;
     const Feature* f = featureHistory_.findFeature(meshPlace_.featureID);
-    if (!f || f->type != FeatureType::MeshImport) return m;
+    if (!f || f->type != meshPlace_.type) return m;
     m.active = true;
     m.name = f->name;
-    MeshImportFeatureData data;
-    if (!meshPlaceBounds(data, m.lo, m.hi, &m.error)) {
-        if (m.error.empty()) m.error = "Mesh not found";
+    m.hasUnit = f->type == FeatureType::MeshImport;
+    MeshTransform xf;
+    if (!placeTransform(xf, m.lo, m.hi, &m.error)) {
+        if (m.error.empty()) m.error = "File not found";
         return m;
     }
-    m.unitIndex = (int)(findLengthUnit(data.unit) - kUnits);
+    if (m.hasUnit)
+        m.unitIndex = (int)(findLengthUnit(std::get<MeshImportFeatureData>(f->data).unit) - kUnits);
     for (int k = 0; k < 3; k++) m.pos[k] = meshPlace_.posBuf[k];
     m.angleDeg = meshPlace_.angleDeg;
     m.angleAxis = meshPlace_.angleAxis;
@@ -432,53 +679,87 @@ App::MeshPlaceModel App::meshPlaceModel() const {
 void App::meshPlaceSetUnit(int unitIndex) {
     MeshImportFeatureData data;
     double lo[3], hi[3];
+    if (meshPlace_.type != FeatureType::MeshImport) return; // STEP/IGES declare their unit
     if (unitIndex < 0 || unitIndex >= kUnitCount || !meshPlaceBounds(data, lo, hi, nullptr)) return;
     data.unit = kUnits[unitIndex].name;
     setMeshImportData(data);
 }
 
 void App::meshPlaceRotate(int axis, double degrees) {
-    MeshImportFeatureData data;
+    MeshTransform xf;
     double lo[3], hi[3];
-    if (axis < 0 || axis > 2 || !meshPlaceBounds(data, lo, hi, nullptr)) return;
+    if (axis < 0 || axis > 2 || !placeTransform(xf, lo, hi, nullptr)) return;
     const double pivot[3] = {(lo[0] + hi[0]) * 0.5, (lo[1] + hi[1]) * 0.5, (lo[2] + hi[2]) * 0.5};
     double q[9];
     axisRotation(axis, degrees, q);
-    rotateAbout(data.transform, q, pivot);
-    setMeshImportData(data);
+    rotateAbout(xf, q, pivot);
+    setPlaceTransform(xf);
 }
 
 void App::meshPlaceSetPosition(const double pos[3]) {
-    MeshImportFeatureData data;
+    MeshTransform xf;
     double lo[3], hi[3];
-    if (!meshPlaceBounds(data, lo, hi, nullptr)) return;
-    for (int a = 0; a < 3; a++) data.transform.t[a] = pos[a];
-    setMeshImportData(data);
+    if (!placeTransform(xf, lo, hi, nullptr)) return;
+    for (int a = 0; a < 3; a++) xf.t[a] = pos[a];
+    setPlaceTransform(xf);
 }
 
 void App::meshPlaceDropToGround() {
-    MeshImportFeatureData data;
+    MeshTransform xf;
     double lo[3], hi[3];
-    if (!meshPlaceBounds(data, lo, hi, nullptr)) return;
-    data.transform.t[1] -= lo[1];   // the viewport is Y-up, so "bottom" is along Y
-    setMeshImportData(data);
+    if (!placeTransform(xf, lo, hi, nullptr)) return;
+    xf.t[1] -= lo[1];   // the viewport is Y-up, so "bottom" is along Y
+    setPlaceTransform(xf);
 }
 
 void App::meshPlaceCentreOnOrigin() {
-    MeshImportFeatureData data;
+    MeshTransform xf;
     double lo[3], hi[3];
-    if (!meshPlaceBounds(data, lo, hi, nullptr)) return;
-    data.transform.t[0] -= (lo[0] + hi[0]) * 0.5;
-    data.transform.t[2] -= (lo[2] + hi[2]) * 0.5;
-    setMeshImportData(data);
+    if (!placeTransform(xf, lo, hi, nullptr)) return;
+    xf.t[0] -= (lo[0] + hi[0]) * 0.5;
+    xf.t[2] -= (lo[2] + hi[2]) * 0.5;
+    setPlaceTransform(xf);
 }
 
 void App::meshPlaceResetPlacement() {
-    MeshImportFeatureData data;
+    MeshTransform xf;
     double lo[3], hi[3];
-    if (!meshPlaceBounds(data, lo, hi, nullptr)) return;
-    data.transform = MeshTransform{};
-    setMeshImportData(data);
+    if (!placeTransform(xf, lo, hi, nullptr)) return;
+    setPlaceTransform(MeshTransform{});
+}
+
+// ---- Camera framing ---------------------------------------------------------------
+
+void App::frameBounds(const double lo[3], const double hi[3]) {
+    const OrbitCamera& cam = viewport3D_.camera();
+    OrbitCamera to = cameraAnimating_ ? cameraTo_ : cam;
+    to.targetX = (float)((lo[0] + hi[0]) * 0.5);
+    to.targetY = (float)((lo[1] + hi[1]) * 0.5);
+    to.targetZ = (float)((lo[2] + hi[2]) * 0.5);
+    const double dx = hi[0] - lo[0], dy = hi[1] - lo[1], dz = hi[2] - lo[2];
+    const float radius = std::max(1.0f, (float)(0.5 * std::sqrt(dx * dx + dy * dy + dz * dz)));
+    // The bounding sphere fits the 45 degree field of view (perspective) or
+    // the half-height (orthographic), with a margin; a narrow window fits width.
+    int w, h;
+    framebufferSize(w, h);
+    const float aspect = (w > 0 && h > 0) ? std::min(1.0f, (float)w / (float)h) : 1.0f;
+    const float halfFov = 22.5f * 3.14159265f / 180.0f;
+    to.distance = cam.orthographic ? radius * 1.15f / aspect
+                                   : radius * 1.15f / (std::sin(halfFov) * aspect);
+    to.orthographic = cam.orthographic;
+    to.autoOrtho = cam.autoOrtho;
+    cameraFrom_ = cam;
+    cameraTo_ = to;
+    cameraAnimating_ = true;
+    cameraAnimT_ = 0.0f;
+}
+
+void App::frameScene() {
+    if (scene_.empty()) return;
+    float l[3], h[3];
+    sceneBounds(l, h);
+    const double lo[3] = {l[0], l[1], l[2]}, hi[3] = {h[0], h[1], h[2]};
+    frameBounds(lo, hi);
 }
 
 void App::updateMeshHover(float vpW, float vpH) {
@@ -561,9 +842,7 @@ void App::exportStepDialog() {
 void App::importStepDialog() {
     std::string path = chooseFile(FileDialog::OpenStep);
     if (path.empty()) return;
-    if (!importSTEP(path, scene_)) {
-        fprintf(stderr, "STEP import failed: %s\n", lastLoadError().c_str());
-    }
+    beginCadImport(path);
 }
 
 void App::exportIgesDialog() {
@@ -578,9 +857,7 @@ void App::exportIgesDialog() {
 void App::importIgesDialog() {
     std::string path = chooseFile(FileDialog::OpenIges);
     if (path.empty()) return;
-    if (!importIGES(path, scene_)) {
-        fprintf(stderr, "IGES import failed: %s\n", lastLoadError().c_str());
-    }
+    beginCadImport(path);
 }
 
 void App::exportObjDialog() {
@@ -604,31 +881,7 @@ void App::exportDxfDialog() {
 void App::importModelDialog() {
     std::string path = chooseFile(FileDialog::OpenImport);
     if (path.empty()) return;
-
-    // Determine format from extension
-    std::string ext;
-    auto dot = path.rfind('.');
-    if (dot != std::string::npos) {
-        ext = path.substr(dot);
-        for (auto& ch : ext) ch = (char)tolower((unsigned char)ch);
-    }
-
-    bool ok = false;
-    if (ext == ".step" || ext == ".stp") {
-        ok = importSTEP(path, scene_);
-    } else if (ext == ".igs" || ext == ".iges") {
-        ok = importIGES(path, scene_);
-    } else if (ext == ".stl") {
-        beginMeshImport(path); // unit is confirmed in the dialog
-        return;
-    } else {
-        fprintf(stderr, "Unsupported import format: %s\n", ext.c_str());
-        return;
-    }
-
-    if (!ok) {
-        fprintf(stderr, "Import failed: %s\n", lastLoadError().c_str());
-    }
+    importFile(path);
 }
 
 void App::updateWindowTitle() {
@@ -678,6 +931,8 @@ static void featureColor(const Feature& feat, bool grayed, float rgb[3]) {
         else set(0.2f, 0.7f, 0.9f);
     } else if (feat.type == FeatureType::MeshImport) {
         set(0.45f, 0.55f, 0.55f);
+    } else if (feat.type == FeatureType::CadImport) {
+        set(0.55f, 0.55f, 0.45f);
     }
 }
 
@@ -698,7 +953,9 @@ App::TimelineModel App::timelineModel() const {
         item.errorMsg = feat.errorMsg;
         item.selected = feat.id == selectedFeatureID_;
         item.suppressed = feat.suppressed;
-        item.canPlace = feat.type == FeatureType::MeshImport && !feat.suppressed && !rolledBack;
+        const bool isImport = feat.type == FeatureType::MeshImport || feat.type == FeatureType::CadImport;
+        item.canPlace = isImport && !feat.suppressed && !rolledBack;
+        item.canReplaceFile = isImport;
         m.items.push_back(std::move(item));
     }
     const int rollbackPos = featureHistory_.rollbackPos();
@@ -727,8 +984,8 @@ void App::editFeature(FeatureID id) {
     } else if (feat.type == FeatureType::Loft) {
         editLoftFeature(feat.id);
         selectedFeatureID_ = NullFeatureID;
-    } else if (feat.type == FeatureType::MeshImport) {
-        editMeshImportFeature(feat.id);
+    } else if (feat.type == FeatureType::MeshImport || feat.type == FeatureType::CadImport) {
+        editImportPlacement(feat.id);
     }
 }
 
@@ -849,10 +1106,16 @@ App::ObjectTreeModel App::objectTreeModel() const {
     }
     for (int i = 0; i < (int)scene_.bodyCount(); i++) {
         const Body3D& body = scene_.getBody(i);
-        const Feature* src = body.isMeshOnly() ? featureHistory_.findFeature(body.sourceFeature) : nullptr;
+        // Every body has a source feature now; only imports are named after it.
+        const Feature* src = body.sourceFeature ? featureHistory_.findFeature(body.sourceFeature) : nullptr;
+        if (src && src->type != FeatureType::MeshImport && src->type != FeatureType::CadImport) src = nullptr;
         char label[160];
-        if (src)
+        if (src && body.isMeshOnly())
             snprintf(label, sizeof(label), "%s (mesh)", src->name.c_str());
+        else if (src && !body.name.empty() && body.name != src->name)
+            snprintf(label, sizeof(label), "%s: %s", src->name.c_str(), body.name.c_str());
+        else if (src)
+            snprintf(label, sizeof(label), "%s", src->name.c_str());
         else
             snprintf(label, sizeof(label), "Body %d", i + 1);
         m.bodies.push_back({(uint64_t)i, i, label, body.visible});

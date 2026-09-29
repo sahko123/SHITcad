@@ -12,6 +12,7 @@ enum class Key : uint8_t {
     Num0, Num1, Num2, Num3, Num4, Num5, Num6, Num7, Num8, Num9,
     Keypad0, Keypad1, Keypad2, Keypad3, Keypad4, Keypad5, Keypad6, Keypad7, Keypad8, Keypad9,
     KeypadDecimal, KeypadEnter, KeypadPlus, KeypadMinus, Period, Enter, Escape, Delete, Backspace,
+    Home,
     Count
 };
 

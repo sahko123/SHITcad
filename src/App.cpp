@@ -900,6 +900,9 @@ void App::handleNumpadView(float vpW, float vpH) {
 
     if (pressed(5)) setOrthographic(!cam.orthographic);
 
+    // Home frames everything (Blender's View All)
+    if (in_.keyPressed(Key::Home)) frameScene();
+
     if (pressed(9)) {
         const OrbitCamera& at = cameraAnimating_ ? cameraTo_ : cam;
         animateCameraView(at.yaw + 180.0f, -at.pitch);

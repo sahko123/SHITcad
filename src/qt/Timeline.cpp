@@ -268,6 +268,8 @@ void Timeline::contextMenu(int i, const QPoint& globalPos) {
     menu.addSeparator();
     if (item.canPlace)
         menu.addAction("Rotate / Move...", [a, id] { a->post([a, id] { a->editFeature(id); }); });
+    if (item.canReplaceFile)
+        menu.addAction("Replace file...", [a, id] { a->post([a, id] { a->replaceImportFile(id); }); });
     const bool suppress = !item.suppressed;
     menu.addAction(suppress ? "Suppress" : "Unsuppress",
                    [a, id, suppress] { a->post([a, id, suppress] { a->setFeatureSuppressed(id, suppress); }); });

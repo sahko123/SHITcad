@@ -141,9 +141,8 @@ const UnitInfo* findLengthUnit(const std::string& name) {
 namespace {
 
 struct CachedMesh {
-    uintmax_t fileSize = 0;
-    std::filesystem::file_time_type mtime;
-    uint64_t contentHash = 0;
+    FileStamp stamp;
+    std::string error;           // the read failed; cached so it is not retried until the file changes
     std::vector<MeshVertex> raw; // unscaled, with per-face normals
     MeshFileInfo info;
 };
@@ -178,43 +177,30 @@ uint64_t sampleHash(const std::filesystem::path& path, uintmax_t size) {
 }
 
 std::shared_ptr<const CachedMesh> readCached(const std::string& path, std::string& error) {
-    std::error_code ec;
-    // Paths are stored as UTF-8 (see Utf8Path.h), so they have to be
-    // converted rather than handed to the narrow constructor.
-    const std::filesystem::path file = fsPath(path);
-    uintmax_t size = std::filesystem::file_size(file, ec);
-    if (ec) {
-        error = "File not found: " + path;
-        return nullptr;
-    }
-    auto mtime = std::filesystem::last_write_time(file, ec);
-    if (ec) {
-        error = "Cannot read file time: " + path;
-        return nullptr;
-    }
-
-    // Size + mtime alone is not enough: a re-exported STL with the same
-    // triangle count has an identical size (84 + 50N bytes), Windows file times
-    // are ~4 ms granular, and timestamp-preserving copies (unzip, sync restore)
-    // collide exactly. Hash a sample of the bytes as well - the whole file would
-    // cost too much on every replay.
-    const uint64_t hash = sampleHash(file, size);
+    FileStamp stamp;
+    if (!stampFile(path, stamp, error)) return nullptr;
     auto it = cache().find(path);
-    if (it != cache().end() && it->second->fileSize == size && it->second->mtime == mtime &&
-        it->second->contentHash == hash) {
+    if (it != cache().end() && it->second->stamp == stamp) {
+        if (!it->second->error.empty()) {
+            error = it->second->error;
+            return nullptr;
+        }
         return it->second;
     }
 
     Handle(Poly_Triangulation) tri = RWStl::ReadFile(path.c_str()); // OCCT takes UTF-8; path::string() would be ANSI
     if (tri.IsNull() || tri->NbTriangles() == 0) {
-        error = "Not a readable STL, or it contains no triangles: " + path;
+        // Remembered until the file changes: the Place panel asks every frame.
+        auto failed = std::make_shared<CachedMesh>();
+        failed->stamp = stamp;
+        failed->error = "Not a readable STL, or it contains no triangles: " + path;
+        cache()[path] = failed;
+        error = failed->error;
         return nullptr;
     }
 
     auto mesh = std::make_shared<CachedMesh>();
-    mesh->fileSize = size;
-    mesh->mtime = mtime;
-    mesh->contentHash = hash;
+    mesh->stamp = stamp;
     mesh->raw.reserve((size_t)tri->NbTriangles() * 3);
     mesh->info.triangleCount = (size_t)tri->NbTriangles();
 
@@ -254,6 +240,30 @@ std::shared_ptr<const CachedMesh> readCached(const std::string& path, std::strin
 }
 
 } // namespace
+
+bool stampFile(const std::string& path, FileStamp& out, std::string& error) {
+    std::error_code ec;
+    // Paths are stored as UTF-8 (see Utf8Path.h), so they have to be
+    // converted rather than handed to the narrow constructor.
+    const std::filesystem::path file = fsPath(path);
+    out.size = std::filesystem::file_size(file, ec);
+    if (ec) {
+        error = "File not found: " + path;
+        return false;
+    }
+    out.mtime = std::filesystem::last_write_time(file, ec);
+    if (ec) {
+        error = "Cannot read file time: " + path;
+        return false;
+    }
+    // Size + mtime alone is not enough: a re-exported STL with the same
+    // triangle count has an identical size (84 + 50N bytes), Windows file times
+    // are ~4 ms granular, and timestamp-preserving copies (unzip, sync restore)
+    // collide exactly. Hash a sample of the bytes as well - the whole file would
+    // cost too much on every replay.
+    out.hash = sampleHash(file, out.size);
+    return true;
+}
 
 bool probeMeshFile(const std::string& path, MeshFileInfo& info, std::string& error) {
     auto mesh = readCached(path, error);

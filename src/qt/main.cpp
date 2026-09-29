@@ -95,6 +95,9 @@ int main(int argc, char** argv) {
     auto* meshImport = new shitcad::MeshImportDialog(viewport->app(), &window);
     QObject::connect(viewport, &shitcad::ViewportWidget::frameBuilt, meshImport, &shitcad::MeshImportDialog::refresh);
 
+    auto* cadImport = new shitcad::CadImportDialog(viewport->app(), &window);
+    QObject::connect(viewport, &shitcad::ViewportWidget::frameBuilt, cadImport, &shitcad::CadImportDialog::refresh);
+
     auto* meshPlace = new shitcad::MeshPlacePanel(viewport->app(), &window);
     QObject::connect(viewport, &shitcad::ViewportWidget::frameBuilt, meshPlace, &shitcad::MeshPlacePanel::refresh);
 

@@ -20,6 +20,7 @@ enum class UndoActionType : uint8_t {
     ModifyBoolean,
     ModifyMeshImport,
     ModifySimulation,
+    ModifyCadImport,
 };
 
 struct UndoCommand {
@@ -63,6 +64,10 @@ struct UndoCommand {
     // ModifyMeshImport (unit, placement)
     MeshImportFeatureData oldMeshImport;
     MeshImportFeatureData newMeshImport;
+
+    // ModifyCadImport (placement, file)
+    CadImportFeatureData oldCadImport;
+    CadImportFeatureData newCadImport;
 
     // ModifySimulation (whole set-up: nozzles, roles, run settings)
     SimulationSetup oldSimulation;

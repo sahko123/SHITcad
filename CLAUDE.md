@@ -32,7 +32,7 @@ The `App` class is large and split across multiple .cpp files by responsibility:
 |------|---------|
 | `App.cpp` | `init()`, `frame()`, `paint()`, `post()`, `shutdown()`, `renderFrame()`, camera, navigation input |
 | `AppSketch.cpp` | `handleSketchInput()`, `handleToolAction()`, `handleSelection()`, `handleDrag()`, constraint application, the inline value box's model |
-| `AppUI.cpp` | Panel models and operations: toolbar (`toolbarModel()`/`perform()`), preferences, mesh import and placement, plane dialogs, object tree, timeline; save/open/export, global undo |
+| `AppUI.cpp` | Panel models and operations: toolbar (`toolbarModel()`/`perform()`), preferences, STL / STEP / IGES import and placement, camera framing, plane dialogs, object tree, timeline; save/open/export, global undo |
 | `AppDimension.cpp` | Dimension panel model, `handleDimToolClick()`, `renderDimensions()`, dimension label layout |
 | `AppExtrude.cpp` | Extrude tool: input, panel model, preview, commit, edit |
 | `AppRevolve.cpp` | Revolve tool: input, panel model, preview, commit, edit |
@@ -75,7 +75,7 @@ Newton-Raphson, up to 40 iterations, convergence tolerance 1e-6. Call `solver.so
 `Coincident`, `Horizontal`, `Vertical`, `Distance`, `Radius`, `Diameter`, `PointDistance`, `PointOnLine`, `PointLineDistance`, `EqualLength`, `Perpendicular`, `Parallel`, `Tangent`, `Angle`, `Symmetric`, `Concentric`, `Midpoint`
 
 ### Units and axes
-The 3D viewport is **Y-up**: the ground plane is XZ at y = 0 and the orbit camera's up is +Y. The grid shows only while the view looks straight along an axis (`OrbitCamera::viewAxis()`, e.g. after numpad 1/3/7), in the plane facing the camera, as a backdrop that writes no depth. (The "XY Plane" reference plane is vertical.) STL from most CAD packages, Onshape included, is Z-up and lands on its side until rotated. Simulation exports declare `"up": [0, 1, 0]` rather than converting.
+The 3D viewport is **Y-up**: the ground plane is XZ at y = 0 and the orbit camera's up is +Y. The grid shows only while the view looks straight along an axis (`OrbitCamera::viewAxis()`, e.g. after numpad 1/3/7), in the plane facing the camera, as a backdrop that writes no depth. (The "XY Plane" reference plane is vertical.) STL from most CAD packages, Onshape included, is Z-up and lands on its side until rotated; the STEP / IGES import dialog asks for the file's up axis (Z by default) and rotates it upright. Simulation exports declare `"up": [0, 1, 0]` rather than converting.
 
 All internal values are in **millimeters**. `UnitUtils.h` handles parsing/formatting with 11 unit types. `Constraint::value` is always in mm; `Constraint::inputUnit` and `inputValue` preserve the user's original input.
 
@@ -91,7 +91,7 @@ Global undo stack with typed commands: `AddFeature`, `DeleteFeature`, `SuppressF
 
 ### Rendering pipeline
 - `Viewport3D` - orbit camera (yaw/pitch/distance), orthographic/perspective, ground grid, and the sky/ground background (`drawBackground`, first after the clear; theme colours `skyZenith`/`skyHorizon`/`groundHorizon`/`groundNadir`)
-- `Scene3D` - stores `Body3D` objects (OCCT shape + tessellated mesh and edges on the CPU; VAO/VBO are a cache uploaded lazily by `syncGpu()` when rendering). Adding, replacing and removing bodies never calls GL, so replay/undo/commit need no GL context (the tests run without one); freed buffers are queued and deleted at the next render. `vertexCount` is set when the body is built.
+- `Scene3D` - stores `Body3D` objects (OCCT shape + tessellated mesh and edges on the CPU; VAO/VBO are a cache uploaded lazily by `syncGpu()` when rendering). The tessellation tolerance scales with the part (0.01 mm up to a 50 mm part, then proportional); a shape whose faces are all meshed already is not meshed again, and wireframe edges come from the face mesh's edge polylines, one per edge. Adding, replacing and removing bodies never calls GL, so replay/undo/commit need no GL context (the tests run without one); freed buffers are queued and deleted at the next render. `vertexCount` is set when the body is built.
 - Host boundary: App never calls Qt. The host drives `App::frame(dt, fbW, fbH, input)` then `App::paint()` with the context current, then draws `App::overlay()`; `AppHost` gives App the window title, redraw requests and file dialogs. Everything outside the frame changes App state only through `App::post()`.
 - Viewport input is `App::in_` (`ViewportInput.h`), passed in once per frame with the semantics the handlers were written against: held-key repeat, trickled events (a quick click is seen down, then up), furthest-drag distance. Screen-space drawing over the 3D view is recorded into `App::overlay_` (`Overlay2D.h`) during the frame, including from inside the GL pass, and drawn once after it; its text is measured by the host's function so labels and hit rectangles match what is drawn.
 - `SketchRenderer` - draws sketch geometry, tool previews, selection highlights, dimension labels
@@ -106,6 +106,16 @@ Global undo stack with typed commands: `AddFeature`, `DeleteFeature`, `SuppressF
 - Placement (`MeshTransform`: row-major rotation matrix + translation in mm, `p' = R p + t`) is applied after unit scaling on every replay. The Place panel (opens after import; timeline double-click or right-click "Rotate / Move...") rotates about the mesh's bounding-box centre via `rotateAbout`, applies edits live, and records one `ModifyMeshImport` undo step on Done. Quarter turns from `axisRotation` are exact. An identity transform is not written to the project file.
 - The body it creates is **mesh-only**: `Body3D::shape` is null, `isMeshOnly()` is true, and `sourceFeature` holds the MeshImport's `FeatureID`. `pickFace` cannot see it; use `pickMesh` (`FacePicker.h`).
 - Projects containing a MeshImport are saved as `version: 2`; projects without one stay `version: 1`.
+
+### STEP / IGES imports (`CadImport.h/cpp`)
+- A `FeatureType::CadImport` feature stores the **file path and a placement** (`MeshTransform`), like a MeshImport; there is no unit field, since the file declares its own and OCCT converts it to mm (`XCAFDoc_DocumentTool::SetLengthUnit` on the reader's document).
+- `loadCadFile` reads through the XCAF readers (`STEPCAFControl_Reader` / `IGESCAFControl_Reader`), walks the assembly's leaves with their absolute placements (`XCAFPrs_DocumentExplorer`), and splits each into **one part per solid**, plus one per loose shell and one for loose faces (surface models). Curves and points make no body. Part names and surface colours come from the file (`Body3D::name`, `hasFileColor`/`fileColor`; `Scene3D::resetBodyColors()` restores them after a tool tints bodies).
+- Cached by path + `FileStamp` (size, mtime, sampled hash; shared with the STL cache). **Failures are cached too** (both caches), until the file changes: replay asks on every edit and the Place panel every frame, so an unreadable file must not be re-parsed each time. The parts are **tessellated once in the loader** (parallel inside OCCT, synchronous to the app) at `tessellationDeflection(bounds)`, and replay adds them with `Scene3D::addBody(placeCadShape(...), deflection, /*premeshed*/ true)`. Placement is only a location (`placeCadShape`, a quaternion so the location is never "scaled"), so every replay shares the tessellation: replaying a 1.3 m part costs tens of ms.
+- Unlike a MeshImport the bodies are **B-rep**: booleans, cut extrudes, face picking and export see them. `sourceFeature` holds the CadImport's `FeatureID` and `isMeshOnly()` is false. Simulation ignores them (it only takes MeshImports).
+- Imports replay the model, so they are only allowed when `canImport()` (Navigate, no 3D tool): replay restores every sketch from its last finished snapshot and would discard an unfinished one. Drops are refused otherwise and the dialogs disable Import. An import made while the playhead is rolled back first rolls forward (its own undo step), or the new part would be hidden.
+- Flow: `beginCadImport` reads the file and opens the dialog (errors show there) -> `confirmCadImport` adds the feature, frames the camera on it (`frameBounds`) and opens the Place panel, which handles both import types (`placeTransform` / `setPlaceTransform`; `ModifyCadImport` undo on Done). `importFile` routes by extension (Import menu, files dropped on the viewport). The timeline's "Replace file..." (`replaceImportFile`) repoints either import type.
+- Projects containing a CadImport are saved as `version: 3`, so builds that only know v2 refuse them instead of misreading the feature.
+- OCCT 8 ignores `Interface_Static` for STEP units: set them in `DESTEP_Parameters` (`exportSTEP` does).
 
 ### Simulation workspace (`Simulation.h/cpp`, `AppSimulation.cpp`)
 - Toolbar tabs switch `workspace_` between Model and Simulation (only from Navigate with no 3D tool active). Simulation replaces `handleNavigateInput` with `handleSimulationInput` and shows the Simulation panel.
@@ -137,10 +147,14 @@ Global undo stack with typed commands: `AddFeature`, `DeleteFeature`, `SuppressF
 - **Bounds caches fold vertex positions into the key**, because a moved mesh has an identical vertex count.
 - **Result colours distinguish "no measurement" from "zero"**: NaN and zero are grey, a sprayed-but-unsampled face is amber, and unscored surfaces are muted since the legend's percentages count scored wall only. Categorical colours keep their slot when one fails to parse.
 
+### Body identity
+- Every body replay creates carries `Body3D::sourceFeature` + `sourceIndex`: the feature that created it and which of its bodies it is (solid *i* of an import, the NewBody of an extrude, split *j* of a cut or Boolean). A body a later feature joins or cuts keeps its identity. Set it with `tagBody` in `FeatureReplay.cpp` whenever replay adds a body; `Scene3D::findBody` looks one up.
+- Booleans store their bodies as `BodyRef`s (`targetBody` / `toolBody`) and resolve them by identity, because indices shift whenever an earlier feature makes a different number of bodies (a re-exported STEP with one more solid used to retarget every later Boolean silently). A missing body is an error on the Boolean. `targetBodyIndex` / `toolBodyIndex` are only read for projects saved before identities (replay then records the refs) and are still written, kept current, for older builds. The result of a Boolean is always the target (identity, name, colour), wherever the tool sits in the list.
+
 ### File I/O (`Serialization.h/cpp`)
 - Project format: JSON (nlohmann/json), stores full feature history + plane definitions
 - Export: STL, STEP, IGES, OBJ, DXF (via OCCT)
-- Import: STL (as a MeshImport feature, above), STEP, IGES
+- Import: STL (a MeshImport feature), STEP and IGES (a CadImport feature), both above; also by dropping a file on the viewport
 - File dialogs go through `AppHost::chooseFile` (`FileDialogs.h` lists them): `QFileDialog`, native on Windows, with Unicode paths.
 
 ## Conventions
@@ -210,4 +224,4 @@ Global undo stack with typed commands: `AddFeature`, `DeleteFeature`, `SuppressF
 - The `App` class `.cpp` files all share the same `App::` method scope - a method declared in `App.h` can be defined in any of the `App*.cpp` files
 - When adding new serialization fields, maintain backward compatibility with existing project files (check for key existence before reading)
 - Any loop that runs OCCT operations over scene bodies must skip `body.isMeshOnly()` bodies - they have no B-rep. OCCT rejects a null shape rather than crashing, but the failure is logged to the diagnostics file on every replay.
-- Anything added straight to `Scene3D` without a feature is wiped by the next `replayFeatures()` and never saved. STEP and IGES import still do this.
+- Anything added straight to `Scene3D` without a feature is wiped by the next `replayFeatures()` and never saved. That is why every import is a feature.

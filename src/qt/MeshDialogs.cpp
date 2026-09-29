@@ -63,11 +63,15 @@ MeshImportDialog::MeshImportDialog(App& app, QWidget* parent) : QDialog(parent),
     warning_->setStyleSheet("color: #b08000;");
     form->addRow(warning_);
     root->addWidget(form_);
+    blocked_ = new QLabel(this);
+    blocked_->setStyleSheet("color: #b08000;");
+    root->addWidget(blocked_);
 
     App* a = &app_;
     auto* buttons = new QHBoxLayout;
     buttons->addStretch(1);
-    buttons->addWidget(pushButton(this, "Import", [a] { a->post([a] { a->confirmMeshImport(); }); }));
+    import_ = pushButton(this, "Import", [a] { a->post([a] { a->confirmMeshImport(); }); });
+    buttons->addWidget(import_);
     buttons->addWidget(pushButton(this, "Cancel", [a] { a->post([a] { a->cancelMeshImport(); }); }));
     root->addLayout(buttons);
 
@@ -94,6 +98,9 @@ void MeshImportDialog::refresh() {
     error_->setVisible(failed);
     error_->setText(QString::fromStdString(m.error));
     form_->setVisible(!failed);
+    blocked_->setVisible(!failed && !m.blocked.empty());
+    blocked_->setText(QString::fromStdString(m.blocked));
+    import_->setEnabled(!failed && m.blocked.empty());
     if (failed) return;
 
     if (m.path != shownPath_) { // a new file: take App's defaults
@@ -122,6 +129,121 @@ void MeshImportDialog::reject() {
     QDialog::reject();
 }
 
+// ---- STEP / IGES import ------------------------------------------------------
+
+namespace {
+
+QString sizeText(const double ext[3]) {
+    const double big = std::max({ext[0], ext[1], ext[2]});
+    const double s = big >= 1000.0 ? 0.001 : 1.0;
+    return QString("Size: %1 x %2 x %3 %4").arg(ext[0] * s, 0, 'g', 4).arg(ext[1] * s, 0, 'g', 4)
+                                           .arg(ext[2] * s, 0, 'g', 4).arg(big >= 1000.0 ? "m" : "mm");
+}
+
+} // namespace
+
+CadImportDialog::CadImportDialog(App& app, QWidget* parent) : QDialog(parent), app_(app) {
+    setWindowTitle("Import");
+    setModal(false);
+
+    auto* root = new QVBoxLayout(this);
+    path_ = new QLabel(this);
+    path_->setWordWrap(true);
+    root->addWidget(path_);
+
+    error_ = new QLabel(this);
+    error_->setWordWrap(true);
+    error_->setStyleSheet("color: #d05050;");
+    root->addWidget(error_);
+
+    form_ = new QWidget(this);
+    auto* form = new QFormLayout(form_);
+    contents_ = new QLabel(form_);
+    form->addRow(contents_);
+    size_ = new QLabel(form_);
+    form->addRow(size_);
+    warning_ = new QLabel(form_);
+    warning_->setWordWrap(true);
+    warning_->setStyleSheet("color: #b08000;");
+    form->addRow(warning_);
+    name_ = new QLineEdit(form_);
+    form->addRow("Name", name_);
+    up_ = new QComboBox(form_);
+    // This viewport is Y-up. Onshape, Fusion and most CAD export Z-up.
+    up_->addItems({"Z (most CAD: Onshape, Fusion, Inventor)", "Y (SolidWorks, as-is)"});
+    form->addRow("Up axis in the file", up_);
+    root->addWidget(form_);
+    blocked_ = new QLabel(this);
+    blocked_->setStyleSheet("color: #b08000;");
+    root->addWidget(blocked_);
+
+    App* a = &app_;
+    auto* buttons = new QHBoxLayout;
+    buttons->addStretch(1);
+    import_ = pushButton(this, "Import", [a] { a->post([a] { a->confirmCadImport(); }); });
+    buttons->addWidget(import_);
+    buttons->addWidget(pushButton(this, "Cancel", [a] { a->post([a] { a->cancelCadImport(); }); }));
+    root->addLayout(buttons);
+
+    connect(name_, &QLineEdit::textEdited, this, [a](const QString& t) {
+        const std::string s = t.toUtf8().toStdString();
+        a->post([a, s] { a->setCadImportName(s); });
+    });
+    connect(up_, &QComboBox::currentIndexChanged, this, [a](int i) {
+        a->post([a, i] { a->setCadImportZUp(i == 0); });
+    });
+    resize(460, 100);
+}
+
+void CadImportDialog::refresh() {
+    const App::CadImportModel m = app_.cadImportModel();
+    if (m.open != isVisible()) setVisible(m.open);
+    if (!m.open) {
+        shownPath_.clear();
+        return;
+    }
+
+    path_->setText(QString::fromStdString(m.path));
+    const bool failed = !m.error.empty();
+    error_->setVisible(failed);
+    error_->setText(QString::fromStdString(m.error));
+    form_->setVisible(!failed);
+    blocked_->setVisible(!failed && !m.blocked.empty());
+    blocked_->setText(QString::fromStdString(m.blocked));
+    import_->setEnabled(!failed && m.blocked.empty());
+    if (failed) {
+        adjustSize();
+        return;
+    }
+
+    if (m.path != shownPath_) { // a new file: take App's defaults
+        shownPath_ = m.path;
+        const QSignalBlocker b1(name_), b2(up_);
+        name_->setText(QString::fromStdString(m.name));
+        up_->setCurrentIndex(m.zUp ? 0 : 1);
+    }
+    setWindowTitle(QString("Import %1").arg(QString::fromStdString(m.format)));
+    QString what;
+    if (m.solids) what += QString("%1 solid%2").arg(m.solids).arg(m.solids == 1 ? "" : "s");
+    if (m.surfaces) {
+        if (!what.isEmpty()) what += ", ";
+        what += QString("%1 surface body%2").arg(m.surfaces).arg(m.surfaces == 1 ? "" : "s");
+    }
+    if (!m.fileUnit.empty()) what += QString("  (file unit: %1, converted to mm)").arg(QString::fromStdString(m.fileUnit));
+    contents_->setText(what);
+    size_->setText(sizeText(m.extMm));
+    warning_->setVisible(m.skippedWires > 0);
+    if (m.skippedWires > 0)
+        warning_->setText("The file also has curves or points; they make no body and are left out.");
+    adjustSize();
+}
+
+void CadImportDialog::reject() {
+    App* a = &app_;
+    app_.post([a] { a->cancelCadImport(); });
+    QDialog::reject();
+}
+
 // ---- placement ---------------------------------------------------------------
 
 MeshPlacePanel::MeshPlacePanel(App& app, QWidget* parent) : QDialog(parent), app_(app) {
@@ -139,11 +261,13 @@ MeshPlacePanel::MeshPlacePanel(App& app, QWidget* parent) : QDialog(parent), app
     form_ = new QWidget(this);
     auto* col = new QVBoxLayout(form_);
     {
-        auto* row = new QHBoxLayout;
-        row->addWidget(new QLabel("File unit", form_));
-        unit_ = unitCombo(form_);
+        unitRow_ = new QWidget(form_);
+        auto* row = new QHBoxLayout(unitRow_);
+        row->setContentsMargins(0, 0, 0, 0);
+        row->addWidget(new QLabel("File unit", unitRow_));
+        unit_ = unitCombo(unitRow_);
         row->addWidget(unit_, 1);
-        col->addLayout(row);
+        col->addWidget(unitRow_);
     }
     size_ = new QLabel(form_);
     bottom_ = new QLabel(form_);
@@ -169,7 +293,7 @@ MeshPlacePanel::MeshPlacePanel(App& app, QWidget* parent) : QDialog(parent), app
     }
     // This viewport is Y-up. CAD packages including Onshape export Z-up, which
     // lands on its side here; Rx(-90) takes +Z to +Y.
-    col->addWidget(pushButton(form_, "Z-up file (Onshape) -> stand upright",
+    col->addWidget(pushButton(form_, "Z-up file -> stand upright",
                               [a] { a->post([a] { a->meshPlaceRotate(0, -90.0); }); }));
     {
         auto* row = new QHBoxLayout;
@@ -259,7 +383,8 @@ void MeshPlacePanel::refresh() {
     bottom_->setText(QString("Bottom at Y = %1 %2").arg(m.lo[1] * s, 0, 'g', 4).arg(su));
 
     const QSignalBlocker b1(unit_), b2(angle_), b3(angleAxis_);
-    unit_->setCurrentIndex(m.unitIndex);
+    unitRow_->setVisible(m.hasUnit);
+    if (m.hasUnit) unit_->setCurrentIndex(m.unitIndex);
     if (!angle_->hasFocus()) angle_->setValue(m.angleDeg);
     angleAxis_->setCurrentIndex(m.angleAxis);
     for (int i = 0; i < 3; i++) {

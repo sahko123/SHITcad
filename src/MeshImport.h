@@ -1,5 +1,7 @@
 #pragma once
 #include "Scene3D.h"
+#include <cstdint>
+#include <filesystem>
 #include <string>
 #include <vector>
 
@@ -61,6 +63,16 @@ bool trianglesAreClosed(const float* xyz, size_t triangles);
 // picked up automatically on the next replay.
 bool loadMeshFile(const std::string& path, const std::string& unit,
                   std::vector<MeshVertex>& outMm, MeshFileInfo& info, std::string& error);
+
+// Identity of a file for the import caches: size, modification time and a
+// hash of samples of its bytes. Size + mtime alone collide - see readCached.
+struct FileStamp {
+    uintmax_t size = 0;
+    std::filesystem::file_time_type mtime{};
+    uint64_t hash = 0;
+    bool operator==(const FileStamp& o) const { return size == o.size && mtime == o.mtime && hash == o.hash; }
+};
+bool stampFile(const std::string& path, FileStamp& out, std::string& error);
 
 // Size and triangle count without scaling - for showing the user what a unit
 // choice would mean before committing to it.

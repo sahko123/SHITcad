@@ -24,13 +24,12 @@ const std::string& lastLoadError();
 
 
 bool exportSTL(const std::string& filepath, const Scene3D& scene);
-// STL import is a MeshImport feature (see FeatureHistory.h / App::beginMeshImport),
-// not a direct scene insertion: a body added straight to the scene is wiped by
-// the next replay and never saved.
+// Imports are features, not direct scene insertions (a body added straight to
+// the scene is wiped by the next replay and never saved): STL is a MeshImport
+// (App::beginMeshImport), STEP and IGES a CadImport (CadImport.h,
+// App::beginCadImport).
 bool exportSTEP(const std::string& filepath, const Scene3D& scene);
-bool importSTEP(const std::string& filepath, Scene3D& scene);
 bool exportIGES(const std::string& filepath, const Scene3D& scene);
-bool importIGES(const std::string& filepath, Scene3D& scene);
 bool exportOBJ(const std::string& filepath, const Scene3D& scene);
 bool exportDXF(const std::string& filepath, const Sketch& sketch);
 

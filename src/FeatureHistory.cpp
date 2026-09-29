@@ -197,6 +197,23 @@ void FeatureHistory::updateMeshImportData(FeatureID id, const MeshImportFeatureD
     std::get<MeshImportFeatureData>(f->data) = data;
 }
 
+FeatureID FeatureHistory::addCadImportFeature(const CadImportFeatureData& params,
+                                              const std::string& name) {
+    Feature f;
+    f.id = nextID_++;
+    f.type = FeatureType::CadImport;
+    f.name = name; // the file stem, like a mesh import
+    f.data = params;
+    features_.push_back(std::move(f));
+    return features_.back().id;
+}
+
+void FeatureHistory::updateCadImportData(FeatureID id, const CadImportFeatureData& data) {
+    Feature* f = findFeature(id);
+    if (!f || f->type != FeatureType::CadImport) return;
+    std::get<CadImportFeatureData>(f->data) = data;
+}
+
 FeatureID FeatureHistory::addLoftFeature(const LoftFeatureData& params) {
     Feature f;
     f.id = nextID_++;

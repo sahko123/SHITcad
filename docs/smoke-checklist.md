@@ -24,6 +24,7 @@ must work from both.
       `4`/`6`/`8`/`2` orbit 15° and return an axis view to perspective (so does
       middle-drag), but not after `5` or `O` chose ortho; `Ctrl` + those pan; `9` flips to
       the opposite side; `+`/`-` zoom.
+- [ ] `Home` (the main keyboard's, not the keypad's) frames the whole model, animated.
 - [ ] The background is sky above a horizon and ground below; orbiting moves the horizon
       (level views put it through the centre), in both themes and in ortho too.
 - [ ] The grid shows only in axis views, in the plane facing you (front XY, right YZ,
@@ -89,9 +90,9 @@ must work from both.
 ## 5. Timeline, history and undo
 
 - [ ] Drag the playhead: the model rolls back live; releasing records one undo step.
-- [ ] Double-click a feature to edit it (sketch, extrude, revolve, loft, mesh placement).
+- [ ] Double-click a feature to edit it (sketch, extrude, revolve, loft, import placement).
 - [ ] Right-click a feature: rename, suppress/unsuppress, delete (dependents go with it),
-      Rotate / Move for mesh imports.
+      Rotate / Move and Replace file... for imports (STL, STEP, IGES).
 - [ ] `Delete` on a selected timeline feature deletes it.
 - [ ] Global undo/redo in Navigate (`Ctrl+Z`, `Ctrl+Y`, `Ctrl+Shift+Z`) steps through
       feature adds, deletes, suppresses, edits, renames, mesh placement and simulation edits.
@@ -117,7 +118,32 @@ must work from both.
       ground. Done records one undo step; Cancel restores.
 - [ ] Hovering an imported mesh shows the pick readout; it does not show while the cursor
       is over the toolbar or a panel.
-- [ ] Import STEP and IGES.
+- [ ] Import STEP and IGES (toolbar Import menu, or drop the file on the view): the dialog
+      shows the format, the file's unit, the solid / surface counts and the size in mm,
+      and an up-axis choice (Z by default). An unreadable file shows its error there.
+- [ ] After Import the camera frames the part and the Place panel opens (no unit row for
+      STEP / IGES). A Z-up part stands the right way up; a flat plate lies on the ground.
+- [ ] A STEP import survives what used to wipe it: undo/redo, an extrude, finishing a
+      sketch, dragging the playhead, saving and reopening. Undo removes it in one step.
+- [ ] Imported solids are real bodies: a cut extrude cuts one, Boolean works on it, a face
+      of it can be sketched on, and STEP / STL export includes it.
+- [ ] An assembly STEP imports every part, with the file's colours; the object tree
+      lists them as "feature: part". A Boolean's tint clears back to those colours.
+- [ ] Rename or move the STEP file: the feature turns red with "File not found"; Replace
+      file... points it at the new path (one undo step). Re-exporting the file in place
+      is picked up on the next edit.
+- [ ] A large STEP (e.g. 1 m across) imports in seconds, and editing afterwards is not
+      slowed by it.
+- [ ] While sketching, or with Extrude / Revolve / Loft / Boolean running, a STEP dropped on
+      the view shows the no-drop cursor, and an open import dialog's Import button is
+      disabled with "Finish the sketch or the active tool first".
+- [ ] With the playhead rolled back, importing moves it to the end (one extra undo step)
+      and the part is visible.
+- [ ] Boolean between an extrude and an imported part, then re-export the STEP with an
+      extra solid: the Boolean still acts on the same two bodies. Suppress one of them:
+      the Boolean turns red with "... body no longer exists".
+- [ ] Replace a referenced STEP with an unreadable file while its Place panel is open:
+      the panel shows the error and the app stays responsive.
 - [ ] Export STL (`Ctrl+E` in Navigate), STEP, IGES, OBJ, DXF (from a sketch).
 
 ## 8. Simulation workspace
