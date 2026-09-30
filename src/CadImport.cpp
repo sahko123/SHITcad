@@ -30,6 +30,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdint>
 #include <cmath>
 #include <map>
 #include <memory>
@@ -73,9 +74,31 @@ struct CachedCad {
     CadFileInfo info;
 };
 
-std::map<std::string, std::shared_ptr<const CachedCad>>& cache() {
-    static std::map<std::string, std::shared_ptr<const CachedCad>> c;
+// Each entry holds every part's B-rep and its triangulation, which is large for
+// a real assembly, so the cache is bounded: the kMaxCachedFiles most recently
+// used files stay, the rest are re-read when asked for again. Replay touches
+// every import in a project each time, so a project stays cached as long as it
+// has no more imports than that.
+constexpr size_t kMaxCachedFiles = 8;
+
+struct CacheSlot {
+    std::shared_ptr<const CachedCad> entry;
+    uint64_t lastUse = 0;
+};
+
+std::map<std::string, CacheSlot>& cache() {
+    static std::map<std::string, CacheSlot> c;
     return c;
+}
+
+void evictOldest(std::map<std::string, CacheSlot>& c, const std::string& keep) {
+    while (c.size() > kMaxCachedFiles) {
+        auto oldest = c.end();
+        for (auto it = c.begin(); it != c.end(); ++it)
+            if (it->first != keep && (oldest == c.end() || it->second.lastUse < oldest->second.lastUse)) oldest = it;
+        if (oldest == c.end()) return;
+        c.erase(oldest);
+    }
 }
 
 std::string labelName(const TDF_Label& label) {
@@ -146,6 +169,15 @@ bool readFile(const std::string& path, CachedCad& out, std::string& error) {
     Handle(XCAFApp_Application) app = XCAFApp_Application::GetApplication();
     Handle(TDocStd_Document) doc;
     app->NewDocument("MDTV-XCAF", doc);
+    // Closed on every way out, including an OCCT exception unwinding to
+    // loadCadFile: the document holds the whole transferred model.
+    struct DocGuard {
+        Handle(XCAFApp_Application) app;
+        Handle(TDocStd_Document) doc;
+        bool open = true;
+        void close() { if (open) { app->Close(doc); open = false; } }
+        ~DocGuard() { close(); }
+    } guard{app, doc};
     // Everything in SHITcad is mm; the readers convert from the file's unit
     // to the document's.
     XCAFDoc_DocumentTool::SetLengthUnit(doc, 1.0, UnitsMethods_LengthUnit_Millimeter);
@@ -159,7 +191,6 @@ bool readFile(const std::string& path, CachedCad& out, std::string& error) {
         reader.SetLayerMode(false);
         if (reader.ReadFile(path.c_str()) != IFSelect_RetDone) {
             error = "Not a readable IGES file: " + path;
-            app->Close(doc);
             return false;
         }
         Handle(IGESData_IGESModel) model = reader.IGESModel();
@@ -167,7 +198,6 @@ bool readFile(const std::string& path, CachedCad& out, std::string& error) {
             out.info.fileUnit = lowerUnit(model->GlobalSection().UnitName()->ToCString());
         if (!reader.Transfer(doc)) {
             error = "Could not convert the IGES file to shapes: " + path;
-            app->Close(doc);
             return false;
         }
     } else {
@@ -179,7 +209,6 @@ bool readFile(const std::string& path, CachedCad& out, std::string& error) {
         reader.SetPropsMode(false);
         if (reader.ReadFile(path.c_str()) != IFSelect_RetDone) {
             error = "Not a readable STEP file: " + path;
-            app->Close(doc);
             return false;
         }
         NCollection_Sequence<TCollection_AsciiString> lengths, angles, solidAngles;
@@ -187,7 +216,6 @@ bool readFile(const std::string& path, CachedCad& out, std::string& error) {
         if (!lengths.IsEmpty()) out.info.fileUnit = lowerUnit(lengths.First().ToCString());
         if (!reader.Transfer(doc)) {
             error = "Could not convert the STEP file to shapes: " + path;
-            app->Close(doc);
             return false;
         }
     }
@@ -203,7 +231,7 @@ bool readFile(const std::string& path, CachedCad& out, std::string& error) {
         if (name.empty()) name = labelName(node.Label);
         splitIntoParts(shape, name, node.Style, out.parts, out.info);
     }
-    app->Close(doc);
+    guard.close(); // the shapes outlive it; meshing below does not need it
 
     if (out.parts.empty()) {
         error = out.info.skippedWires
@@ -240,8 +268,10 @@ bool loadCadFile(const std::string& path, std::vector<CadPart>& parts, CadFileIn
                  std::string& error) {
     FileStamp stamp;
     if (!stampFile(path, stamp, error)) return false;
-    auto it = cache().find(path);
-    if (it == cache().end() || !(it->second->stamp == stamp)) {
+    static uint64_t tick = 0;
+    auto& c = cache();
+    auto it = c.find(path);
+    if (it == c.end() || !(it->second.entry->stamp == stamp)) {
         auto entry = std::make_shared<CachedCad>();
         entry->stamp = stamp;
         // OCCT reports malformed files by throwing; nothing above this line does.
@@ -255,14 +285,17 @@ bool loadCadFile(const std::string& path, std::vector<CadPart>& parts, CadFileIn
         // edit and the Place panel on every frame, and re-parsing a broken
         // 50 MB STEP each time froze the app.
         if (!entry->error.empty()) entry->parts.clear();
-        it = cache().insert_or_assign(path, entry).first;
+        it = c.insert_or_assign(path, CacheSlot{entry, 0}).first;
     }
-    if (!it->second->error.empty()) {
-        error = it->second->error;
+    it->second.lastUse = ++tick;
+    const std::shared_ptr<const CachedCad> hit = it->second.entry; // survives the eviction below
+    evictOldest(c, path);
+    if (!hit->error.empty()) {
+        error = hit->error;
         return false;
     }
-    parts = it->second->parts;
-    info = it->second->info;
+    parts = hit->parts;
+    info = hit->info;
     return true;
 }
 

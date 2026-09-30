@@ -42,6 +42,7 @@ struct Body3D {
     std::string name;          // part name from an imported file, else empty
     bool hasFileColor = false; // colour from an imported file, restored by resetBodyColors()
     float fileColor[3] = {0, 0, 0};
+    double deflection = 0.0;   // tessellation tolerance (mm) it was built with; replaceBody keeps it
 
     bool isMeshOnly() const { return shape.IsNull(); }
 
@@ -68,6 +69,7 @@ struct Body3D {
           closed(other.closed),
           name(std::move(other.name)), hasFileColor(other.hasFileColor),
           fileColor{other.fileColor[0], other.fileColor[1], other.fileColor[2]},
+          deflection(other.deflection),
           edgeVAO(other.edgeVAO), edgeVBO(other.edgeVBO), edgeVertexCount(other.edgeVertexCount) {
         other.vao = 0; other.vbo = 0;
         other.edgeVAO = 0; other.edgeVBO = 0;
@@ -96,6 +98,7 @@ struct Body3D {
             name = std::move(other.name);
             hasFileColor = other.hasFileColor;
             for (int i = 0; i < 3; i++) fileColor[i] = other.fileColor[i];
+            deflection = other.deflection;
             edgeVAO = other.edgeVAO; edgeVBO = other.edgeVBO; edgeVertexCount = other.edgeVertexCount;
             // Zero source
             other.vao = 0; other.vbo = 0;

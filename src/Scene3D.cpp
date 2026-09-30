@@ -208,6 +208,7 @@ void Scene3D::addBody(const TopoDS_Shape& shape, double deflection, bool premesh
     const auto& bc = activeTheme().bodyColor;
     body.colorR = bc[0]; body.colorG = bc[1]; body.colorB = bc[2];
     deflection = autoDeflection(shape, deflection);
+    body.deflection = deflection;
     triangulateShape(shape, body.vertices, deflection, premeshed);
     extractEdges(shape, body.edges, deflection);
     body.vertexCount = (int)body.vertices.size();
@@ -232,8 +233,13 @@ void Scene3D::replaceBody(int index, const TopoDS_Shape& newShape) {
     b.shape = newShape;
     b.vertices.clear();
     b.edges.clear();
-    triangulateShape(newShape, b.vertices);
-    extractEdges(newShape, b.edges);
+    // At the tolerance the body was built with: faces the operation left alone
+    // keep a triangulation that already satisfies it, so BRepMesh skips them and
+    // only the new faces are meshed. A different tolerance (say, from the
+    // result's own bounds) would redo every face of a large import and rewrite
+    // the triangulation it shares with the file cache.
+    triangulateShape(newShape, b.vertices, b.deflection);
+    extractEdges(newShape, b.edges, b.deflection);
     b.vertexCount = (int)b.vertices.size();
     b.edgeVertexCount = (int)b.edges.size();
     b.gpuDirty = true;

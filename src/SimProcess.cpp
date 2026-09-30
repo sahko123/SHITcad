@@ -107,14 +107,20 @@ bool ProcessRunner::start(const std::vector<std::string>& argv, const std::strin
         if (job) {
             JOBOBJECT_EXTENDED_LIMIT_INFORMATION info = {};
             info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
-            SetInformationJobObject(job, JobObjectExtendedLimitInformation, &info, sizeof(info));
-            AssignProcessToJobObject(job, pi.hProcess);
-            job_ = job;
+            // Either call can fail (an enclosing job that forbids nesting, say).
+            // Then the job protects nothing, so drop it: closeAll() falls back
+            // to terminating the child itself.
+            if (SetInformationJobObject(job, JobObjectExtendedLimitInformation, &info, sizeof(info)) &&
+                AssignProcessToJobObject(job, pi.hProcess))
+                job_ = job;
+            else
+                CloseHandle(job);
         }
         ResumeThread(pi.hThread);
     }
     CloseHandle(pi.hThread);
 
+    killWithApp_ = killWithApp;
     process_ = pi.hProcess;
     outRead_ = outR;
     errRead_ = errR;
@@ -179,7 +185,15 @@ void ProcessRunner::cancel() {
 void ProcessRunner::closeAll() {
     if (outRead_) { CloseHandle((HANDLE)outRead_); outRead_ = nullptr; }
     if (errRead_) { CloseHandle((HANDLE)errRead_); errRead_ = nullptr; }
-    if (process_) { CloseHandle((HANDLE)process_); process_ = nullptr; }
+    if (process_) {
+        // No job to do it: end the child directly (its own children are not
+        // reached, but the engine itself no longer outlives the app).
+        if (killWithApp_ && !job_ && WaitForSingleObject((HANDLE)process_, 0) == WAIT_TIMEOUT)
+            TerminateProcess((HANDLE)process_, 1);
+        CloseHandle((HANDLE)process_);
+        process_ = nullptr;
+    }
+    killWithApp_ = false;
     // Closing the job kills anything still in it - the point of killWithApp.
     if (job_) { CloseHandle((HANDLE)job_); job_ = nullptr; }
 }

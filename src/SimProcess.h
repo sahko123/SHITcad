@@ -43,6 +43,7 @@ private:
     void* job_ = nullptr;
     void* outRead_ = nullptr;
     void* errRead_ = nullptr;
+    bool killWithApp_ = false;
     bool running_ = false;
     bool finished_ = false;
     int exitCode_ = 0;
