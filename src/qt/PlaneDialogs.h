@@ -1,0 +1,68 @@
+#pragma once
+#include "App.h"
+
+#include <QDialog>
+
+#undef near
+#undef far
+
+class QDoubleSpinBox;
+class QLabel;
+class QLineEdit;
+class QPushButton;
+class QRadioButton;
+class QSlider;
+class QVBoxLayout;
+
+namespace shitcad {
+
+// Qt front end for AddPlaneModel: a reference plane offset from another
+// plane, or from a face picked in the viewport.
+class AddPlaneDialog : public QDialog {
+    Q_OBJECT
+public:
+    AddPlaneDialog(App& app, QWidget* parent = nullptr);
+    void refresh();
+
+protected:
+    // Escape and the window's X both land here; App is told, or the next
+    // refresh would show the dialog again.
+    void reject() override;
+
+private:
+    void rebuildSources(const App::AddPlaneModel& m);
+
+    App& app_;
+    QRadioButton* fromPlane_ = nullptr;
+    QRadioButton* fromFace_ = nullptr;
+    QWidget* sourceList_ = nullptr;
+    QVBoxLayout* sourceLayout_ = nullptr;
+    std::vector<QRadioButton*> sources_;   // parallel to the model's sources
+    QLabel* faceState_ = nullptr;
+    QLineEdit* offset_ = nullptr;
+    QLineEdit* name_ = nullptr;
+    QPushButton* create_ = nullptr;
+    size_t shownSources_ = 0;
+};
+
+// Qt front end for TangentPlaneModel: a plane tangent to a cylinder, at an
+// angle from the clicked point. Create also starts a sketch on it.
+class TangentPlaneDialog : public QDialog {
+    Q_OBJECT
+public:
+    TangentPlaneDialog(App& app, QWidget* parent = nullptr);
+    void refresh();
+
+protected:
+    // Escape and the window's X both land here; App is told, or the next
+    // refresh would show the dialog again.
+    void reject() override;
+
+private:
+    App& app_;
+    QLineEdit* name_ = nullptr;
+    QDoubleSpinBox* angle_ = nullptr;
+    QSlider* slider_ = nullptr;
+};
+
+} // namespace shitcad

@@ -13,11 +13,6 @@
 #include <TopoDS_Solid.hxx>
 
 #include <glad/gl.h>
-#include <GLFW/glfw3.h>
-#include <imgui.h>
-#include <imgui_internal.h>
-#include <imgui_impl_glfw.h>
-#include <imgui_impl_opengl3.h>
 #include <cstdio>
 #include <cmath>
 #include <algorithm>
@@ -97,19 +92,18 @@ void App::enterExtrudeMode() {
 
 void App::handleExtrudeInput(float vpW, float vpH) {
     if (!hasExtrudeSketch()) return;
-    ImGuiIO& io = ImGui::GetIO();
 
     const SketchPlane& plane = extrudePlane();
 
     // Project mouse to sketch plane
-    if (!io.WantCaptureMouse) {
+    {
         int w, h;
-        glfwGetFramebufferSize(window_, &w, &h);
+        framebufferSize(w, h);
         float view[16], proj[16];
         getViewProj(w, h, view, proj);
 
         float rayOrig[3], rayDir[3];
-        screenToRay(io.MousePos.x, io.MousePos.y, 0, 0, vpW, vpH, view, proj, rayOrig, rayDir);
+        screenToRay(in_.mouseX, in_.mouseY, 0, 0, vpW, vpH, view, proj, rayOrig, rayDir);
 
         float lx, ly, t;
         if (plane.rayIntersect(rayOrig, rayDir, lx, ly, t)) {
@@ -118,24 +112,21 @@ void App::handleExtrudeInput(float vpW, float vpH) {
     }
 
     // Keyboard
-    if (!io.WantCaptureKeyboard) {
-        if (ImGui::IsKeyPressed(ImGuiKey_Escape)) {
-            cancelExtrude();
+    if (in_.keyPressed(Key::Escape)) {
+        cancelExtrude();
+        return;
+    }
+    if (in_.keyPressed(Key::Enter) || in_.keyPressed(Key::KeypadEnter)) {
+        if (extrudeTool_.hasSelectedProfiles()) {
+            commitExtrude();
             return;
-        }
-        if (ImGui::IsKeyPressed(ImGuiKey_Enter) || ImGui::IsKeyPressed(ImGuiKey_KeypadEnter)) {
-            if (extrudeTool_.hasSelectedProfiles()) {
-                commitExtrude();
-                return;
-            }
         }
     }
 
-    if (io.WantCaptureMouse) return;
 
     // Profile selection: click to toggle (disabled during handle drag)
     if (!extrudeTool_.isDragging) {
-        if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+        if (in_.mouseClicked(MouseButton::Left)) {
             int hitIdx = hitTestProfile(extrudeSketch(), extrudeTool_.allProfiles, cursorLocal_,
                                         extrudeTool_.renderCache);
             if (hitIdx >= 0) {
@@ -150,10 +141,10 @@ void App::handleExtrudeInput(float vpW, float vpH) {
 
     // Drag handle hit test: only start drag when clicking near the handle arrow tip
     if (extrudeTool_.hasSelectedProfiles() && !extrudeTool_.isDragging &&
-        extrudeTool_.handleVisible && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+        extrudeTool_.handleVisible && in_.mouseClicked(MouseButton::Left)) {
         // Compute handle tip position in screen space
         int w, h;
-        glfwGetFramebufferSize(window_, &w, &h);
+        framebufferSize(w, h);
         float view[16], proj[16];
         getViewProj(w, h, view, proj);
 
@@ -165,13 +156,13 @@ void App::handleExtrudeInput(float vpW, float vpH) {
         };
         float tipSx, tipSy;
         if (worldToScreen(tipWorld, view, proj, vpW, vpH, tipSx, tipSy)) {
-            float dx = io.MousePos.x - tipSx;
-            float dy = io.MousePos.y - tipSy;
+            float dx = in_.mouseX - tipSx;
+            float dy = in_.mouseY - tipSy;
             float handleRadius = 20.0f; // pixels
             if (dx*dx + dy*dy < handleRadius * handleRadius) {
                 extrudeTool_.isDragging = true;
-                extrudeTool_.dragStartMouseX = io.MousePos.x;
-                extrudeTool_.dragStartMouseY = io.MousePos.y;
+                extrudeTool_.dragStartMouseX = in_.mouseX;
+                extrudeTool_.dragStartMouseY = in_.mouseY;
                 extrudeTool_.dragStartHeight = extrudeTool_.height;
             }
         }
@@ -181,7 +172,7 @@ void App::handleExtrudeInput(float vpW, float vpH) {
     if (extrudeTool_.isDragging) {
         // Compute pixels-per-unit along the extrude normal for 1:1 screen mapping
         int w, h;
-        glfwGetFramebufferSize(window_, &w, &h);
+        framebufferSize(w, h);
         float view[16], proj[16];
         getViewProj(w, h, view, proj);
 
@@ -203,8 +194,8 @@ void App::handleExtrudeInput(float vpW, float vpH) {
         }
 
         // Mouse delta projected onto the normal's screen direction
-        float mouseDx = io.MousePos.x - extrudeTool_.dragStartMouseX;
-        float mouseDy = io.MousePos.y - extrudeTool_.dragStartMouseY;
+        float mouseDx = in_.mouseX - extrudeTool_.dragStartMouseX;
+        float mouseDy = in_.mouseY - extrudeTool_.dragStartMouseY;
 
         // Screen direction of the normal (base → tip)
         float tipAtStart[3] = {
@@ -239,111 +230,59 @@ void App::handleExtrudeInput(float vpW, float vpH) {
     }
 
     // End drag — force final preview rebuild
-    if (extrudeTool_.isDragging && ImGui::IsMouseReleased(ImGuiMouseButton_Left)) {
+    if (extrudeTool_.isDragging && in_.mouseReleased(MouseButton::Left)) {
         extrudeTool_.isDragging = false;
         extrudeTool_.previewDirty = true;
     }
 
     // Right click: cancel
-    if (ImGui::IsMouseClicked(ImGuiMouseButton_Right)) {
+    if (in_.mouseClicked(MouseButton::Right)) {
         cancelExtrude();
     }
 }
 
-void App::drawExtrudePanel() {
-    ImGuiIO& io = ImGui::GetIO();
-    float panelW = 220.0f;
+App::ExtrudePanelModel App::extrudePanelModel() const {
+    ExtrudePanelModel m;
+    m.open = tool_.type == ToolType::Extrude && hasExtrudeSketch();
+    if (!m.open) return m;
+    m.operation = (int)extrudeTool_.operation;
+    m.cutAllowed = !scene_.empty();
+    m.distanceText = extrudeTool_.heightBuf;
+    m.offsetText = extrudeTool_.offsetBuf;
+    m.direction = (int)extrudeTool_.direction;
+    m.selectedProfiles = (int)extrudeTool_.selectedProfileIndices.size();
+    m.totalProfiles = (int)extrudeTool_.allProfiles.size();
+    m.canCommit = extrudeTool_.hasSelectedProfiles();
+    return m;
+}
 
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, {10, 10});
-    ImGui::SetNextWindowPos({io.DisplaySize.x - panelW, 30});
-    ImGui::SetNextWindowSize({panelW, 0});
-    ImGui::Begin("Extrude", nullptr,
-        ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
-        ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_AlwaysAutoResize);
+void App::setExtrudeOperation(int op) {
+    if (op == (int)ExtrudeOperation::Cut && scene_.empty()) return;   // nothing to cut
+    extrudeTool_.operation = (ExtrudeOperation)op;
+    extrudeTool_.previewDirty = true;
+}
 
-    // Operation
-    ImGui::Text("Operation:");
-    const char* opNames[] = {"New Body", "Cut"};
-    int opIdx = (int)extrudeTool_.operation;
-    bool cutDisabled = (extrudeTool_.operation != ExtrudeOperation::Cut && scene_.empty());
-    if (cutDisabled) {
-        // Can't switch to Cut if no bodies exist — but allow if already Cut
-    }
-    if (ImGui::Combo("##op", &opIdx, opNames, 2)) {
-        if (opIdx == (int)ExtrudeOperation::Cut && scene_.empty()) {
-            // Don't allow Cut when no bodies
-        } else {
-            extrudeTool_.operation = (ExtrudeOperation)opIdx;
-            extrudeTool_.previewDirty = true;
-        }
-    }
-
-    // Distance
-    ImGui::Text("Distance:");
-    if (ImGui::InputText("##dist", extrudeTool_.heightBuf, sizeof(extrudeTool_.heightBuf),
-            ImGuiInputTextFlags_EnterReturnsTrue)) {
-        float val = (float)atof(extrudeTool_.heightBuf);
-        if (val > 0.001f) {
-            extrudeTool_.height = val;
-            extrudeTool_.previewDirty = true;
-        } else {
-            // Revert to last valid value
-            snprintf(extrudeTool_.heightBuf, sizeof(extrudeTool_.heightBuf), "%.3f", extrudeTool_.height);
-        }
-    }
-    // Also sync on deactivation (user tabs away or clicks elsewhere)
-    if (ImGui::IsItemDeactivatedAfterEdit()) {
-        float val = (float)atof(extrudeTool_.heightBuf);
-        if (val > 0.001f) {
-            extrudeTool_.height = val;
-            extrudeTool_.previewDirty = true;
-        } else {
-            snprintf(extrudeTool_.heightBuf, sizeof(extrudeTool_.heightBuf), "%.3f", extrudeTool_.height);
-        }
-    }
-
-    // Direction
-    ImGui::Text("Direction:");
-    const char* dirNames[] = {"One Side", "Other Side", "Both Sides", "Symmetric"};
-    int dirIdx = (int)extrudeTool_.direction;
-    if (ImGui::Combo("##dir", &dirIdx, dirNames, 4)) {
-        extrudeTool_.direction = (ExtrudeDirection)dirIdx;
+void App::setExtrudeDistanceText(const std::string& text) {
+    snprintf(extrudeTool_.heightBuf, sizeof(extrudeTool_.heightBuf), "%s", text.c_str());
+    float val = (float)atof(extrudeTool_.heightBuf);
+    if (val > 0.001f) {
+        extrudeTool_.height = val;
         extrudeTool_.previewDirty = true;
+    } else {
+        // Revert to last valid value
+        snprintf(extrudeTool_.heightBuf, sizeof(extrudeTool_.heightBuf), "%.3f", extrudeTool_.height);
     }
+}
 
-    // Offset
-    ImGui::Text("Offset:");
-    if (ImGui::InputText("##offset", extrudeTool_.offsetBuf, sizeof(extrudeTool_.offsetBuf),
-            ImGuiInputTextFlags_EnterReturnsTrue)) {
-        extrudeTool_.offset = (float)atof(extrudeTool_.offsetBuf);
-        extrudeTool_.previewDirty = true;
-    }
-    if (ImGui::IsItemDeactivatedAfterEdit()) {
-        extrudeTool_.offset = (float)atof(extrudeTool_.offsetBuf);
-        extrudeTool_.previewDirty = true;
-    }
+void App::setExtrudeDirection(int dir) {
+    extrudeTool_.direction = (ExtrudeDirection)dir;
+    extrudeTool_.previewDirty = true;
+}
 
-    // Profile info
-    ImGui::Separator();
-    ImGui::Text("Profiles: %d / %d",
-                (int)extrudeTool_.selectedProfileIndices.size(),
-                (int)extrudeTool_.allProfiles.size());
-
-    // OK / Cancel
-    ImGui::Separator();
-    bool canCommit = extrudeTool_.hasSelectedProfiles();
-    if (!canCommit) ImGui::BeginDisabled();
-    if (ImGui::Button("OK [Enter]", {95, 0})) {
-        commitExtrude();
-    }
-    if (!canCommit) ImGui::EndDisabled();
-    ImGui::SameLine();
-    if (ImGui::Button("Cancel [Esc]", {95, 0})) {
-        cancelExtrude();
-    }
-
-    ImGui::End();
-    ImGui::PopStyleVar();
+void App::setExtrudeOffsetText(const std::string& text) {
+    snprintf(extrudeTool_.offsetBuf, sizeof(extrudeTool_.offsetBuf), "%s", text.c_str());
+    extrudeTool_.offset = (float)atof(extrudeTool_.offsetBuf);
+    extrudeTool_.previewDirty = true;
 }
 
 // Helper: build the tool shape from selected profiles for current extrude settings
@@ -449,6 +388,7 @@ void App::renderExtrudePreview(const float* view, const float* proj, const float
     shader.setMat4("uProj", proj);
     shader.setVec3("uEyePos", eyePos[0], eyePos[1], eyePos[2]);
     shader.setVec3("uLightDir", 0.3f, 0.8f, 0.5f);
+    applyClip(shader, nullptr); // tool previews are never sectioned
 
     float alpha = (extrudeTool_.operation == ExtrudeOperation::Cut) ? 0.4f : 0.5f;
     shader.setVec3("uColor", body.colorR, body.colorG, body.colorB);
@@ -486,12 +426,12 @@ void App::renderExtrudeHandle(const float* view, const float* proj, float vpW, f
     float tipSx, tipSy;
     if (!worldToScreen(tipWorld, view, proj, vpW, vpH, tipSx, tipSy)) return;
 
-    ImDrawList* dl = ImGui::GetForegroundDrawList();
-    ImU32 handleColor = IM_COL32(255, 180, 0, 220);
-    ImU32 tipColor = IM_COL32(255, 200, 50, 255);
+    Overlay2D& ov = overlay_;
+    Color32 handleColor = rgba32(255, 180, 0, 220);
+    Color32 tipColor = rgba32(255, 200, 50, 255);
 
     // Line from base to tip
-    dl->AddLine({baseSx, baseSy}, {tipSx, tipSy}, handleColor, 2.5f);
+    ov.addLine({baseSx, baseSy}, {tipSx, tipSy}, handleColor, 2.5f);
 
     // Arrowhead at tip
     float dx = tipSx - baseSx, dy = tipSy - baseSy;
@@ -500,23 +440,23 @@ void App::renderExtrudeHandle(const float* view, const float* proj, float vpW, f
         float ux = dx / len, uy = dy / len;
         float arrowLen = 12.0f;
         float arrowW = 6.0f;
-        ImVec2 p1 = {tipSx - ux * arrowLen + uy * arrowW, tipSy - uy * arrowLen - ux * arrowW};
-        ImVec2 p2 = {tipSx - ux * arrowLen - uy * arrowW, tipSy - uy * arrowLen + ux * arrowW};
-        dl->AddTriangleFilled({tipSx, tipSy}, p1, p2, handleColor);
+        OvVec2 p1 = {tipSx - ux * arrowLen + uy * arrowW, tipSy - uy * arrowLen - ux * arrowW};
+        OvVec2 p2 = {tipSx - ux * arrowLen - uy * arrowW, tipSy - uy * arrowLen + ux * arrowW};
+        ov.addTriangleFilled({tipSx, tipSy}, p1, p2, handleColor);
     }
 
     // Drag handle circle at tip
     float handleRadius = 8.0f;
-    dl->AddCircleFilled({tipSx, tipSy}, handleRadius, tipColor);
-    dl->AddCircle({tipSx, tipSy}, handleRadius, handleColor, 0, 2.0f);
+    ov.addCircleFilled({tipSx, tipSy}, handleRadius, tipColor);
+    ov.addCircle({tipSx, tipSy}, handleRadius, handleColor, 0, 2.0f);
 
     // Small circle at base
-    dl->AddCircleFilled({baseSx, baseSy}, 4.0f, handleColor);
+    ov.addCircleFilled({baseSx, baseSy}, 4.0f, handleColor);
 
     // Height label near tip
     char label[32];
     snprintf(label, sizeof(label), "%.2f", extrudeTool_.height);
-    dl->AddText({tipSx + 14.0f, tipSy - 8.0f}, IM_COL32(255, 220, 100, 255), label);
+    ov.addText({tipSx + 14.0f, tipSy - 8.0f}, rgba32(255, 220, 100, 255), label);
 }
 
 void App::editExtrudeFeature(FeatureID id) {

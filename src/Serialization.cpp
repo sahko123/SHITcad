@@ -1,25 +1,16 @@
-#define NOMINMAX
-#include <windows.h>
-#include <commdlg.h>
-
 #include "Serialization.h"
+#include "Utf8Path.h"
 #include <nlohmann/json.hpp>
 #include <fstream>
 #include <sstream>
 #include <cmath>
 #include <StlAPI_Writer.hxx>
-#include <RWStl.hxx>
 #include <Poly_Triangulation.hxx>
-#include <BRepBuilderAPI_MakeFace.hxx>
-#include <BRepBuilderAPI_Sewing.hxx>
 #include <gp_Pnt.hxx>
 #include <BRep_Builder.hxx>
 #include <TopoDS_Compound.hxx>
 #include <STEPControl_Writer.hxx>
-#include <STEPControl_Reader.hxx>
 #include <IGESControl_Writer.hxx>
-#include <IGESControl_Reader.hxx>
-#include <Interface_Static.hxx>
 #include <XSControl_WorkSession.hxx>
 
 using json = nlohmann::json;
@@ -87,6 +78,8 @@ static const char* featureTypeToStr(FeatureType t) {
         case FeatureType::Revolve: return "Revolve";
         case FeatureType::Loft:    return "Loft";
         case FeatureType::Boolean: return "Boolean";
+        case FeatureType::MeshImport: return "MeshImport";
+        case FeatureType::CadImport: return "CadImport";
     }
     return "Sketch";
 }
@@ -96,6 +89,8 @@ static FeatureType featureTypeFromStr(const std::string& s) {
     if (s == "Revolve") return FeatureType::Revolve;
     if (s == "Loft")    return FeatureType::Loft;
     if (s == "Boolean") return FeatureType::Boolean;
+    if (s == "MeshImport") return FeatureType::MeshImport;
+    if (s == "CadImport") return FeatureType::CadImport;
     return FeatureType::Sketch;
 }
 
@@ -507,6 +502,11 @@ static json booleanFeatureDataToJson(const BooleanFeatureData& bd) {
     j["operation"] = (bd.operation == BooleanOperation::Subtract) ? "Subtract" : "Union";
     j["targetBodyIndex"] = bd.targetBodyIndex;
     j["toolBodyIndex"] = bd.toolBodyIndex;
+    // Optional: files from before body identities have only the indices.
+    if (bd.targetBody.isSet() && bd.toolBody.isSet()) {
+        j["targetBody"] = {{"feature", bd.targetBody.feature}, {"index", bd.targetBody.index}};
+        j["toolBody"] = {{"feature", bd.toolBody.feature}, {"index", bd.toolBody.index}};
+    }
     return j;
 }
 
@@ -516,7 +516,70 @@ static BooleanFeatureData booleanFeatureDataFromJson(const json& j) {
     bd.operation = (op == "Subtract") ? BooleanOperation::Subtract : BooleanOperation::Union;
     bd.targetBodyIndex = j.value("targetBodyIndex", -1);
     bd.toolBodyIndex = j.value("toolBodyIndex", -1);
+    if (j.contains("targetBody") && j.contains("toolBody")) {
+        bd.targetBody = {j.at("targetBody").at("feature").get<FeatureID>(), j.at("targetBody").at("index").get<int>()};
+        bd.toolBody = {j.at("toolBody").at("feature").get<FeatureID>(), j.at("toolBody").at("index").get<int>()};
+    }
     return bd;
+}
+
+static json meshImportFeatureDataToJson(const MeshImportFeatureData& md) {
+    json j;
+    j["sourcePath"] = md.sourcePath;
+    j["unit"] = md.unit;
+    if (!md.transform.isIdentity()) {
+        j["transform"] = {
+            {"rotation", std::vector<double>(md.transform.r, md.transform.r + 9)},
+            {"translationMm", std::vector<double>(md.transform.t, md.transform.t + 3)},
+        };
+    }
+    return j;
+}
+
+static MeshImportFeatureData meshImportFeatureDataFromJson(const json& j) {
+    MeshImportFeatureData md;
+    md.sourcePath = j.at("sourcePath").get<std::string>();
+    // No default: guessing the unit of a mesh is exactly the mistake this
+    // field exists to prevent. A file without it is invalid.
+    md.unit = j.at("unit").get<std::string>();
+    // Optional: imports saved before placement existed load as identity.
+    if (j.contains("transform")) {
+        const auto& xj = j.at("transform");
+        auto rot = xj.at("rotation").get<std::vector<double>>();
+        auto tr = xj.at("translationMm").get<std::vector<double>>();
+        if (rot.size() != 9 || tr.size() != 3)
+            throw json::other_error::create(501, "MeshImport transform must have 9 rotation and 3 translation values", &xj);
+        for (int i = 0; i < 9; i++) md.transform.r[i] = rot[i];
+        for (int i = 0; i < 3; i++) md.transform.t[i] = tr[i];
+    }
+    return md;
+}
+
+static json cadImportFeatureDataToJson(const CadImportFeatureData& cd) {
+    json j;
+    j["sourcePath"] = cd.sourcePath;
+    if (!cd.transform.isIdentity()) {
+        j["transform"] = {
+            {"rotation", std::vector<double>(cd.transform.r, cd.transform.r + 9)},
+            {"translationMm", std::vector<double>(cd.transform.t, cd.transform.t + 3)},
+        };
+    }
+    return j;
+}
+
+static CadImportFeatureData cadImportFeatureDataFromJson(const json& j) {
+    CadImportFeatureData cd;
+    cd.sourcePath = j.at("sourcePath").get<std::string>();
+    if (j.contains("transform")) {
+        const auto& xj = j.at("transform");
+        auto rot = xj.at("rotation").get<std::vector<double>>();
+        auto tr = xj.at("translationMm").get<std::vector<double>>();
+        if (rot.size() != 9 || tr.size() != 3)
+            throw json::other_error::create(501, "CadImport transform must have 9 rotation and 3 translation values", &xj);
+        for (int i = 0; i < 9; i++) cd.transform.r[i] = rot[i];
+        for (int i = 0; i < 3; i++) cd.transform.t[i] = tr[i];
+    }
+    return cd;
 }
 
 // ─── Feature ────────────────────────────────────────────────────────
@@ -538,6 +601,10 @@ static json featureToJson(const Feature& f) {
         j["data"] = loftFeatureDataToJson(std::get<LoftFeatureData>(f.data));
     } else if (f.type == FeatureType::Boolean) {
         j["data"] = booleanFeatureDataToJson(std::get<BooleanFeatureData>(f.data));
+    } else if (f.type == FeatureType::MeshImport) {
+        j["data"] = meshImportFeatureDataToJson(std::get<MeshImportFeatureData>(f.data));
+    } else if (f.type == FeatureType::CadImport) {
+        j["data"] = cadImportFeatureDataToJson(std::get<CadImportFeatureData>(f.data));
     }
     return j;
 }
@@ -559,6 +626,10 @@ static Feature featureFromJson(const json& j) {
         f.data = loftFeatureDataFromJson(j.at("data"));
     } else if (f.type == FeatureType::Boolean) {
         f.data = booleanFeatureDataFromJson(j.at("data"));
+    } else if (f.type == FeatureType::MeshImport) {
+        f.data = meshImportFeatureDataFromJson(j.at("data"));
+    } else if (f.type == FeatureType::CadImport) {
+        f.data = cadImportFeatureDataFromJson(j.at("data"));
     }
     return f;
 }
@@ -641,22 +712,43 @@ static void featureHistoryFromJson(const json& j, FeatureHistory& h) {
 
 bool saveProject(const std::string& filepath,
                  const FeatureHistory& history,
-                 const std::vector<SketchPlane>& planes) {
+                 const std::vector<SketchPlane>& planes,
+                 const SimulationSetup* simulation) {
+    // Version 2 = may contain MeshImport features or a simulation set-up. Only
+    // written when it does, so projects without either still open in older
+    // builds. An older build refuses a v2 file with a clear message, rather
+    // than failing on an unknown feature type or - worse, for the simulation
+    // block it would not read - silently dropping it on the next save.
+    //
+    // Version 3 = may contain CadImport (STEP/IGES) features. A v2 build would
+    // read one as an unknown type, so it has to refuse the file instead.
+    bool needsV2 = simulation && !simulation->empty();
+    bool needsV3 = false;
+    for (const auto& f : history.features()) {
+        if (f.type == FeatureType::MeshImport) needsV2 = true;
+        if (f.type == FeatureType::CadImport) needsV3 = true;
+    }
+
     json doc;
-    doc["version"] = 1;
+    doc["version"] = needsV3 ? 3 : needsV2 ? 2 : 1;
     doc["app"] = "SHITcad";
     doc["featureHistory"] = featureHistoryToJson(history);
+    if (simulation && !simulation->empty()) {
+        json sj;
+        simulationToJson(*simulation, sj);
+        doc["simulation"] = sj;
+    }
 
     doc["sketchPlanes"] = json::array();
     for (auto& sp : planes) doc["sketchPlanes"].push_back(sketchPlaneToJson(sp));
 
-    std::ofstream out(filepath);
+    std::ofstream out(fsPath(filepath));
     if (!out.is_open()) {
         s_lastError = "Could not open file for writing: " + filepath;
         return false;
     }
 
-    out << doc.dump(2);
+    out << doc.dump(2, ' ', false, json::error_handler_t::replace);
     if (out.fail()) {
         s_lastError = "Write error";
         return false;
@@ -667,8 +759,9 @@ bool saveProject(const std::string& filepath,
 
 bool loadProject(const std::string& filepath,
                  FeatureHistory& history,
-                 std::vector<SketchPlane>& planes) {
-    std::ifstream in(filepath);
+                 std::vector<SketchPlane>& planes,
+                 SimulationSetup* simulation) {
+    std::ifstream in(fsPath(filepath));
     if (!in.is_open()) {
         s_lastError = "Could not open file: " + filepath;
         return false;
@@ -684,7 +777,7 @@ bool loadProject(const std::string& filepath,
 
     try {
         int version = doc.at("version").get<int>();
-        if (version > 1) {
+        if (version > 3) {
             s_lastError = "File was created with a newer version of SHITcad (version " +
                           std::to_string(version) + ")";
             return false;
@@ -699,9 +792,19 @@ bool loadProject(const std::string& filepath,
             tempPlanes.push_back(sketchPlaneFromJson(sp));
         }
 
+        SimulationSetup tempSim;
+        if (doc.contains("simulation")) {
+            std::string simErr;
+            if (!simulationFromJson(doc.at("simulation"), tempSim, simErr)) {
+                s_lastError = "Invalid simulation set-up: " + simErr;
+                return false;
+            }
+        }
+
         // All succeeded — move into output
         history = std::move(tempHistory);
         planes = std::move(tempPlanes);
+        if (simulation) *simulation = std::move(tempSim);
 
     } catch (const json::exception& e) {
         s_lastError = std::string("Invalid file format: ") + e.what();
@@ -712,44 +815,6 @@ bool loadProject(const std::string& filepath,
 }
 
 // ─── Native file dialogs ────────────────────────────────────────────
-
-std::string openNativeOpenDialog() {
-    char filename[MAX_PATH] = {};
-    OPENFILENAMEA ofn = {};
-    ofn.lStructSize = sizeof(ofn);
-    ofn.lpstrFilter = "SHITcad Files (*.shitcad)\0*.shitcad\0All Files\0*.*\0";
-    ofn.lpstrFile = filename;
-    ofn.nMaxFile = MAX_PATH;
-    ofn.Flags = OFN_FILEMUSTEXIST | OFN_NOCHANGEDIR;
-    if (GetOpenFileNameA(&ofn)) return filename;
-    return {};
-}
-
-std::string openNativeSaveDialog() {
-    char filename[MAX_PATH] = {};
-    OPENFILENAMEA ofn = {};
-    ofn.lStructSize = sizeof(ofn);
-    ofn.lpstrFilter = "SHITcad Files (*.shitcad)\0*.shitcad\0All Files\0*.*\0";
-    ofn.lpstrFile = filename;
-    ofn.nMaxFile = MAX_PATH;
-    ofn.lpstrDefExt = "shitcad";
-    ofn.Flags = OFN_OVERWRITEPROMPT | OFN_NOCHANGEDIR;
-    if (GetSaveFileNameA(&ofn)) return filename;
-    return {};
-}
-
-std::string openNativeStlSaveDialog() {
-    char filename[MAX_PATH] = {};
-    OPENFILENAMEA ofn = {};
-    ofn.lStructSize = sizeof(ofn);
-    ofn.lpstrFilter = "STL Files (*.stl)\0*.stl\0All Files\0*.*\0";
-    ofn.lpstrFile = filename;
-    ofn.nMaxFile = MAX_PATH;
-    ofn.lpstrDefExt = "stl";
-    ofn.Flags = OFN_OVERWRITEPROMPT | OFN_NOCHANGEDIR;
-    if (GetSaveFileNameA(&ofn)) return filename;
-    return {};
-}
 
 bool exportSTL(const std::string& filepath, const Scene3D& scene) {
     if (scene.bodyCount() == 0) {
@@ -782,48 +847,6 @@ bool exportSTL(const std::string& filepath, const Scene3D& scene) {
     return true;
 }
 
-bool importSTL(const std::string& filepath, Scene3D& scene) {
-    Handle(Poly_Triangulation) mesh = RWStl::ReadFile(filepath.c_str());
-    if (mesh.IsNull() || mesh->NbTriangles() == 0) {
-        s_lastError = "Failed to read STL file or file is empty";
-        return false;
-    }
-
-    // Build MeshVertex data directly from the triangulation
-    std::vector<MeshVertex> vertices;
-    vertices.reserve(mesh->NbTriangles() * 3);
-
-    for (int i = 1; i <= mesh->NbTriangles(); i++) {
-        int n1, n2, n3;
-        mesh->Triangle(i).Get(n1, n2, n3);
-
-        gp_Pnt p1 = mesh->Node(n1);
-        gp_Pnt p2 = mesh->Node(n2);
-        gp_Pnt p3 = mesh->Node(n3);
-
-        // Compute face normal
-        float ax = (float)(p2.X() - p1.X()), ay = (float)(p2.Y() - p1.Y()), az = (float)(p2.Z() - p1.Z());
-        float bx = (float)(p3.X() - p1.X()), by = (float)(p3.Y() - p1.Y()), bz = (float)(p3.Z() - p1.Z());
-        float nx = ay * bz - az * by;
-        float ny = az * bx - ax * bz;
-        float nz = ax * by - ay * bx;
-        float len = std::sqrt(nx * nx + ny * ny + nz * nz);
-        if (len > 1e-10f) { nx /= len; ny /= len; nz /= len; }
-
-        vertices.push_back({(float)p1.X(), (float)p1.Y(), (float)p1.Z(), nx, ny, nz});
-        vertices.push_back({(float)p2.X(), (float)p2.Y(), (float)p2.Z(), nx, ny, nz});
-        vertices.push_back({(float)p3.X(), (float)p3.Y(), (float)p3.Z(), nx, ny, nz});
-    }
-
-    // Add as a mesh-only body (no TopoDS_Shape — STL has no topology)
-    Body3D body;
-    body.vertices = std::move(vertices);
-    body.vertexCount = (int)body.vertices.size();
-    Scene3D::uploadMesh(body);
-    scene.addMeshBody(std::move(body));
-    return true;
-}
-
 // Helper: build compound of all visible bodies
 static bool buildVisibleCompound(const Scene3D& scene, TopoDS_Compound& compound) {
     BRep_Builder builder;
@@ -853,11 +876,13 @@ bool exportSTEP(const std::string& filepath, const Scene3D& scene) {
     TopoDS_Compound compound;
     if (!buildVisibleCompound(scene, compound)) return false;
 
-    Interface_Static::SetCVal("xstep.cascade.unit", "MM");
-    Interface_Static::SetCVal("write.step.unit", "MM");
+    // Written in mm. OCCT 8 ignores Interface_Static("write.step.unit"); the
+    // unit goes in the transfer parameters.
+    DESTEP_Parameters params;
+    params.WriteUnit = UnitsMethods_LengthUnit_Millimeter;
 
     STEPControl_Writer writer;
-    IFSelect_ReturnStatus status = writer.Transfer(compound, STEPControl_AsIs);
+    IFSelect_ReturnStatus status = writer.Transfer(compound, STEPControl_AsIs, params);
     if (status != IFSelect_RetDone) {
         s_lastError = "STEP transfer failed";
         return false;
@@ -866,30 +891,6 @@ bool exportSTEP(const std::string& filepath, const Scene3D& scene) {
     if (status != IFSelect_RetDone) {
         s_lastError = "STEP write failed";
         return false;
-    }
-    return true;
-}
-
-bool importSTEP(const std::string& filepath, Scene3D& scene) {
-    STEPControl_Reader reader;
-    IFSelect_ReturnStatus status = reader.ReadFile(filepath.c_str());
-    if (status != IFSelect_RetDone) {
-        s_lastError = "Failed to read STEP file";
-        return false;
-    }
-
-    reader.TransferRoots();
-    int nbShapes = reader.NbShapes();
-    if (nbShapes == 0) {
-        s_lastError = "STEP file contains no shapes";
-        return false;
-    }
-
-    for (int i = 1; i <= nbShapes; i++) {
-        TopoDS_Shape shape = reader.Shape(i);
-        if (!shape.IsNull()) {
-            scene.addBody(shape);
-        }
     }
     return true;
 }
@@ -915,30 +916,6 @@ bool exportIGES(const std::string& filepath, const Scene3D& scene) {
     return true;
 }
 
-bool importIGES(const std::string& filepath, Scene3D& scene) {
-    IGESControl_Reader reader;
-    IFSelect_ReturnStatus status = reader.ReadFile(filepath.c_str());
-    if (status != IFSelect_RetDone) {
-        s_lastError = "Failed to read IGES file";
-        return false;
-    }
-
-    reader.TransferRoots();
-    int nbShapes = reader.NbShapes();
-    if (nbShapes == 0) {
-        s_lastError = "IGES file contains no shapes";
-        return false;
-    }
-
-    for (int i = 1; i <= nbShapes; i++) {
-        TopoDS_Shape shape = reader.Shape(i);
-        if (!shape.IsNull()) {
-            scene.addBody(shape);
-        }
-    }
-    return true;
-}
-
 // ─── OBJ export ─────────────────────────────────────────────────────
 
 bool exportOBJ(const std::string& filepath, const Scene3D& scene) {
@@ -947,7 +924,7 @@ bool exportOBJ(const std::string& filepath, const Scene3D& scene) {
         return false;
     }
 
-    std::ofstream out(filepath);
+    std::ofstream out(fsPath(filepath));
     if (!out.is_open()) {
         s_lastError = "Cannot open file for writing";
         return false;
@@ -997,7 +974,7 @@ bool exportOBJ(const std::string& filepath, const Scene3D& scene) {
 // ─── DXF export (2D sketch) ─────────────────────────────────────────
 
 bool exportDXF(const std::string& filepath, const Sketch& sketch) {
-    std::ofstream out(filepath);
+    std::ofstream out(fsPath(filepath));
     if (!out.is_open()) {
         s_lastError = "Cannot open file for writing";
         return false;
@@ -1068,109 +1045,5 @@ bool exportDXF(const std::string& filepath, const Sketch& sketch) {
 }
 
 // ─── Additional file dialogs ────────────────────────────────────────
-
-std::string openNativeStepSaveDialog() {
-    char filename[MAX_PATH] = {};
-    OPENFILENAMEA ofn = {};
-    ofn.lStructSize = sizeof(ofn);
-    ofn.lpstrFilter = "STEP Files (*.step;*.stp)\0*.step;*.stp\0All Files\0*.*\0";
-    ofn.lpstrFile = filename;
-    ofn.nMaxFile = MAX_PATH;
-    ofn.lpstrDefExt = "step";
-    ofn.Flags = OFN_OVERWRITEPROMPT | OFN_NOCHANGEDIR;
-    if (GetSaveFileNameA(&ofn)) return filename;
-    return {};
-}
-
-std::string openNativeStepOpenDialog() {
-    char filename[MAX_PATH] = {};
-    OPENFILENAMEA ofn = {};
-    ofn.lStructSize = sizeof(ofn);
-    ofn.lpstrFilter = "STEP Files (*.step;*.stp)\0*.step;*.stp\0All Files\0*.*\0";
-    ofn.lpstrFile = filename;
-    ofn.nMaxFile = MAX_PATH;
-    ofn.Flags = OFN_FILEMUSTEXIST | OFN_NOCHANGEDIR;
-    if (GetOpenFileNameA(&ofn)) return filename;
-    return {};
-}
-
-std::string openNativeIgesSaveDialog() {
-    char filename[MAX_PATH] = {};
-    OPENFILENAMEA ofn = {};
-    ofn.lStructSize = sizeof(ofn);
-    ofn.lpstrFilter = "IGES Files (*.igs;*.iges)\0*.igs;*.iges\0All Files\0*.*\0";
-    ofn.lpstrFile = filename;
-    ofn.nMaxFile = MAX_PATH;
-    ofn.lpstrDefExt = "igs";
-    ofn.Flags = OFN_OVERWRITEPROMPT | OFN_NOCHANGEDIR;
-    if (GetSaveFileNameA(&ofn)) return filename;
-    return {};
-}
-
-std::string openNativeIgesOpenDialog() {
-    char filename[MAX_PATH] = {};
-    OPENFILENAMEA ofn = {};
-    ofn.lStructSize = sizeof(ofn);
-    ofn.lpstrFilter = "IGES Files (*.igs;*.iges)\0*.igs;*.iges\0All Files\0*.*\0";
-    ofn.lpstrFile = filename;
-    ofn.nMaxFile = MAX_PATH;
-    ofn.Flags = OFN_FILEMUSTEXIST | OFN_NOCHANGEDIR;
-    if (GetOpenFileNameA(&ofn)) return filename;
-    return {};
-}
-
-std::string openNativeObjSaveDialog() {
-    char filename[MAX_PATH] = {};
-    OPENFILENAMEA ofn = {};
-    ofn.lStructSize = sizeof(ofn);
-    ofn.lpstrFilter = "OBJ Files (*.obj)\0*.obj\0All Files\0*.*\0";
-    ofn.lpstrFile = filename;
-    ofn.nMaxFile = MAX_PATH;
-    ofn.lpstrDefExt = "obj";
-    ofn.Flags = OFN_OVERWRITEPROMPT | OFN_NOCHANGEDIR;
-    if (GetSaveFileNameA(&ofn)) return filename;
-    return {};
-}
-
-std::string openNativeDxfSaveDialog() {
-    char filename[MAX_PATH] = {};
-    OPENFILENAMEA ofn = {};
-    ofn.lStructSize = sizeof(ofn);
-    ofn.lpstrFilter = "DXF Files (*.dxf)\0*.dxf\0All Files\0*.*\0";
-    ofn.lpstrFile = filename;
-    ofn.nMaxFile = MAX_PATH;
-    ofn.lpstrDefExt = "dxf";
-    ofn.Flags = OFN_OVERWRITEPROMPT | OFN_NOCHANGEDIR;
-    if (GetSaveFileNameA(&ofn)) return filename;
-    return {};
-}
-
-std::string openNativeStlOpenDialog() {
-    char filename[MAX_PATH] = {};
-    OPENFILENAMEA ofn = {};
-    ofn.lStructSize = sizeof(ofn);
-    ofn.lpstrFilter = "STL Files (*.stl)\0*.stl\0All Files\0*.*\0";
-    ofn.lpstrFile = filename;
-    ofn.nMaxFile = MAX_PATH;
-    ofn.Flags = OFN_FILEMUSTEXIST | OFN_NOCHANGEDIR;
-    if (GetOpenFileNameA(&ofn)) return filename;
-    return {};
-}
-
-std::string openNativeImportDialog() {
-    char filename[MAX_PATH] = {};
-    OPENFILENAMEA ofn = {};
-    ofn.lStructSize = sizeof(ofn);
-    ofn.lpstrFilter = "All Supported (*.step;*.stp;*.igs;*.iges;*.stl)\0*.step;*.stp;*.igs;*.iges;*.stl\0"
-                      "STEP Files (*.step;*.stp)\0*.step;*.stp\0"
-                      "IGES Files (*.igs;*.iges)\0*.igs;*.iges\0"
-                      "STL Files (*.stl)\0*.stl\0"
-                      "All Files\0*.*\0";
-    ofn.lpstrFile = filename;
-    ofn.nMaxFile = MAX_PATH;
-    ofn.Flags = OFN_FILEMUSTEXIST | OFN_NOCHANGEDIR;
-    if (GetOpenFileNameA(&ofn)) return filename;
-    return {};
-}
 
 } // namespace shitcad

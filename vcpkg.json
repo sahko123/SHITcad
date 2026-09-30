@@ -3,7 +3,43 @@
   "version": "0.1.0",
   "description": "Parametric CAD modeler with 2D constrained sketching and 3D feature history.",
   "dependencies": [
-    "opencascade"
+    "opencascade",
+    {
+      "name": "qtbase",
+      "default-features": false,
+      "features": [
+        "gui",
+        "widgets",
+        "opengl",
+        "png",
+        "freetype",
+        "harfbuzz",
+        "doubleconversion",
+        "pcre2",
+        "thread",
+        "concurrent",
+        {
+          "name": "windeployqt",
+          "platform": "windows"
+        },
+        {
+          "name": "xcb",
+          "platform": "linux"
+        },
+        {
+          "name": "xkb",
+          "platform": "linux"
+        },
+        {
+          "name": "fontconfig",
+          "platform": "linux"
+        },
+        {
+          "name": "egl",
+          "platform": "linux"
+        }
+      ]
+    }
   ],
   "builtin-baseline": "5b698638c97b4610044a254347d571f823e56557"
 }

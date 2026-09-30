@@ -13,11 +13,6 @@
 #include <TopoDS_Solid.hxx>
 
 #include <glad/gl.h>
-#include <GLFW/glfw3.h>
-#include <imgui.h>
-#include <imgui_internal.h>
-#include <imgui_impl_glfw.h>
-#include <imgui_impl_opengl3.h>
 #include <cstdio>
 #include <cmath>
 #include <algorithm>
@@ -35,127 +30,80 @@ void App::enterLoftMode() {
 
 void App::handleLoftInput(float vpW, float vpH) {
     (void)vpW; (void)vpH;
-    ImGuiIO& io = ImGui::GetIO();
 
-    if (!io.WantCaptureKeyboard) {
-        if (ImGui::IsKeyPressed(ImGuiKey_Escape)) {
-            cancelLoft();
+    if (in_.keyPressed(Key::Escape)) {
+        cancelLoft();
+        return;
+    }
+    if (in_.keyPressed(Key::Enter) || in_.keyPressed(Key::KeypadEnter)) {
+        if (loftTool_.canCommit()) {
+            commitLoft();
             return;
-        }
-        if (ImGui::IsKeyPressed(ImGuiKey_Enter) || ImGui::IsKeyPressed(ImGuiKey_KeypadEnter)) {
-            if (loftTool_.canCommit()) {
-                commitLoft();
-                return;
-            }
         }
     }
 }
 
-void App::drawLoftPanel() {
-    ImGuiIO& io = ImGui::GetIO();
-    float panelW = 250.0f;
-
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, {10, 10});
-    ImGui::SetNextWindowPos({io.DisplaySize.x - panelW, 30});
-    ImGui::SetNextWindowSize({panelW, 0});
-    ImGui::Begin("Loft", nullptr,
-        ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
-        ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_AlwaysAutoResize);
-
-    ImGui::Text("Select profiles on different");
-    ImGui::Text("sketch planes to loft between.");
-    ImGui::Separator();
-
-    // List current sections
-    for (int i = 0; i < (int)loftTool_.sections.size(); i++) {
-        const auto& sec = loftTool_.sections[i];
-        char label[64];
-        snprintf(label, sizeof(label), "Section %d: Plane %d, Profile %d", i+1, sec.sketchPlaneIndex, sec.profileIndex);
-        ImGui::TextUnformatted(label);
-        ImGui::SameLine();
-        ImGui::PushID(i);
-        if (ImGui::SmallButton("X")) {
-            loftTool_.sections.erase(loftTool_.sections.begin() + i);
-            loftTool_.previewDirty = true;
-            ImGui::PopID();
-            break; // invalidated iterator
-        }
-        ImGui::PopID();
-    }
-
-    ImGui::Separator();
-
-    // Add section: pick a sketch plane that has profiles
-    ImGui::Text("Add section:");
+App::LoftPanelModel App::loftPanelModel() const {
+    LoftPanelModel m;
+    m.open = tool_.type == ToolType::Loft;
+    if (!m.open) return m;
+    for (const auto& sec : loftTool_.sections)
+        m.sections.push_back({sec.sketchPlaneIndex, sec.profileIndex, (int)sec.detectedProfiles.size()});
+    // Sketch planes with closed profiles that are not a section yet
     for (int pi = 0; pi < (int)sketchPlanes_.size(); pi++) {
-        auto& sp = sketchPlanes_[pi];
+        const auto& sp = sketchPlanes_[pi];
         if (sp.sketch.points.empty() && sp.sketch.lines.empty() && sp.sketch.circles.empty())
             continue;
-
-        auto profiles = detectClosedProfiles(sp.sketch, sp);
-        if (profiles.empty()) continue;
-
-        // Check not already added
         bool alreadyUsed = false;
         for (const auto& sec : loftTool_.sections) {
             if (sec.sketchPlaneIndex == pi) { alreadyUsed = true; break; }
         }
         if (alreadyUsed) continue;
-
-        char btnLabel[64];
-        snprintf(btnLabel, sizeof(btnLabel), "%s (%d profiles)", sp.name.c_str(), (int)profiles.size());
-        if (ImGui::Button(btnLabel)) {
-            LoftToolSection sec;
-            sec.sketchPlaneIndex = pi;
-            sec.detectedProfiles = profiles;
-            // Auto-select first profile
-            sec.profileIndex = 0;
-            buildProfileRenderCaches(sp.sketch, sec.detectedProfiles, sec.renderCache);
-            loftTool_.sections.push_back(std::move(sec));
-            loftTool_.previewDirty = true;
-        }
+        auto profiles = detectClosedProfiles(sp.sketch, sp);
+        if (profiles.empty()) continue;
+        char label[64];
+        snprintf(label, sizeof(label), "%s (%d profiles)", sp.name.c_str(), (int)profiles.size());
+        m.candidates.push_back({pi, label});
     }
+    m.solid = loftTool_.solid;
+    m.canCommit = loftTool_.canCommit();
+    return m;
+}
 
-    // Profile selection per section
-    if (!loftTool_.sections.empty()) {
-        ImGui::Separator();
-        ImGui::Text("Profile selection:");
-        for (int i = 0; i < (int)loftTool_.sections.size(); i++) {
-            auto& sec = loftTool_.sections[i];
-            int numProfiles = (int)sec.detectedProfiles.size();
-            if (numProfiles <= 1) continue;
+void App::addLoftSection(int planeIndex) {
+    if (planeIndex < 0 || planeIndex >= (int)sketchPlanes_.size()) return;
+    for (const auto& sec : loftTool_.sections)
+        if (sec.sketchPlaneIndex == planeIndex) return;
+    auto& sp = sketchPlanes_[planeIndex];
+    auto profiles = detectClosedProfiles(sp.sketch, sp);
+    if (profiles.empty()) return;
+    LoftToolSection sec;
+    sec.sketchPlaneIndex = planeIndex;
+    sec.detectedProfiles = std::move(profiles);
+    // Auto-select first profile
+    sec.profileIndex = 0;
+    buildProfileRenderCaches(sp.sketch, sec.detectedProfiles, sec.renderCache);
+    loftTool_.sections.push_back(std::move(sec));
+    loftTool_.previewDirty = true;
+}
 
-            char label[64];
-            snprintf(label, sizeof(label), "Section %d profile", i+1);
-            ImGui::PushID(100 + i);
-            if (ImGui::SliderInt(label, &sec.profileIndex, 0, numProfiles - 1)) {
-                loftTool_.previewDirty = true;
-            }
-            ImGui::PopID();
-        }
-    }
+void App::removeLoftSection(int section) {
+    if (section < 0 || section >= (int)loftTool_.sections.size()) return;
+    loftTool_.sections.erase(loftTool_.sections.begin() + section);
+    loftTool_.previewDirty = true;
+}
 
-    // Solid toggle
-    ImGui::Separator();
-    if (ImGui::Checkbox("Solid", &loftTool_.solid)) {
-        loftTool_.previewDirty = true;
-    }
+void App::setLoftSectionProfile(int section, int profile) {
+    if (section < 0 || section >= (int)loftTool_.sections.size()) return;
+    auto& sec = loftTool_.sections[section];
+    if (profile < 0 || profile >= (int)sec.detectedProfiles.size()) return;
+    sec.profileIndex = profile;
+    loftTool_.previewDirty = true;
+}
 
-    // OK / Cancel
-    ImGui::Separator();
-    bool canCommit = loftTool_.canCommit();
-    if (!canCommit) ImGui::BeginDisabled();
-    if (ImGui::Button("OK [Enter]", {95, 0})) {
-        commitLoft();
-    }
-    if (!canCommit) ImGui::EndDisabled();
-    ImGui::SameLine();
-    if (ImGui::Button("Cancel [Esc]", {95, 0})) {
-        cancelLoft();
-    }
-
-    ImGui::End();
-    ImGui::PopStyleVar();
+void App::setLoftSolid(bool solid) {
+    loftTool_.solid = solid;
+    loftTool_.previewDirty = true;
 }
 
 void App::updateLoftPreview() {
@@ -245,6 +193,7 @@ void App::renderLoftPreview(const float* view, const float* proj, const float* e
     shader.setMat4("uProj", proj);
     shader.setVec3("uEyePos", eyePos[0], eyePos[1], eyePos[2]);
     shader.setVec3("uLightDir", 0.3f, 0.8f, 0.5f);
+    applyClip(shader, nullptr); // tool previews are never sectioned
 
     float alpha = (loftTool_.operation == ExtrudeOperation::Cut) ? 0.4f : 0.5f;
     shader.setVec3("uColor", body.colorR, body.colorG, body.colorB);

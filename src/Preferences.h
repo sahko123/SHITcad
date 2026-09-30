@@ -1,5 +1,5 @@
 #pragma once
-#include <imgui.h>
+#include "Overlay2D.h" // Color32
 #include <cstdint>
 
 namespace shitcad {
@@ -13,6 +13,13 @@ enum class ProfileDetectorBackend : uint8_t {
 struct Theme {
     // 3D viewport
     float bgColor[3];
+    // Background gradient, all one smooth blend: skyHorizon at the horizon,
+    // up to skyZenith overhead, down through groundHorizon (about 20 degrees
+    // below) to groundNadir straight below.
+    float skyZenith[3];
+    float skyHorizon[3];
+    float groundHorizon[3];
+    float groundNadir[3];
     float gridMinor[3];
     float gridMajor[3];
 
@@ -27,11 +34,11 @@ struct Theme {
     float sketchProjected[3];
 
     // Dimensions
-    ImU32 dimLineColor;
-    ImU32 dimTextColor;
-    ImU32 dimBgColor;
-    ImU32 dimDrivenLineColor;
-    ImU32 dimDrivenTextColor;
+    Color32 dimLineColor;
+    Color32 dimTextColor;
+    Color32 dimBgColor;
+    Color32 dimDrivenLineColor;
+    Color32 dimDrivenTextColor;
 
     // Bodies
     float bodyColor[3];
@@ -74,5 +81,8 @@ struct Preferences {
 
     void applyTheme();
 };
+
+bool operator==(const Preferences& a, const Preferences& b);
+inline bool operator!=(const Preferences& a, const Preferences& b) { return !(a == b); }
 
 } // namespace shitcad

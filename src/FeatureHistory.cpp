@@ -178,6 +178,42 @@ void FeatureHistory::updateBooleanData(FeatureID id, const BooleanFeatureData& d
     std::get<BooleanFeatureData>(f->data) = data;
 }
 
+FeatureID FeatureHistory::addMeshImportFeature(const MeshImportFeatureData& params,
+                                               const std::string& name) {
+    Feature f;
+    f.id = nextID_++;
+    f.type = FeatureType::MeshImport;
+    // Named after the file rather than a counter: the name is what identifies
+    // the surface when the model is handed to a simulation.
+    f.name = name;
+    f.data = params;
+    features_.push_back(std::move(f));
+    return features_.back().id;
+}
+
+void FeatureHistory::updateMeshImportData(FeatureID id, const MeshImportFeatureData& data) {
+    Feature* f = findFeature(id);
+    if (!f || f->type != FeatureType::MeshImport) return;
+    std::get<MeshImportFeatureData>(f->data) = data;
+}
+
+FeatureID FeatureHistory::addCadImportFeature(const CadImportFeatureData& params,
+                                              const std::string& name) {
+    Feature f;
+    f.id = nextID_++;
+    f.type = FeatureType::CadImport;
+    f.name = name; // the file stem, like a mesh import
+    f.data = params;
+    features_.push_back(std::move(f));
+    return features_.back().id;
+}
+
+void FeatureHistory::updateCadImportData(FeatureID id, const CadImportFeatureData& data) {
+    Feature* f = findFeature(id);
+    if (!f || f->type != FeatureType::CadImport) return;
+    std::get<CadImportFeatureData>(f->data) = data;
+}
+
 FeatureID FeatureHistory::addLoftFeature(const LoftFeatureData& params) {
     Feature f;
     f.id = nextID_++;

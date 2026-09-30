@@ -13,11 +13,6 @@
 #include <TopoDS_Solid.hxx>
 
 #include <glad/gl.h>
-#include <GLFW/glfw3.h>
-#include <imgui.h>
-#include <imgui_internal.h>
-#include <imgui_impl_glfw.h>
-#include <imgui_impl_opengl3.h>
 #include <cstdio>
 #include <cmath>
 #include <algorithm>
@@ -81,18 +76,17 @@ void App::enterRevolveMode() {
 
 void App::handleRevolveInput(float vpW, float vpH) {
     if (!hasRevolveSketch()) return;
-    ImGuiIO& io = ImGui::GetIO();
 
     const SketchPlane& plane = revolvePlane();
 
-    if (!io.WantCaptureMouse) {
+    {
         int w, h;
-        glfwGetFramebufferSize(window_, &w, &h);
+        framebufferSize(w, h);
         float view[16], proj[16];
         getViewProj(w, h, view, proj);
 
         float rayOrig[3], rayDir[3];
-        screenToRay(io.MousePos.x, io.MousePos.y, 0, 0, vpW, vpH, view, proj, rayOrig, rayDir);
+        screenToRay(in_.mouseX, in_.mouseY, 0, 0, vpW, vpH, view, proj, rayOrig, rayDir);
 
         float lx, ly, t;
         if (plane.rayIntersect(rayOrig, rayDir, lx, ly, t)) {
@@ -100,22 +94,19 @@ void App::handleRevolveInput(float vpW, float vpH) {
         }
     }
 
-    if (!io.WantCaptureKeyboard) {
-        if (ImGui::IsKeyPressed(ImGuiKey_Escape)) {
-            cancelRevolve();
+    if (in_.keyPressed(Key::Escape)) {
+        cancelRevolve();
+        return;
+    }
+    if (in_.keyPressed(Key::Enter) || in_.keyPressed(Key::KeypadEnter)) {
+        if (revolveTool_.hasSelectedProfiles() && revolveTool_.axisLineID != NullID) {
+            commitRevolve();
             return;
-        }
-        if (ImGui::IsKeyPressed(ImGuiKey_Enter) || ImGui::IsKeyPressed(ImGuiKey_KeypadEnter)) {
-            if (revolveTool_.hasSelectedProfiles() && revolveTool_.axisLineID != NullID) {
-                commitRevolve();
-                return;
-            }
         }
     }
 
-    if (io.WantCaptureMouse) return;
 
-    if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+    if (in_.mouseClicked(MouseButton::Left)) {
         if (revolveTool_.phase == RevolvePhase::SelectingProfiles) {
             int hitIdx = hitTestProfile(revolveSketch(), revolveTool_.allProfiles, cursorLocal_,
                                         revolveTool_.renderCache);
@@ -130,7 +121,7 @@ void App::handleRevolveInput(float vpW, float vpH) {
             // Hit test lines in sketch
             const Sketch& sketch = revolveSketch();
             int w, h;
-            glfwGetFramebufferSize(window_, &w, &h);
+            framebufferSize(w, h);
             float view[16], proj[16];
             getViewProj(w, h, view, proj);
             float apparentScale = computeApparentScale(revolvePlane(), view, proj, (float)w, (float)h);
@@ -163,99 +154,46 @@ void App::handleRevolveInput(float vpW, float vpH) {
     }
 }
 
-void App::drawRevolvePanel() {
-    ImGuiIO& io = ImGui::GetIO();
-    float panelW = 220.0f;
-
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, {10, 10});
-    ImGui::SetNextWindowPos({io.DisplaySize.x - panelW, 30});
-    ImGui::SetNextWindowSize({panelW, 0});
-    ImGui::Begin("Revolve", nullptr,
-        ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
-        ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_AlwaysAutoResize);
-
-    // Operation
-    ImGui::Text("Operation:");
-    const char* opNames[] = {"New Body", "Cut"};
-    int opIdx = (int)revolveTool_.operation;
-    if (ImGui::Combo("##revOp", &opIdx, opNames, 2)) {
-        if (opIdx == (int)ExtrudeOperation::Cut && scene_.empty()) {
-            // Don't allow
-        } else {
-            revolveTool_.operation = (ExtrudeOperation)opIdx;
-            revolveTool_.previewDirty = true;
-        }
-    }
-
-    // Angle
-    ImGui::Text("Angle (deg):");
-    if (ImGui::InputText("##revAngle", revolveTool_.angleBuf, sizeof(revolveTool_.angleBuf),
-            ImGuiInputTextFlags_EnterReturnsTrue)) {
-        float val = (float)atof(revolveTool_.angleBuf);
-        if (std::fabs(val) > 0.01f) {
-            revolveTool_.angleDeg = val;
-            revolveTool_.previewDirty = true;
-        } else {
-            snprintf(revolveTool_.angleBuf, sizeof(revolveTool_.angleBuf), "%.1f", revolveTool_.angleDeg);
-        }
-    }
-    if (ImGui::IsItemDeactivatedAfterEdit()) {
-        float val = (float)atof(revolveTool_.angleBuf);
-        if (std::fabs(val) > 0.01f) {
-            revolveTool_.angleDeg = val;
-            revolveTool_.previewDirty = true;
-        } else {
-            snprintf(revolveTool_.angleBuf, sizeof(revolveTool_.angleBuf), "%.1f", revolveTool_.angleDeg);
-        }
-    }
-
-    // Axis info
-    ImGui::Separator();
-    if (revolveTool_.axisLineID != NullID) {
-        ImGui::Text("Axis: Line %u", revolveTool_.axisLineID);
-        if (ImGui::Button("Change Axis")) {
-            revolveTool_.phase = RevolvePhase::SelectingAxis;
-            revolveTool_.axisLineID = NullID;
-            revolveTool_.previewDirty = true;
-        }
-    } else {
-        if (revolveTool_.phase == RevolvePhase::SelectingAxis) {
-            ImGui::TextColored(ImVec4(1,0.8f,0,1), "Click a line for axis");
-        } else {
-            if (ImGui::Button("Select Axis")) {
-                revolveTool_.phase = RevolvePhase::SelectingAxis;
-            }
-        }
-    }
-
-    // Profile info
-    ImGui::Separator();
-    ImGui::Text("Profiles: %d / %d",
-                (int)revolveTool_.selectedProfileIndices.size(),
-                (int)revolveTool_.allProfiles.size());
-
-    if (revolveTool_.phase != RevolvePhase::SelectingAxis) {
-        if (ImGui::Button("Select Profiles")) {
-            revolveTool_.phase = RevolvePhase::SelectingProfiles;
-        }
-    }
-
-    // OK / Cancel
-    ImGui::Separator();
-    bool canCommit = revolveTool_.hasSelectedProfiles() && revolveTool_.axisLineID != NullID;
-    if (!canCommit) ImGui::BeginDisabled();
-    if (ImGui::Button("OK [Enter]", {95, 0})) {
-        commitRevolve();
-    }
-    if (!canCommit) ImGui::EndDisabled();
-    ImGui::SameLine();
-    if (ImGui::Button("Cancel [Esc]", {95, 0})) {
-        cancelRevolve();
-    }
-
-    ImGui::End();
-    ImGui::PopStyleVar();
+App::RevolvePanelModel App::revolvePanelModel() const {
+    RevolvePanelModel m;
+    m.open = tool_.type == ToolType::Revolve && hasRevolveSketch();
+    if (!m.open) return m;
+    m.operation = (int)revolveTool_.operation;
+    m.angleText = revolveTool_.angleBuf;
+    m.axisLine = revolveTool_.axisLineID;
+    m.selectingAxis = revolveTool_.phase == RevolvePhase::SelectingAxis;
+    m.selectedProfiles = (int)revolveTool_.selectedProfileIndices.size();
+    m.totalProfiles = (int)revolveTool_.allProfiles.size();
+    m.canCommit = revolveTool_.hasSelectedProfiles() && revolveTool_.axisLineID != NullID;
+    return m;
 }
+
+void App::setRevolveOperation(int op) {
+    if (op == (int)ExtrudeOperation::Cut && scene_.empty()) return;   // nothing to cut
+    revolveTool_.operation = (ExtrudeOperation)op;
+    revolveTool_.previewDirty = true;
+}
+
+void App::setRevolveAngleText(const std::string& text) {
+    snprintf(revolveTool_.angleBuf, sizeof(revolveTool_.angleBuf), "%s", text.c_str());
+    float val = (float)atof(revolveTool_.angleBuf);
+    if (std::fabs(val) > 0.01f) {
+        revolveTool_.angleDeg = val;
+        revolveTool_.previewDirty = true;
+    } else {
+        snprintf(revolveTool_.angleBuf, sizeof(revolveTool_.angleBuf), "%.1f", revolveTool_.angleDeg);
+    }
+}
+
+void App::pickRevolveAxis(bool clearCurrent) {
+    revolveTool_.phase = RevolvePhase::SelectingAxis;
+    if (clearCurrent) {
+        revolveTool_.axisLineID = NullID;
+        revolveTool_.previewDirty = true;
+    }
+}
+
+void App::pickRevolveProfiles() { revolveTool_.phase = RevolvePhase::SelectingProfiles; }
 
 void App::updateRevolvePreview() {
     revolveTool_.previewDirty = false;
@@ -334,6 +272,7 @@ void App::renderRevolvePreview(const float* view, const float* proj, const float
     shader.setMat4("uProj", proj);
     shader.setVec3("uEyePos", eyePos[0], eyePos[1], eyePos[2]);
     shader.setVec3("uLightDir", 0.3f, 0.8f, 0.5f);
+    applyClip(shader, nullptr); // tool previews are never sectioned
 
     float alpha = (revolveTool_.operation == ExtrudeOperation::Cut) ? 0.4f : 0.5f;
     shader.setVec3("uColor", body.colorR, body.colorG, body.colorB);

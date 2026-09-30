@@ -1,5 +1,6 @@
 #pragma once
 #include "FeatureHistory.h"
+#include "Simulation.h"
 #include <vector>
 #include <utility>
 
@@ -17,6 +18,9 @@ enum class UndoActionType : uint8_t {
     ModifyRevolve,
     ModifyLoft,
     ModifyBoolean,
+    ModifyMeshImport,
+    ModifySimulation,
+    ModifyCadImport,
 };
 
 struct UndoCommand {
@@ -56,6 +60,18 @@ struct UndoCommand {
     // ModifyBoolean
     BooleanFeatureData oldBoolean;
     BooleanFeatureData newBoolean;
+
+    // ModifyMeshImport (unit, placement)
+    MeshImportFeatureData oldMeshImport;
+    MeshImportFeatureData newMeshImport;
+
+    // ModifyCadImport (placement, file)
+    CadImportFeatureData oldCadImport;
+    CadImportFeatureData newCadImport;
+
+    // ModifySimulation (whole set-up: nozzles, roles, run settings)
+    SimulationSetup oldSimulation;
+    SimulationSetup newSimulation;
 };
 
 class UndoStack {

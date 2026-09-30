@@ -3,6 +3,8 @@
 #include "ExtrudeTool.h"
 #include "ProfileDetector.h"
 #include "FacePicker.h"
+#include "MeshImport.h"
+#include "CadImport.h"
 #include <BRepAlgoAPI_Cut.hxx>
 #include <BRepAlgoAPI_Fuse.hxx>
 #include <BRepCheck_Analyzer.hxx>
@@ -12,6 +14,7 @@
 #include <BRepBndLib.hxx>
 #include <cstdio>
 #include <ctime>
+#include <map>
 #include <sstream>
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -358,6 +361,13 @@ std::set<int> matchProfiles(const std::vector<ProfileSignature>& sigs,
     return matched;
 }
 
+// Give the body at `index` its identity: made by `feature`, as its n-th body.
+static void tagBody(Scene3D& scene, int index, FeatureID feature, int n) {
+    Body3D& b = scene.getBodyMut(index);
+    b.sourceFeature = feature;
+    b.sourceIndex = n;
+}
+
 void replayFeatures(FeatureHistory& history,
                     std::vector<SketchPlane>& planes,
                     Scene3D& scene) {
@@ -379,6 +389,7 @@ void replayFeatures(FeatureHistory& history,
         Feature& mutableFeat = history.features()[fi];
         mutableFeat.hasError = false;
         mutableFeat.errorMsg.clear();
+        int created = 0; // bodies this feature has created, for their identities
 
         if (feat.type == FeatureType::Sketch) {
             const auto& sd = std::get<SketchFeatureData>(feat.data);
@@ -455,6 +466,7 @@ void replayFeatures(FeatureHistory& history,
                 bool anyCut = false;
                 for (int i = (int)scene.bodyCount() - 1; i >= 0; i--) {
                     const auto& body = scene.getBody(i);
+                    if (body.isMeshOnly()) continue; // no B-rep to cut
                     BRepAlgoAPI_Cut cutter(body.shape, toolShape);
                     if (!cutter.IsDone() || cutter.HasErrors()) {
                         logBooleanError(feat.name.c_str(), "Extrude Cut", body.shape, toolShape, i, -1, cutter);
@@ -472,6 +484,7 @@ void replayFeatures(FeatureHistory& history,
                         scene.replaceBody(i, solids[0]);
                         for (size_t j = 1; j < solids.size(); j++) {
                             scene.addBody(solids[j]);
+                            tagBody(scene, (int)scene.bodyCount() - 1, feat.id, created++);
                         }
                     }
                     anyCut = true;
@@ -485,9 +498,11 @@ void replayFeatures(FeatureHistory& history,
                 // NewBody + auto-fuse
                 scene.addBody(toolShape);
                 int newIdx = (int)scene.bodyCount() - 1;
+                tagBody(scene, newIdx, feat.id, created++);
 
                 for (int i = newIdx - 1; i >= 0; i--) {
                     const auto& existing = scene.getBody(i);
+                    if (existing.isMeshOnly()) continue; // never fuse into a reference mesh
                     BRepAlgoAPI_Fuse fuser(existing.shape, scene.getBody(newIdx).shape);
                     if (!fuser.IsDone() || fuser.HasErrors()) continue;
 
@@ -555,6 +570,7 @@ void replayFeatures(FeatureHistory& history,
                 bool anyCut = false;
                 for (int i = (int)scene.bodyCount() - 1; i >= 0; i--) {
                     const auto& body = scene.getBody(i);
+                    if (body.isMeshOnly()) continue; // no B-rep to cut
                     BRepAlgoAPI_Cut cutter(body.shape, toolShape);
                     if (!cutter.IsDone() || cutter.HasErrors()) {
                         logBooleanError(feat.name.c_str(), "Revolve Cut", body.shape, toolShape, i, -1, cutter);
@@ -572,6 +588,7 @@ void replayFeatures(FeatureHistory& history,
                         scene.replaceBody(i, solids[0]);
                         for (size_t j = 1; j < solids.size(); j++) {
                             scene.addBody(solids[j]);
+                            tagBody(scene, (int)scene.bodyCount() - 1, feat.id, created++);
                         }
                     }
                     anyCut = true;
@@ -584,9 +601,11 @@ void replayFeatures(FeatureHistory& history,
             } else {
                 scene.addBody(toolShape);
                 int newIdx = (int)scene.bodyCount() - 1;
+                tagBody(scene, newIdx, feat.id, created++);
 
                 for (int i = newIdx - 1; i >= 0; i--) {
                     const auto& existing = scene.getBody(i);
+                    if (existing.isMeshOnly()) continue; // never fuse into a reference mesh
                     BRepAlgoAPI_Fuse fuser(existing.shape, scene.getBody(newIdx).shape);
                     if (!fuser.IsDone() || fuser.HasErrors()) continue;
 
@@ -680,6 +699,7 @@ void replayFeatures(FeatureHistory& history,
             if (ld.operation == ExtrudeOperation::Cut) {
                 for (int i = (int)scene.bodyCount() - 1; i >= 0; i--) {
                     const auto& body = scene.getBody(i);
+                    if (body.isMeshOnly()) continue; // no B-rep to cut
                     BRepAlgoAPI_Cut cutter(body.shape, toolShape);
                     if (!cutter.IsDone() || cutter.HasErrors()) continue;
                     auto solids = enumerateSolids(cutter.Shape());
@@ -689,15 +709,19 @@ void replayFeatures(FeatureHistory& history,
                         scene.replaceBody(i, solids[0]);
                     } else {
                         scene.replaceBody(i, solids[0]);
-                        for (size_t j = 1; j < solids.size(); j++)
+                        for (size_t j = 1; j < solids.size(); j++) {
                             scene.addBody(solids[j]);
+                            tagBody(scene, (int)scene.bodyCount() - 1, feat.id, created++);
+                        }
                     }
                 }
             } else {
                 scene.addBody(toolShape);
                 int newIdx = (int)scene.bodyCount() - 1;
+                tagBody(scene, newIdx, feat.id, created++);
                 for (int i = newIdx - 1; i >= 0; i--) {
                     const auto& existing = scene.getBody(i);
+                    if (existing.isMeshOnly()) continue; // never fuse into a reference mesh
                     BRepAlgoAPI_Fuse fuser(existing.shape, scene.getBody(newIdx).shape);
                     if (!fuser.IsDone() || fuser.HasErrors()) continue;
                     auto solids = enumerateSolids(fuser.Shape());
@@ -708,12 +732,80 @@ void replayFeatures(FeatureHistory& history,
                     }
                 }
             }
+        } else if (feat.type == FeatureType::MeshImport) {
+            const auto& md = std::get<MeshImportFeatureData>(feat.data);
+
+            Body3D body;
+            MeshFileInfo info;
+            std::string err;
+            if (!loadMeshFile(md.sourcePath, md.unit, body.vertices, info, err)) {
+                // Referenced, not embedded: a moved or deleted file is an error on
+                // this feature, not a silently missing body.
+                mutableFeat.hasError = true;
+                mutableFeat.errorMsg = err;
+                continue;
+            }
+            applyMeshTransform(body.vertices, md.transform);
+            body.sourceFeature = feat.id;
+            body.sourceIndex = created++;
+            body.closed = info.closed;
+            scene.addMeshBody(std::move(body)); // uploaded when next rendered
+        } else if (feat.type == FeatureType::CadImport) {
+            const auto& cd = std::get<CadImportFeatureData>(feat.data);
+
+            std::vector<CadPart> parts;
+            CadFileInfo info;
+            std::string err;
+            if (!loadCadFile(cd.sourcePath, parts, info, err)) {
+                // Referenced, not embedded, like a mesh import.
+                mutableFeat.hasError = true;
+                mutableFeat.errorMsg = err;
+                continue;
+            }
+            // Names that tell the bodies apart in the object tree: an unnamed
+            // part gets a number, and a name used twice (instances of one part
+            // in an assembly) a suffix.
+            std::vector<std::string> names(parts.size());
+            std::map<std::string, int> uses, seen;
+            for (size_t i = 0; i < parts.size(); i++) {
+                names[i] = parts[i].name.empty() && parts.size() > 1 ? "Body " + std::to_string(i + 1) : parts[i].name;
+                uses[names[i]]++;
+            }
+            for (auto& n : names)
+                if (!n.empty() && uses[n] > 1) n += " (" + std::to_string(++seen[n]) + ")";
+            for (size_t pi = 0; pi < parts.size(); pi++) {
+                const CadPart& part = parts[pi];
+                // Placement is only a location, so the cached tessellation is reused.
+                scene.addBody(placeCadShape(part.shape, cd.transform), info.deflection, true);
+                tagBody(scene, (int)scene.bodyCount() - 1, feat.id, created++); // solid i of the file
+                Body3D& body = scene.getBodyMut((int)scene.bodyCount() - 1);
+                body.name = names[pi];
+                // A shell or face group can be open; only a solid is surely closed.
+                body.closed = part.shape.ShapeType() == TopAbs_SOLID;
+                if (part.hasColor) {
+                    body.hasFileColor = true;
+                    for (int k = 0; k < 3; k++) body.fileColor[k] = part.color[k];
+                    body.colorR = part.color[0]; body.colorG = part.color[1]; body.colorB = part.color[2];
+                }
+            }
         } else if (feat.type == FeatureType::Boolean) {
-            const auto& bd = std::get<BooleanFeatureData>(feat.data);
+            auto& bd = std::get<BooleanFeatureData>(mutableFeat.data);
 
-            int targetIdx = bd.targetBodyIndex;
-            int toolIdx = bd.toolBodyIndex;
+            // By identity. A project saved before identities has only indices:
+            // resolve those once and record who they pointed at, so from here
+            // on the Boolean follows its bodies rather than their positions.
+            const bool byRef = bd.targetBody.isSet() && bd.toolBody.isSet();
+            int targetIdx = byRef ? scene.findBody(bd.targetBody.feature, bd.targetBody.index) : bd.targetBodyIndex;
+            int toolIdx = byRef ? scene.findBody(bd.toolBody.feature, bd.toolBody.index) : bd.toolBodyIndex;
 
+            if (byRef && (targetIdx < 0 || toolIdx < 0)) {
+                // Its feature was deleted or suppressed, or a re-exported import
+                // now has fewer solids. Refuse rather than guess at another body.
+                mutableFeat.hasError = true;
+                mutableFeat.errorMsg = targetIdx < 0 ? "The target body no longer exists"
+                                                     : "The tool body no longer exists";
+                continue;
+            }
             if (targetIdx < 0 || targetIdx >= (int)scene.bodyCount() ||
                 toolIdx < 0 || toolIdx >= (int)scene.bodyCount() ||
                 targetIdx == toolIdx) {
@@ -724,10 +816,26 @@ void replayFeatures(FeatureHistory& history,
                 mutableFeat.errorMsg = msg;
                 continue;
             }
+            if (!byRef) {
+                const Body3D& t = scene.getBody(targetIdx);
+                const Body3D& u = scene.getBody(toolIdx);
+                bd.targetBody = {t.sourceFeature, t.sourceIndex};
+                bd.toolBody = {u.sourceFeature, u.sourceIndex};
+            }
+            // Kept current for builds that only read indices.
+            bd.targetBodyIndex = targetIdx;
+            bd.toolBodyIndex = toolIdx;
 
-            const auto& targetShape = scene.getBody(targetIdx).shape;
-            const auto& toolShape = scene.getBody(toolIdx).shape;
+            if (scene.getBody(targetIdx).isMeshOnly() || scene.getBody(toolIdx).isMeshOnly()) {
+                mutableFeat.hasError = true;
+                mutableFeat.errorMsg = "Boolean body is an imported mesh (no solid geometry)";
+                continue;
+            }
 
+            const TopoDS_Shape targetShape = scene.getBody(targetIdx).shape;
+            const TopoDS_Shape toolShape = scene.getBody(toolIdx).shape;
+
+            std::vector<TopoDS_Shape> solids;
             if (bd.operation == BooleanOperation::Union) {
                 BRepAlgoAPI_Fuse fuser(targetShape, toolShape);
                 if (!fuser.IsDone() || fuser.HasErrors()) {
@@ -736,21 +844,13 @@ void replayFeatures(FeatureHistory& history,
                     logBooleanError(feat.name.c_str(), "Union (Fuse)", targetShape, toolShape, targetIdx, toolIdx, fuser);
                     continue;
                 }
-                auto solids = enumerateSolids(fuser.Shape());
+                solids = enumerateSolids(fuser.Shape());
                 if (solids.empty()) {
                     mutableFeat.hasError = true;
                     mutableFeat.errorMsg = "Union produced no solids";
                     logBooleanError(feat.name.c_str(), "Union produced 0 solids", targetShape, toolShape, targetIdx, toolIdx, fuser);
                     continue;
                 }
-
-                // Remove tool body first (higher index), then replace target
-                int hi = std::max(targetIdx, toolIdx);
-                int lo = std::min(targetIdx, toolIdx);
-                scene.removeBody(hi);
-                scene.replaceBody(lo, solids[0]);
-                for (size_t j = 1; j < solids.size(); j++)
-                    scene.addBody(solids[j]);
             } else {
                 BRepAlgoAPI_Cut cutter(targetShape, toolShape);
                 if (!cutter.IsDone() || cutter.HasErrors()) {
@@ -759,19 +859,20 @@ void replayFeatures(FeatureHistory& history,
                     logBooleanError(feat.name.c_str(), "Subtract (Cut)", targetShape, toolShape, targetIdx, toolIdx, cutter);
                     continue;
                 }
-                auto solids = enumerateSolids(cutter.Shape());
+                solids = enumerateSolids(cutter.Shape());
+            }
 
-                // Remove tool body first (if higher index), then handle target
-                int hi = std::max(targetIdx, toolIdx);
-                int lo = std::min(targetIdx, toolIdx);
-                scene.removeBody(hi);
-
-                if (solids.empty()) {
-                    scene.removeBody(lo);
-                } else {
-                    scene.replaceBody(lo, solids[0]);
-                    for (size_t j = 1; j < solids.size(); j++)
-                        scene.addBody(solids[j]);
+            // The result is the target (it keeps the target's identity, name and
+            // colour, whichever comes first in the list); the tool is used up.
+            if (solids.empty()) {
+                scene.removeBody(std::max(targetIdx, toolIdx));
+                scene.removeBody(std::min(targetIdx, toolIdx));
+            } else {
+                scene.replaceBody(targetIdx, solids[0]);
+                scene.removeBody(toolIdx);
+                for (size_t j = 1; j < solids.size(); j++) {
+                    scene.addBody(solids[j]);
+                    tagBody(scene, (int)scene.bodyCount() - 1, feat.id, created++);
                 }
             }
         }

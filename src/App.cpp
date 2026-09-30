@@ -14,11 +14,6 @@
 #include <TopoDS_Solid.hxx>
 
 #include <glad/gl.h>
-#include <GLFW/glfw3.h>
-#include <imgui.h>
-#include <imgui_internal.h>
-#include <imgui_impl_glfw.h>
-#include <imgui_impl_opengl3.h>
 #include "UnitUtils.h"
 #include <cstdio>
 #include <cstdlib>
@@ -26,77 +21,17 @@
 #include <cmath>
 #include <algorithm>
 #include <string>
+#include <chrono>
 
 namespace shitcad {
 
 static float lerp(float a, float b, float t) { return a + (b - a) * t; }
 
-bool App::init() {
-    if (!glfwInit()) {
-        fprintf(stderr, "Failed to initialize GLFW\n");
-        return false;
-    }
-
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
-    glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
-    glfwWindowHint(GLFW_MAXIMIZED, GLFW_TRUE);
-
-    window_ = glfwCreateWindow(1280, 720, "SHITcad", nullptr, nullptr);
-    if (!window_) {
-        fprintf(stderr, "Failed to create GLFW window\n");
-        glfwTerminate();
-        return false;
-    }
-
-    glfwMakeContextCurrent(window_);
-    glfwSwapInterval(1);
-
-    int version = gladLoadGL(glfwGetProcAddress);
-    if (version == 0) {
-        fprintf(stderr, "Failed to initialize OpenGL loader\n");
-        return false;
-    }
-
-    IMGUI_CHECKVERSION();
-    ImGui::CreateContext();
-
-    // DPI scaling: query monitor content scale
-    float xscale = 1.0f, yscale = 1.0f;
-    glfwGetWindowContentScale(window_, &xscale, &yscale);
-    dpiScale_ = xscale > yscale ? xscale : yscale;
-    if (dpiScale_ < 1.0f) dpiScale_ = 1.0f;
-
-    // Load a crisp TTF font at native DPI size (no blurry bitmap scaling)
-    ImGuiIO& io = ImGui::GetIO();
-    float fontSize = 15.0f * dpiScale_;
-    const char* fontPaths[] = {
-        "C:/Windows/Fonts/segoeui.ttf",   // Segoe UI (Windows 10/11)
-        "C:/Windows/Fonts/calibri.ttf",    // Calibri fallback
-        "C:/Windows/Fonts/arial.ttf",      // Arial fallback
-    };
-    bool fontLoaded = false;
-    for (const char* path : fontPaths) {
-        FILE* f = fopen(path, "rb");
-        if (f) {
-            fclose(f);
-            io.Fonts->AddFontFromFileTTF(path, fontSize);
-            fontLoaded = true;
-            break;
-        }
-    }
-    if (!fontLoaded) {
-        // Fall back to default bitmap font with scaling
-        io.FontGlobalScale = dpiScale_;
-    }
+bool App::init(AppHost* host, float dpiScale) {
+    host_ = host;
+    dpiScale_ = dpiScale;
 
     prefs_.applyTheme();
-
-    // Scale ImGui style for high-DPI
-    ImGui::GetStyle().ScaleAllSizes(dpiScale_);
-
-    ImGui_ImplGlfw_InitForOpenGL(window_, true);
-    ImGui_ImplOpenGL3_Init("#version 330");
 
     if (!viewport3D_.init()) {
         fprintf(stderr, "Failed to init 3D viewport\n");
@@ -148,50 +83,50 @@ bool App::init() {
     return true;
 }
 
-void App::run() {
-    double lastTime = glfwGetTime();
+void App::frame(float dt, int framebufferW, int framebufferH, const InputFrame& input) {
+    fbW_ = framebufferW;
+    fbH_ = framebufferH;
+    in_ = input;
 
-    while (!glfwWindowShouldClose(window_)) {
-        profiler_.beginFrame();
+    // Frame rate over the last 60 frames, for the FPS readout
+    frameTimeSum_ += dt - frameTimes_[frameTimeIdx_];
+    frameTimes_[frameTimeIdx_] = dt;
+    frameTimeIdx_ = (frameTimeIdx_ + 1) % 60;
 
-        profiler_.begin("PollEvents");
-        glfwPollEvents();
-        profiler_.end();
+    updateCameraAnimation(dt);
 
-        double now = glfwGetTime();
-        float dt = (float)(now - lastTime);
-        lastTime = now;
-
-        updateCameraAnimation(dt);
-
-        ImGui_ImplOpenGL3_NewFrame();
-        ImGui_ImplGlfw_NewFrame();
-        ImGui::NewFrame();
-
-        profiler_.begin("UI+Input");
-        renderFrame();
-        profiler_.end();
-
-        ImGui::Render();
-
-        int w, h;
-        glfwGetFramebufferSize(window_, &w, &h);
-
-        profiler_.begin("Render3D");
-        render3DScene(w, h);
-        profiler_.end();
-
-        profiler_.begin("ImGuiDraw");
-        ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
-        profiler_.end();
-
-        profiler_.begin("SwapBuffers");
-        glfwSwapBuffers(window_);
-        profiler_.end();
-
-        profiler_.recordFrameEnd();
-        profiler_.endFrame();
+    // Posted operations run first, with the context current and before any
+    // of this frame's input or UI is built. Taken out first: one may post more.
+    if (!posted_.empty()) {
+        auto work = std::move(posted_);
+        posted_.clear();
+        for (auto& fn : work) fn();
     }
+
+    overlay_.clear();
+    renderFrame();
+}
+
+// The host draws overlay() after this: the 3D pass records overlays too
+// (extrude handle, box select, simulation labels).
+void App::paint() {
+    render3DScene(fbW_, fbH_);
+}
+
+void App::post(std::function<void()> fn) {
+    posted_.push_back(std::move(fn));
+    if (host_) host_->requestRedraw();
+}
+
+std::string App::chooseFile(FileDialog kind, const char* title) {
+    std::string path;
+    if (host_) host_->chooseFile(kind, title, path);
+    return path;
+}
+
+double App::nowSeconds() const {
+    using namespace std::chrono;
+    return duration<double>(steady_clock::now().time_since_epoch()).count();
 }
 
 void App::getViewProj(int w, int h, float view[16], float proj[16]) {
@@ -212,14 +147,17 @@ void App::render3DScene(int w, int h) {
 
     const auto& bg = activeTheme().bgColor;
     glClearColor(bg[0], bg[1], bg[2], 1.0f);
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
 
     float view[16], proj[16];
     getViewProj(w, h, view, proj);
 
+    // Sky and ground behind everything, so the horizon shows which way is up
+    viewport3D_.drawBackground(view, h > 0 ? (float)w / (float)h : 1.0f);
+
     // Ground grid — hidden in sketch mode since the adaptive sketch grid takes over
     if (mode_ != InteractionMode::Sketching)
-        viewport3D_.drawGroundGrid(view, proj);
+        viewport3D_.drawGroundGrid(view, proj, (float)w, (float)h);
 
     // Bodies — push faces back slightly so wireframe edges render cleanly on top
     float eye[3];
@@ -228,13 +166,24 @@ void App::render3DScene(int w, int h) {
         glEnable(GL_POLYGON_OFFSET_FILL);
         glPolygonOffset(1.0f, 1.0f);
     }
+    // Both body shaders light back faces, pickMesh is two-sided, and a section
+    // view shows interiors - so culling must be off. SketchRenderer enables it
+    // and does not restore it, which made sectioned vessels see-through from
+    // the second frame on.
+    glDisable(GL_CULL_FACE);
     profiler_.begin("Bodies");
-    scene_.render(viewport3D_.meshShader(), view, proj, eye);
+    // Results are drawn on the imported meshes' own triangles, so the meshes
+    // step aside while results are showing.
+    const bool resultsShown = workspace_ == Workspace::Simulation && simView_.loaded && simView_.show;
+    scene_.render(viewport3D_.meshShader(), view, proj, eye,
+                  resultsShown ? &simView_.coveredFeatures : nullptr, &section_);
+    renderSimulationResults(view, proj, eye);
+    renderSectionCap(view, proj, resultsShown);
     profiler_.end();
     if (prefs_.showWireframe) {
         glDisable(GL_POLYGON_OFFSET_FILL);
         glLineWidth(prefs_.edgeThickness);
-        scene_.renderEdges(viewport3D_.gridShader(), view, proj, prefs_.edgeColor);
+        scene_.renderEdges(viewport3D_.gridShader(), view, proj, prefs_.edgeColor, &section_);
         glLineWidth(1.0f);
     }
 
@@ -261,6 +210,8 @@ void App::render3DScene(int w, int h) {
         if (booleanTool_.previewDirty) updateBooleanPreview();
         renderBooleanPreview(view, proj, eye);
     }
+
+    renderSimulationOverlay(view, proj);
 
     // Reference planes (translucent) — render all planes marked as reference
     sketchRenderer_.renderReferencePlanes(sketchPlanes_.data(), (int)sketchPlanes_.size(),
@@ -375,14 +326,14 @@ void App::render3DScene(int w, int h) {
 
         // Selection overlay
         if (selection_.dragMode == SelectionDragMode::BoxSelect) {
-            // Draw box in screen space using ImGui
-            ImDrawList* dl = ImGui::GetForegroundDrawList();
-            ImVec2 a(f(selection_.dragAnchorScreen.x), f(selection_.dragAnchorScreen.y));
-            ImVec2 b = ImGui::GetIO().MousePos;
-            ImVec2 mn(std::min(a.x, b.x), std::min(a.y, b.y));
-            ImVec2 mx(std::max(a.x, b.x), std::max(a.y, b.y));
-            dl->AddRectFilled(mn, mx, IM_COL32(0, 230, 230, 38));
-            dl->AddRect(mn, mx, IM_COL32(0, 230, 230, 200), 0.0f, 0, 1.5f);
+            // Draw box in screen space
+            Overlay2D& ov = overlay_;
+            OvVec2 a(f(selection_.dragAnchorScreen.x), f(selection_.dragAnchorScreen.y));
+            OvVec2 b(in_.mouseX, in_.mouseY);
+            OvVec2 mn(std::min(a.x, b.x), std::min(a.y, b.y));
+            OvVec2 mx(std::max(a.x, b.x), std::max(a.y, b.y));
+            ov.addRectFilled(mn, mx, rgba32(0, 230, 230, 38));
+            ov.addRect(mn, mx, rgba32(0, 230, 230, 200), 0.0f, 0, 1.5f);
         } else if (selection_.dragMode == SelectionDragMode::LassoSelect) {
             sketchRenderer_.renderSelectionOverlay(sp, view, proj, selection_, cursorLocal_);
         }
@@ -394,15 +345,14 @@ void App::render3DScene(int w, int h) {
 }
 
 void App::renderFrame() {
-    ImGuiIO& io = ImGui::GetIO();
-    float vpW = io.DisplaySize.x;
-    float vpH = io.DisplaySize.y;
+    const float vpW = in_.screenW;
+    const float vpH = in_.screenH;
 
     // Sync user-adjustable dimension colors into active theme (before renderDimensions)
     {
         auto& tm = activeThemeMut();
-        auto toU32 = [](const float c[4]) -> ImU32 {
-            return IM_COL32((int)(c[0]*255), (int)(c[1]*255), (int)(c[2]*255), (int)(c[3]*255));
+        auto toU32 = [](const float c[4]) -> Color32 {
+            return rgba32((int)(c[0]*255), (int)(c[1]*255), (int)(c[2]*255), (int)(c[3]*255));
         };
         tm.dimLineColor = toU32(prefs_.dimLineCol);
         tm.dimTextColor = toU32(prefs_.dimTextCol);
@@ -410,40 +360,19 @@ void App::renderFrame() {
     }
 
     // Toggle object tree with T key (only in navigate mode)
-    if (!io.WantCaptureKeyboard && mode_ == InteractionMode::Navigate &&
-        ImGui::IsKeyPressed(ImGuiKey_T)) {
+    if (mode_ == InteractionMode::Navigate &&
+        in_.keyPressed(Key::T)) {
         objectTreeOpen_ = !objectTreeOpen_;
     }
 
     // Toggle ortho/perspective with O key
-    if (!io.WantCaptureKeyboard && ImGui::IsKeyPressed(ImGuiKey_O)) {
-        viewport3D_.camera().orthographic = !viewport3D_.camera().orthographic;
+    if (in_.keyPressed(Key::O)) {
+        setOrthographic(!viewport3D_.camera().orthographic);
     }
+    handleNumpadView(vpW, vpH);
 
-    // Toolbar — auto-fit height
-    float toolbarH = ImGui::GetFrameHeight() + ImGui::GetStyle().WindowPadding.y * 2.0f;
-    ImGui::SetNextWindowPos({0, 0});
-    ImGui::SetNextWindowSize({vpW, toolbarH});
-    ImGui::Begin("##toolbar", nullptr,
-        ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
-        ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse |
-        ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse |
-        ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoFocusOnAppearing);
-    drawToolbar();
-    ImGui::End();
-
-    // Object tree sidebar (positioned below toolbar)
-    float panelW = 0.0f;
-    if (objectTreeOpen_) {
-        panelW = 200.0f;
-        drawObjectTree();
-    }
-
-    // Handle input (below toolbar, right of object tree)
-    float inputY = toolbarH;
-    float inputH = vpH - inputY;
-
-    viewport3D_.handleInput(panelW, inputY, vpW - panelW, inputH);
+    // The panels are the host's widgets, outside the view: all of it takes input.
+    viewport3D_.handleInput(in_, 0.0f, 0.0f, vpW, vpH);
 
     // Route extrude/revolve input regardless of mode
     profiler_.begin("Input");
@@ -456,94 +385,65 @@ void App::renderFrame() {
     } else if (isBooleanActive()) {
         handleBooleanInput(vpW, vpH);
     } else if (mode_ == InteractionMode::Navigate || !hasActiveSketch()) {
-        handleNavigateInput(vpW, vpH);
+        if (workspace_ == Workspace::Simulation)
+            handleSimulationInput(vpW, vpH);
+        else
+            handleNavigateInput(vpW, vpH);
     } else {
         handleSketchInput(vpW, vpH);
     }
+    // Same condition that routes input to handleNavigateInput above. Not
+    // `tool_.type == None`: init() leaves the sketch Line tool selected while
+    // in Navigate mode, which would hide the readout for the whole session.
+    bool navigating = mode_ == InteractionMode::Navigate &&
+                      tool_.type != ToolType::Extrude && tool_.type != ToolType::Revolve &&
+                      tool_.type != ToolType::Loft && !isBooleanActive();
+    // In the Simulation workspace the hover pick only matters while placing.
+    if (navigating && (workspace_ == Workspace::Model || simUi_.placing))
+        updateMeshHover(vpW, vpH);
+    else
+        meshHover_ = {};
     profiler_.end();
 
-    // Extrude panel
-    if (tool_.type == ToolType::Extrude && hasExtrudeSketch()) drawExtrudePanel();
-    if (tool_.type == ToolType::Revolve && hasRevolveSketch()) drawRevolvePanel();
-    if (tool_.type == ToolType::Loft) drawLoftPanel();
-    if (isBooleanActive()) drawBooleanPanel();
-
-    // Dimension panel
-    if (tool_.type == ToolType::Dimension && activeSketchPlane_ >= 0) drawDimensionPanel(activeSketch());
-
-    // Preferences window
-    if (prefsOpen_) drawPreferencesWindow();
-
-    // Cylinder tangent plane dialog
-    if (cylPlaneDialogOpen_) {
-        ImGui::SetNextWindowSize({280, 0}, ImGuiCond_Always);
-        ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Appearing, {0.5f, 0.5f});
-        ImGui::Begin("Tangent Plane", &cylPlaneDialogOpen_,
-            ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_AlwaysAutoResize);
-
-        ImGui::Text("Create a tangent plane on cylinder");
-        ImGui::Separator();
-
-        ImGui::Text("Name:");
-        ImGui::SetNextItemWidth(-1);
-        ImGui::InputText("##cylname", cylPlaneNameBuf_, sizeof(cylPlaneNameBuf_));
-
-        ImGui::Text("Angle (degrees from click point):");
-        ImGui::SetNextItemWidth(-1);
-        if (ImGui::InputText("##cylangle", cylPlaneAngleBuf_, sizeof(cylPlaneAngleBuf_),
-                             ImGuiInputTextFlags_EnterReturnsTrue)) {
-            cylPlaneAngle_ = (float)atof(cylPlaneAngleBuf_);
+    // Dimension tool: the typed value follows into its constraint every frame
+    if (tool_.type == ToolType::Dimension && activeSketchPlane_ >= 0) {
+        if (dimTool_.warningTimer > 0) dimTool_.warningTimer -= in_.dt;
+        if (dimTool_.phase != DimToolState::Selecting) {
+            syncDimensionLive();
+            if (in_.keyPressed(Key::Escape)) cancelDimension();
         }
-        ImGui::SliderFloat("##cylangleslider", &cylPlaneAngle_, -180.0f, 180.0f, "%.1f deg");
-        snprintf(cylPlaneAngleBuf_, sizeof(cylPlaneAngleBuf_), "%.1f", cylPlaneAngle_);
-
-        ImGui::Separator();
-        if (ImGui::Button("Create & Sketch", {-1, 0})) {
-            SketchPlane newPlane;
-            if (buildCylinderTangentPlane(cylPlaneFace_, cylPlaneAngle_, cylPlaneHitWorld_, newPlane)) {
-                newPlane.sourceBodyIndex = cylPlaneBodyIndex_;
-                newPlane.name = strlen(cylPlaneNameBuf_) > 0 ? cylPlaneNameBuf_ : "CylPlane";
-                newPlane.isReferencePlane = true;
-                newPlane.color[0] = 0.2f; newPlane.color[1] = 0.7f;
-                newPlane.color[2] = 0.5f; newPlane.color[3] = 0.15f;
-                projectFaceOntoSketch(cylPlaneFace_, newPlane, newPlane.sketch);
-                newPlane.planeID = nextPlaneID_++;
-                sketchPlanes_.push_back(std::move(newPlane));
-                cylPlaneDialogOpen_ = false;
-                enterSketchMode((int)sketchPlanes_.size() - 1);
-            }
-        }
-        if (ImGui::Button("Cancel", {-1, 0})) {
-            cylPlaneDialogOpen_ = false;
-        }
-
-        ImGui::End();
     }
 
-    // Timeline
-    float timelineH = 0.0f;
-    if (timelineOpen_ && !featureHistory_.empty()) {
-        timelineH = ImGui::GetFrameHeight() + ImGui::GetStyle().WindowPadding.y * 2.0f;
-        drawTimeline(panelW);
+    pollSimulationRun(); // every frame, whichever workspace is showing
+    validateSimulationSelection();
+    drawNozzleLabels();
+    validateMeshPlace();
+    drawMeshHoverReadout();
+
+    // Timeline: the playhead's deferred replay, and Delete on its selection
+    const float timelineH = hostTimelineH_;
+    if (!featureHistory_.empty()) {
+        if (playheadDragging_) tickPlayhead();
+        if (in_.keyPressed(Key::Delete)) deleteSelectedFeature();
     }
 
     // FPS / frametime overlay
     {
-        ImGuiIO& fpsIo = ImGui::GetIO();
+        const float fps = frameTimeSum_ > 0.0f ? 60.0f / frameTimeSum_ : 0.0f;
         char fpsText[64];
-        snprintf(fpsText, sizeof(fpsText), "%.1f FPS  (%.2f ms)", fpsIo.Framerate, 1000.0f / fpsIo.Framerate);
-        ImVec2 textSize = ImGui::CalcTextSize(fpsText);
-        ImVec2 pos(vpW - textSize.x - 8.0f, vpH - textSize.y - 8.0f - timelineH);
-        ImDrawList* dl = ImGui::GetForegroundDrawList();
-        dl->AddRectFilled(ImVec2(pos.x - 4, pos.y - 2), ImVec2(pos.x + textSize.x + 4, pos.y + textSize.y + 2),
-                          IM_COL32(0, 0, 0, 140), 4.0f);
-        dl->AddText(pos, IM_COL32(200, 200, 200, 255), fpsText);
+        snprintf(fpsText, sizeof(fpsText), "%.1f FPS  (%.2f ms)", fps, fps > 0.0f ? 1000.0f / fps : 0.0f);
+        Overlay2D& ov = overlay_;
+        OvVec2 textSize = ov.textSize(fpsText);
+        OvVec2 pos(vpW - textSize.x - 8.0f, vpH - textSize.y - 8.0f - timelineH);
+        ov.addRectFilled(OvVec2(pos.x - 4, pos.y - 2), OvVec2(pos.x + textSize.x + 4, pos.y + textSize.y + 2),
+                          rgba32(0, 0, 0, 140), 4.0f);
+        ov.addText(pos, rgba32(200, 200, 200, 255), fpsText);
     }
 
-    // Dimension annotations (must be in ImGui frame, before ImGui::Render())
+    // Dimension annotations
     {
         int w, h;
-        glfwGetFramebufferSize(window_, &w, &h);
+        framebufferSize(w, h);
         float view[16], proj[16];
         getViewProj(w, h, view, proj);
         renderDimensions(view, proj, (float)w, (float)h);
@@ -552,7 +452,7 @@ void App::renderFrame() {
     // Scale ruler — bottom-left of viewport, only in sketch mode
     if (mode_ == InteractionMode::Sketching && hasActiveSketch()) {
         int fbW, fbH;
-        glfwGetFramebufferSize(window_, &fbW, &fbH);
+        framebufferSize(fbW, fbH);
         float view[16], proj[16];
         getViewProj(fbW, fbH, view, proj);
         const auto& sp = activePlane();
@@ -581,19 +481,19 @@ void App::renderFrame() {
 
         // Position: bottom-left of viewport, above any timeline
         float margin  = 16.0f;
-        float rulerX  = panelW + margin;
+        float rulerX  = margin;
         float rulerY  = vpH - margin - 24.0f;
 
-        ImDrawList* dl = ImGui::GetForegroundDrawList();
-        ImU32 col = IM_COL32(160, 160, 160, 220);
+        Overlay2D& ov = overlay_;
+        Color32 col = rgba32(160, 160, 160, 220);
         float capH = 5.0f;
 
-        dl->AddLine(ImVec2(rulerX,           rulerY), ImVec2(rulerX + rulerPx, rulerY), col, 1.5f);
-        dl->AddLine(ImVec2(rulerX,           rulerY - capH), ImVec2(rulerX,           rulerY + capH), col, 1.5f);
-        dl->AddLine(ImVec2(rulerX + rulerPx, rulerY - capH), ImVec2(rulerX + rulerPx, rulerY + capH), col, 1.5f);
+        ov.addLine(OvVec2(rulerX,           rulerY), OvVec2(rulerX + rulerPx, rulerY), col, 1.5f);
+        ov.addLine(OvVec2(rulerX,           rulerY - capH), OvVec2(rulerX,           rulerY + capH), col, 1.5f);
+        ov.addLine(OvVec2(rulerX + rulerPx, rulerY - capH), OvVec2(rulerX + rulerPx, rulerY + capH), col, 1.5f);
 
-        ImVec2 ts = ImGui::CalcTextSize(label);
-        dl->AddText(ImVec2(rulerX + rulerPx * 0.5f - ts.x * 0.5f, rulerY - ts.y - 3.0f), col, label);
+        OvVec2 ts = ov.textSize(label);
+        ov.addText(OvVec2(rulerX + rulerPx * 0.5f - ts.x * 0.5f, rulerY - ts.y - 3.0f), col, label);
     }
 }
 
@@ -604,43 +504,40 @@ void App::renderFrame() {
 
 
 void App::handleNavigateInput(float vpW, float vpH) {
-    ImGuiIO& io = ImGui::GetIO();
 
     // Global undo/redo in navigate mode
-    if (!io.WantCaptureKeyboard) {
-        if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_Z) && !io.KeyShift) globalUndo();
-        if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_Y)) globalRedo();
-        if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_Z) && io.KeyShift) globalRedo();
-        if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_S)) saveProjectDialog();
-        if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_O)) openProjectDialog();
-        if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_E)) exportStlDialog();
-    }
+    if (in_.ctrl && in_.keyPressed(Key::Z) && !in_.shift) globalUndo();
+    if (in_.ctrl && in_.keyPressed(Key::Y)) globalRedo();
+    if (in_.ctrl && in_.keyPressed(Key::Z) && in_.shift) globalRedo();
+    if (in_.ctrl && in_.keyPressed(Key::S)) saveProjectDialog();
+    if (in_.ctrl && in_.keyPressed(Key::O)) openProjectDialog();
+    if (in_.ctrl && in_.keyPressed(Key::E)) exportStlDialog();
 
     // E key: enter extrude mode from navigate mode
-    if (!io.WantCaptureKeyboard && ImGui::IsKeyPressed(ImGuiKey_E)) {
+    if (in_.keyPressed(Key::E)) {
         enterExtrudeMode();
         return;
     }
     // V key: enter revolve mode from navigate mode
-    if (!io.WantCaptureKeyboard && ImGui::IsKeyPressed(ImGuiKey_V)) {
+    if (in_.keyPressed(Key::V)) {
         enterRevolveMode();
         return;
     }
 
     // Don't handle clicks on toolbar
-    if (io.MousePos.y < 30.0f) return;
+    if (in_.mouseY < in_.viewY) return;
 
     // Face pick for "Add Reference Plane" dialog
-    if (addPlaneWaitingFace_ && ImGui::IsMouseClicked(ImGuiMouseButton_Left) && !io.WantCaptureMouse) {
+    if (addPlaneWaitingFace_ && in_.mouseClicked(MouseButton::Left)) {
         int w, h;
-        glfwGetFramebufferSize(window_, &w, &h);
+        framebufferSize(w, h);
         float view[16], proj[16];
         getViewProj(w, h, view, proj);
 
         float rayOrig[3], rayDir[3];
-        screenToRay(io.MousePos.x, io.MousePos.y, 0, 0, vpW, vpH, view, proj, rayOrig, rayDir);
+        screenToRay(in_.mouseX, in_.mouseY, 0, 0, vpW, vpH, view, proj, rayOrig, rayDir);
 
-        FacePickResult faceHit = pickFace(scene_, rayOrig, rayDir);
+        FacePickResult faceHit = pickFace(scene_, rayOrig, rayDir, &section_);
         if (faceHit.hit) {
             SketchPlane facePlane;
             if (extractPlaneFromFace(faceHit.face, facePlane, faceHit.hitWorld)) {
@@ -653,14 +550,14 @@ void App::handleNavigateInput(float vpW, float vpH) {
     }
 
     // Double-click: start sketch on a reference plane or body face
-    if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) && !io.WantCaptureMouse) {
+    if (in_.mouseDoubleClicked(MouseButton::Left)) {
         int w, h;
-        glfwGetFramebufferSize(window_, &w, &h);
+        framebufferSize(w, h);
         float view[16], proj[16];
         getViewProj(w, h, view, proj);
 
         float rayOrig[3], rayDir[3];
-        screenToRay(io.MousePos.x, io.MousePos.y, 0, 0, vpW, vpH, view, proj, rayOrig, rayDir);
+        screenToRay(in_.mouseX, in_.mouseY, 0, 0, vpW, vpH, view, proj, rayOrig, rayDir);
 
         // Check reference planes first (built-in + user-created)
         float bestT = 1e30f;
@@ -681,13 +578,12 @@ void App::handleNavigateInput(float vpW, float vpH) {
         }
 
         // Check body faces
-        FacePickResult faceHit = pickFace(scene_, rayOrig, rayDir);
+        FacePickResult faceHit = pickFace(scene_, rayOrig, rayDir, &section_);
         if (faceHit.hit && faceHit.t < bestT) {
             if (isCylindricalFace(faceHit.face)) {
                 // Open tangent plane dialog for cylinders
                 cylPlaneDialogOpen_ = true;
                 cylPlaneAngle_ = 0.0f;
-                snprintf(cylPlaneAngleBuf_, sizeof(cylPlaneAngleBuf_), "0");
                 snprintf(cylPlaneNameBuf_, sizeof(cylPlaneNameBuf_), "CylPlane");
                 cylPlaneFace_ = faceHit.face;
                 cylPlaneHitWorld_[0] = faceHit.hitWorld[0];
@@ -940,6 +836,109 @@ void App::updateCameraAnimation(float dt) {
     cam.targetZ = lerp(cameraFrom_.targetZ, cameraTo_.targetZ, s);
 }
 
+// Turn the camera to a yaw/pitch about the same target, the short way round.
+// Starts from where a running animation was heading.
+void App::animateCameraView(float yaw, float pitch) {
+    OrbitCamera to = cameraAnimating_ ? cameraTo_ : viewport3D_.camera();
+    const float currentYaw = viewport3D_.camera().yaw;
+    float yawDiff = std::fmod(yaw - currentYaw, 360.0f);
+    if (yawDiff > 180.0f) yawDiff -= 360.0f;
+    if (yawDiff < -180.0f) yawDiff += 360.0f;
+    to.yaw = currentYaw + yawDiff;
+    to.pitch = pitch;
+    to.distance = viewport3D_.camera().distance;
+    to.orthographic = viewport3D_.camera().orthographic;
+    to.autoOrtho = viewport3D_.camera().autoOrtho;
+
+    cameraFrom_ = viewport3D_.camera();
+    cameraTo_ = to;
+    cameraAnimating_ = true;
+    cameraAnimT_ = 0.0f;
+}
+
+void App::setOrthographic(bool on) {
+    OrbitCamera& cam = viewport3D_.camera();
+    const float before = cam.distance;
+    cam.setOrthographic(on);
+    // An animation in flight lerps the distance: keep it in the new projection.
+    const float k = cam.distance / before;
+    cameraFrom_.distance *= k;
+    cameraTo_.distance *= k;
+}
+
+// Keys that go into a value rather than to the view: digits open the inline
+// box while a circle's centre or a fillet's corner waits for its size, and a
+// value being typed keeps them. (Qt text fields never pass keys to the view.)
+bool App::numpadTypesText() const {
+    if (tool_.inlineInputActive) return true;
+    if (mode_ == InteractionMode::Sketching && hasActiveSketch() && tool_.hasFirstPoint &&
+        (tool_.type == ToolType::Circle || tool_.type == ToolType::Fillet))
+        return true;
+    return tool_.type == ToolType::Dimension && dimTool_.phase != DimToolState::Selecting;
+}
+
+// Blender's numpad: 1/3/7 front/right/top (Ctrl: back/left/bottom), 5 ortho
+// or perspective, 2/4/6/8 orbit in 15-degree steps (Ctrl: pan), 9 the
+// opposite side, +/- zoom. The axis views switch to orthographic and orbiting
+// away switches back, unless 5 or O chose the projection.
+void App::handleNumpadView(float vpW, float vpH) {
+    if (numpadTypesText()) return;
+    auto pressed = [&](int d) { return in_.keyPressed(keypadDigitKey(d)); };
+    OrbitCamera& cam = viewport3D_.camera();
+    constexpr float kStep = 15.0f;
+
+    auto axisView = [&](float yaw, float pitch) {
+        if (!cam.orthographic) {
+            setOrthographic(true);
+            cam.autoOrtho = true;
+        }
+        animateCameraView(yaw, pitch);
+    };
+    if (pressed(1)) axisView(in_.ctrl ? 180.0f : 0.0f, 0.0f);
+    if (pressed(3)) axisView(in_.ctrl ? -90.0f : 90.0f, 0.0f);
+    if (pressed(7)) axisView(0.0f, in_.ctrl ? -90.0f : 90.0f);
+
+    if (pressed(5)) setOrthographic(!cam.orthographic);
+
+    // Home frames everything (Blender's View All)
+    if (in_.keyPressed(Key::Home)) frameScene();
+
+    if (pressed(9)) {
+        const OrbitCamera& at = cameraAnimating_ ? cameraTo_ : cam;
+        animateCameraView(at.yaw + 180.0f, -at.pitch);
+    }
+
+    const float h = (float)pressed(6) - (float)pressed(4);
+    const float v = (float)pressed(8) - (float)pressed(2);
+    if (h != 0.0f || v != 0.0f) {
+        if (in_.ctrl) {
+            // Pan the view a tenth of its height per press, carrying an
+            // animation in flight along with it.
+            const float x0 = cam.targetX, y0 = cam.targetY, z0 = cam.targetZ;
+            const float px = vpH * 0.1f;
+            cam.pan(-h * px, v * px, vpW, vpH);
+            for (OrbitCamera* c : {&cameraFrom_, &cameraTo_}) {
+                c->targetX += cam.targetX - x0;
+                c->targetY += cam.targetY - y0;
+                c->targetZ += cam.targetZ - z0;
+            }
+        } else {
+            if (cam.autoOrtho) setOrthographic(false);
+            OrbitCamera& to = cameraAnimating_ ? cameraTo_ : cam;
+            to.yaw += h * kStep;
+            to.pitch += v * kStep;
+        }
+    }
+
+    const float zoom = (float)in_.keyPressed(Key::KeypadPlus) - (float)in_.keyPressed(Key::KeypadMinus);
+    if (zoom != 0.0f) {
+        const float before = cam.distance;
+        cam.zoom(zoom);
+        cameraFrom_.distance *= cam.distance / before;
+        cameraTo_.distance *= cam.distance / before;
+    }
+}
+
 // enterExtrudeMode, handleExtrudeInput, drawExtrudePanel, updateExtrudePreview,
 // renderExtrudePreview, renderExtrudeHandle, editExtrudeFeature, commitExtrude,
 // cancelExtrude are in AppExtrude.cpp
@@ -952,18 +951,15 @@ void App::updateCameraAnimation(float dt) {
 
 void App::shutdown() {
     scene_.clear();
+    scene_.syncGpu(); // free the buffers clear() queued, while the context is current
     sketchRenderer_.shutdown();
     viewport3D_.shutdown();
-
-    ImGui_ImplOpenGL3_Shutdown();
-    ImGui_ImplGlfw_Shutdown();
-    ImGui::DestroyContext();
-
-    if (window_) {
-        glfwDestroyWindow(window_);
-        window_ = nullptr;
-    }
-    glfwTerminate();
+    if (simLineVAO_) { glDeleteVertexArrays(1, &simLineVAO_); simLineVAO_ = 0; }
+    if (simLineVBO_) { glDeleteBuffers(1, &simLineVBO_); simLineVBO_ = 0; }
+    if (capVAO_) { glDeleteVertexArrays(1, &capVAO_); capVAO_ = 0; }
+    if (capVBO_) { glDeleteBuffers(1, &capVBO_); capVBO_ = 0; }
+    if (simRunner_.running()) simRunner_.cancel();
+    releaseSimulationResults();
 }
 
 } // namespace shitcad

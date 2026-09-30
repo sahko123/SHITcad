@@ -4,7 +4,7 @@ A parametric CAD modeler. Sketch 2D profiles with geometric and dimensional
 constraints, extrude / revolve / loft them into 3D solids, and edit anything
 afterwards through a full feature history with undo/redo and timeline playback.
 
-Built with C++17, OpenGL 3.3, Dear ImGui, and OpenCASCADE.
+Built with C++17, OpenGL 3.3, Qt 6 Widgets, and OpenCASCADE.
 
 ## Features
 
@@ -24,17 +24,18 @@ Built with C++17, OpenGL 3.3, Dear ImGui, and OpenCASCADE.
 
 ## Requirements
 
-- **Windows** (uses Win32 file dialogs and `dbghelp` for crash logging)
+- **Windows** (the simulation runner uses Win32 processes and job objects, and
+  crash logging uses `dbghelp`)
 - **Visual Studio 2019 or 2022** with the C++ desktop workload (MSVC, C++17)
 - **CMake 3.20+**
-- **[vcpkg](https://github.com/microsoft/vcpkg)** — supplies OpenCASCADE
+- **[vcpkg](https://github.com/microsoft/vcpkg)** — supplies OpenCASCADE and Qt 6
 - **Python 3** with **Jinja2** (`pip install jinja2`) — glad generates the
   OpenGL loader at build time with a Python script. The configure step checks
   for this and tells you if it's missing.
 - A GPU/driver supporting **OpenGL 3.3 core**
 
-GLFW 3.4, glad, Dear ImGui 1.91.9 and nlohmann/json 3.11.3 are fetched
-automatically by CMake at configure time — no manual setup needed.
+glad and nlohmann/json 3.11.3 are fetched automatically by CMake at configure
+time — no manual setup needed.
 
 ## Building
 
@@ -60,10 +61,10 @@ cmake -B build -S . -DCMAKE_TOOLCHAIN_FILE=<path-to-vcpkg>/scripts/buildsystems/
 cmake --build build --config Release
 ```
 
-`vcpkg.json` declares OpenCASCADE as a manifest dependency, so the configure
-step installs it automatically. **The first configure builds OpenCASCADE from
-source and can take upwards of an hour**; subsequent builds reuse vcpkg's binary
-cache and are fast.
+`vcpkg.json` declares OpenCASCADE and a trimmed `qtbase` (Widgets and OpenGL
+only) as manifest dependencies, so the configure step installs them
+automatically. **The first configure builds both from source and can take well
+over an hour**; subsequent builds reuse vcpkg's binary cache and are fast.
 
 ### 3. Run
 
@@ -71,16 +72,19 @@ cache and are fast.
 ./build/Release/SHITcad.exe
 ```
 
-vcpkg copies the OpenCASCADE DLLs next to the executable as part of the build,
-so it runs in place with no extra setup.
+vcpkg copies the OpenCASCADE and Qt DLLs next to the executable as part of the
+build, and the build copies Qt's Windows platform plugin into `platforms/`, so it
+runs in place with no extra setup.
 
 ## Repository layout
 
 | Path | Contents |
 |------|----------|
-| `src/` | All application source. The `App` class is split across `App*.cpp` files by responsibility (sketching, UI, dimensions, extrude, revolve, loft, boolean). |
+| `src/` | The CAD core, the 3D viewport and the `App` class, which is split across `App*.cpp` files by responsibility (sketching, panel models, dimensions, extrude, revolve, loft, boolean, simulation). None of it uses Qt. |
+| `src/qt/` | The Qt 6 Widgets front end: main window, viewport widget, toolbar, docks and dialogs |
+| `tests/` | Headless test programs (`-DSHITCAD_BUILD_TESTS=ON`) |
 | `cmake/Dependencies.cmake` | FetchContent declarations and the OpenCASCADE target |
-| `vcpkg.json` | vcpkg manifest pinning the OpenCASCADE dependency |
+| `vcpkg.json` | vcpkg manifest pinning OpenCASCADE and Qt |
 | `CLAUDE.md` | Detailed architecture notes and conventions |
 
 See [CLAUDE.md](CLAUDE.md) for the architecture walkthrough — data flow, the ID
@@ -101,6 +105,10 @@ then configure again.
 **The window opens black or the app exits immediately**
 The GPU or driver doesn't expose OpenGL 3.3 core. Check
 `build/<config>/SHITcad_stderr.log` for the GL initialization error.
+
+**"This application failed to start because no Qt platform plugin could be initialized"**
+`platforms/qwindows.dll` is missing next to the executable; rebuild the
+`SHITcad` target, whose post-build step copies it from vcpkg.
 
 **Crash on startup**
 A crash dump and log are written next to the executable by `CrashLogger`.

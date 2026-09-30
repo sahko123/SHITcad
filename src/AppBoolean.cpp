@@ -4,7 +4,6 @@
 #include "FeatureReplay.h"
 #include <BRepAlgoAPI_Cut.hxx>
 #include <BRepAlgoAPI_Fuse.hxx>
-#include <imgui.h>
 
 namespace shitcad {
 
@@ -18,28 +17,27 @@ void App::enterBooleanMode(BooleanOperation op) {
 }
 
 void App::handleBooleanInput(float vpW, float vpH) {
-    if (ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+    if (in_.keyPressed(Key::Escape)) {
         cancelBoolean();
         return;
     }
-    if (ImGui::IsKeyPressed(ImGuiKey_Enter) && booleanTool_.canCommit()) {
+    if (in_.keyPressed(Key::Enter) && booleanTool_.canCommit()) {
         commitBoolean();
         return;
     }
 
     // Click to pick bodies
-    if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) && !ImGui::GetIO().WantCaptureMouse) {
-        float mx = ImGui::GetMousePos().x;
-        float my = ImGui::GetMousePos().y;
-        ImVec2 vMin = ImGui::GetMainViewport()->WorkPos;
+    if (in_.mouseClicked(MouseButton::Left)) {
+        float mx = in_.mouseX;
+        float my = in_.mouseY;
 
         float view[16], proj[16];
         getViewProj((int)vpW, (int)vpH, view, proj);
 
         float rayOrig[3], rayDir[3];
-        screenToRay(mx, my, vMin.x, vMin.y, vpW, vpH, view, proj, rayOrig, rayDir);
+        screenToRay(mx, my, 0, 0, vpW, vpH, view, proj, rayOrig, rayDir);
 
-        FacePickResult hit = pickFace(scene_, rayOrig, rayDir);
+        FacePickResult hit = pickFace(scene_, rayOrig, rayDir, &section_);
         if (hit.hit) {
             int bodyIdx = hit.bodyIndex;
 
@@ -62,72 +60,27 @@ void App::handleBooleanInput(float vpW, float vpH) {
     }
 }
 
-void App::drawBooleanPanel() {
-    ImGui::SetNextWindowPos({ImGui::GetMainViewport()->WorkPos.x + ImGui::GetMainViewport()->WorkSize.x - 250,
-                             ImGui::GetMainViewport()->WorkPos.y + 60}, ImGuiCond_Always);
-    ImGui::SetNextWindowSize({240, 0}, ImGuiCond_Always);
+App::BooleanPanelModel App::booleanPanelModel() const {
+    BooleanPanelModel m;
+    m.open = isBooleanActive();
+    if (!m.open) return m;
+    m.isUnion = booleanTool_.operation == BooleanOperation::Union;
+    m.target = booleanTool_.targetBodyIndex;
+    m.tool = booleanTool_.toolBodyIndex;
+    m.previewValid = booleanTool_.previewValid;
+    m.canCommit = booleanTool_.canCommit();
+    return m;
+}
 
-    const char* title = (booleanTool_.operation == BooleanOperation::Union) ? "Union Bodies" : "Subtract Bodies";
-    ImGui::Begin(title, nullptr, ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse);
+void App::clearBooleanTarget() {
+    booleanTool_.targetBodyIndex = -1;
+    booleanTool_.toolBodyIndex = -1;
+    booleanTool_.previewValid = false;
+}
 
-    if (booleanTool_.operation == BooleanOperation::Union) {
-        ImGui::TextWrapped("Pick two bodies to combine into one.");
-    } else {
-        ImGui::TextWrapped("Pick target body, then tool body to cut away.");
-    }
-
-    ImGui::Separator();
-
-    // Target body
-    if (booleanTool_.hasTarget()) {
-        ImGui::Text("Target: Body %d", booleanTool_.targetBodyIndex);
-        ImGui::SameLine();
-        if (ImGui::SmallButton("Clear##target")) {
-            booleanTool_.targetBodyIndex = -1;
-            booleanTool_.toolBodyIndex = -1;
-            booleanTool_.previewValid = false;
-        }
-    } else {
-        ImGui::TextColored({1, 1, 0, 1}, "Click to select target body");
-    }
-
-    // Tool body
-    if (booleanTool_.hasTool()) {
-        if (booleanTool_.operation == BooleanOperation::Union)
-            ImGui::Text("Other: Body %d", booleanTool_.toolBodyIndex);
-        else
-            ImGui::Text("Tool:  Body %d", booleanTool_.toolBodyIndex);
-        ImGui::SameLine();
-        if (ImGui::SmallButton("Clear##tool")) {
-            booleanTool_.toolBodyIndex = -1;
-            booleanTool_.previewValid = false;
-        }
-    } else if (booleanTool_.hasTarget()) {
-        if (booleanTool_.operation == BooleanOperation::Union)
-            ImGui::TextColored({1, 1, 0, 1}, "Click another body to combine");
-        else
-            ImGui::TextColored({1, 1, 0, 1}, "Click body to subtract");
-    }
-
-    ImGui::Separator();
-
-    bool canCommit = booleanTool_.canCommit();
-    if (!canCommit) ImGui::BeginDisabled();
-    if (ImGui::Button("Apply [Enter]", {-1, 0})) {
-        commitBoolean();
-    }
-    if (!canCommit) ImGui::EndDisabled();
-
-    if (ImGui::Button("Cancel [Esc]", {-1, 0})) {
-        cancelBoolean();
-    }
-
-    if (booleanTool_.previewValid) {
-        ImGui::Separator();
-        ImGui::TextColored({0, 1, 0, 1}, "Preview ready");
-    }
-
-    ImGui::End();
+void App::clearBooleanTool() {
+    booleanTool_.toolBodyIndex = -1;
+    booleanTool_.previewValid = false;
 }
 
 void App::updateBooleanPreview() {
@@ -196,6 +149,11 @@ void App::commitBoolean() {
     bd.operation = booleanTool_.operation;
     bd.targetBodyIndex = booleanTool_.targetBodyIndex;
     bd.toolBodyIndex = booleanTool_.toolBodyIndex;
+    // By identity, which survives earlier features making more or fewer bodies.
+    const Body3D& target = scene_.getBody(bd.targetBodyIndex);
+    const Body3D& tool = scene_.getBody(bd.toolBodyIndex);
+    bd.targetBody = {target.sourceFeature, target.sourceIndex};
+    bd.toolBody = {tool.sourceFeature, tool.sourceIndex};
 
     FeatureID fid = featureHistory_.addBooleanFeature(bd);
 
@@ -206,11 +164,7 @@ void App::commitBoolean() {
     markDirty();
 
     // Reset body colors before replay
-    for (size_t i = 0; i < scene_.bodyCount(); i++) {
-        scene_.getBodyMut((int)i).colorR = 0.6f;
-        scene_.getBodyMut((int)i).colorG = 0.6f;
-        scene_.getBodyMut((int)i).colorB = 0.65f;
-    }
+    scene_.resetBodyColors();
 
     replayAllFeatures();
 
@@ -220,12 +174,8 @@ void App::commitBoolean() {
 }
 
 void App::cancelBoolean() {
-    // Reset body colors
-    for (size_t i = 0; i < scene_.bodyCount(); i++) {
-        scene_.getBodyMut((int)i).colorR = 0.6f;
-        scene_.getBodyMut((int)i).colorG = 0.6f;
-        scene_.getBodyMut((int)i).colorB = 0.65f;
-    }
+    // Reset body colors (the theme's, or an imported part's own)
+    scene_.resetBodyColors();
 
     booleanTool_.reset();
     tool_.type = ToolType::None;

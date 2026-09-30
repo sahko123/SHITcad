@@ -3,11 +3,6 @@
 #include "AutoConstraint.h"
 
 #include <glad/gl.h>
-#include <GLFW/glfw3.h>
-#include <imgui.h>
-#include <imgui_internal.h>
-#include <imgui_impl_glfw.h>
-#include <imgui_impl_opengl3.h>
 #include "UnitUtils.h"
 #include <cstdio>
 #include <cmath>
@@ -23,7 +18,7 @@ struct DimLabelRectOut {
     float x0, y0, x1, y1;
 };
 
-static void renderTwoPointDim(ImDrawList* dl, const SketchPlane& sp, const Constraint& c,
+static void renderTwoPointDim(Overlay2D& ov, const SketchPlane& sp, const Constraint& c,
     Point2D a2d, Point2D b2d, const char* prefix,
     const float view[16], const float proj[16], float vpW, float vpH,
     const Theme& theme, float arrowLen, float arrowWidth, float extGap, float extOvershoot,
@@ -91,17 +86,17 @@ static void renderTwoPointDim(ImDrawList* dl, const SketchPlane& sp, const Const
     if (!toScr(aB1x, aB1y, saB1[0], saB1[1])) return;
     if (!toScr(aB2x, aB2y, saB2[0], saB2[1])) return;
 
-    ImU32 dimColor = c.driven ? theme.dimDrivenLineColor : theme.dimLineColor;
-    ImU32 textColor = c.driven ? theme.dimDrivenTextColor : theme.dimTextColor;
+    Color32 dimColor = c.driven ? theme.dimDrivenLineColor : theme.dimLineColor;
+    Color32 textColor = c.driven ? theme.dimDrivenTextColor : theme.dimTextColor;
 
     // Extension lines
-    dl->AddLine({sea0[0], sea0[1]}, {sea1[0], sea1[1]}, dimColor, 1.0f);
-    dl->AddLine({seb0[0], seb0[1]}, {seb1[0], seb1[1]}, dimColor, 1.0f);
+    ov.addLine({sea0[0], sea0[1]}, {sea1[0], sea1[1]}, dimColor, 1.0f);
+    ov.addLine({seb0[0], seb0[1]}, {seb1[0], seb1[1]}, dimColor, 1.0f);
     // Dimension line
-    dl->AddLine({sda[0], sda[1]}, {sdb[0], sdb[1]}, dimColor, 1.0f);
+    ov.addLine({sda[0], sda[1]}, {sdb[0], sdb[1]}, dimColor, 1.0f);
     // Arrows
-    dl->AddTriangleFilled({sda[0], sda[1]}, {saA1[0], saA1[1]}, {saA2[0], saA2[1]}, dimColor);
-    dl->AddTriangleFilled({sdb[0], sdb[1]}, {saB1[0], saB1[1]}, {saB2[0], saB2[1]}, dimColor);
+    ov.addTriangleFilled({sda[0], sda[1]}, {saA1[0], saA1[1]}, {saA2[0], saA2[1]}, dimColor);
+    ov.addTriangleFilled({sdb[0], sdb[1]}, {saB1[0], saB1[1]}, {saB2[0], saB2[1]}, dimColor);
 
     // Text at midpoint of dimension line (screen-aligned for readability)
     char buf[80];
@@ -115,25 +110,25 @@ static void renderTwoPointDim(ImDrawList* dl, const SketchPlane& sp, const Const
         formatDimensionText(valBuf, sizeof(valBuf), f(c.value), c.inputUnit, f(c.inputValue));
         snprintf(buf, sizeof(buf), "%s%s", prefix, valBuf);
     }
-    ImVec2 textSize = ImGui::CalcTextSize(buf);
+    OvVec2 textSize = ov.textSize(buf);
     float tmx = (sda[0] + sdb[0]) * 0.5f, tmy = (sda[1] + sdb[1]) * 0.5f;
     float pad = 2.0f;
-    ImVec2 textPos = { tmx - textSize.x * 0.5f, tmy - textSize.y * 0.5f };
+    OvVec2 textPos = { tmx - textSize.x * 0.5f, tmy - textSize.y * 0.5f };
     float rx0 = textPos.x - pad, ry0 = textPos.y - pad;
     float rx1 = textPos.x + textSize.x + pad, ry1 = textPos.y + textSize.y + pad;
-    dl->AddRectFilled({rx0, ry0}, {rx1, ry1}, theme.dimBgColor, 2.0f);
+    ov.addRectFilled({rx0, ry0}, {rx1, ry1}, theme.dimBgColor, 2.0f);
     if (selected) {
-        dl->AddRect({rx0 - 1, ry0 - 1}, {rx1 + 1, ry1 + 1},
-            IM_COL32(255, 165, 0, 220), 2.0f, 0, 2.0f);
+        ov.addRect({rx0 - 1, ry0 - 1}, {rx1 + 1, ry1 + 1},
+            rgba32(255, 165, 0, 220), 2.0f, 0, 2.0f);
     }
-    dl->AddText(textPos, textColor, buf);
+    ov.addText(textPos, textColor, buf);
 
     if (labelRects) {
         labelRects->push_back({c.id, planeIndex, rx0, ry0, rx1, ry1});
     }
 }
 
-static void renderAngleDim(ImDrawList* dl, const SketchPlane& sp, const Sketch& sketch,
+static void renderAngleDim(Overlay2D& ov, const SketchPlane& sp, const Sketch& sketch,
     const Constraint& c, const float view[16], const float proj[16], float vpW, float vpH,
     const Theme& theme, float pxPerLocal, bool selected = false,
     std::vector<DimLabelRectOut>* labelRects = nullptr, int planeIndex = -1) {
@@ -200,12 +195,12 @@ static void renderAngleDim(ImDrawList* dl, const SketchPlane& sp, const Sketch& 
         if (offDist > 1e-3) arcRadiusLocal = offDist;
     }
 
-    ImU32 dimColor = c.driven ? theme.dimDrivenLineColor : theme.dimLineColor;
-    ImU32 textColor = c.driven ? theme.dimDrivenTextColor : theme.dimTextColor;
+    Color32 dimColor = c.driven ? theme.dimDrivenLineColor : theme.dimLineColor;
+    Color32 textColor = c.driven ? theme.dimDrivenTextColor : theme.dimTextColor;
 
     // Tessellate arc in local space, transform each point to screen
     int steps = std::max(12, (int)(c.value / 5.0f));
-    std::vector<ImVec2> arcScreen(steps + 1);
+    std::vector<OvVec2> arcScreen(steps + 1);
     bool allVisible = true;
     for (int i = 0; i <= steps; i++) {
         double t = (double)i / steps;
@@ -222,7 +217,7 @@ static void renderAngleDim(ImDrawList* dl, const SketchPlane& sp, const Sketch& 
 
     // Draw arc segments
     for (int i = 0; i < steps; i++) {
-        dl->AddLine(arcScreen[i], arcScreen[i + 1], dimColor, 1.0f);
+        ov.addLine(arcScreen[i], arcScreen[i + 1], dimColor, 1.0f);
     }
 
     // Arrowheads at arc endpoints — computed in local space
@@ -250,7 +245,7 @@ static void renderAngleDim(ImDrawList* dl, const SketchPlane& sp, const Sketch& 
             double a2x = tipLx + tux*arrowLenL - pnx*arrowWidthL, a2y = tipLy + tuy*arrowLenL - pny*arrowWidthL;
             float st[2], s1[2], s2[2];
             if (toScr(tipLx, tipLy, st[0], st[1]) && toScr(a1x, a1y, s1[0], s1[1]) && toScr(a2x, a2y, s2[0], s2[1]))
-                dl->AddTriangleFilled({st[0], st[1]}, {s1[0], s1[1]}, {s2[0], s2[1]}, dimColor);
+                ov.addTriangleFilled({st[0], st[1]}, {s1[0], s1[1]}, {s2[0], s2[1]}, dimColor);
         }
     }
     // Arrow at end (tangent backward into arc in local space)
@@ -269,7 +264,7 @@ static void renderAngleDim(ImDrawList* dl, const SketchPlane& sp, const Sketch& 
             double a2x = tipLx + tux*arrowLenL - pnx*arrowWidthL, a2y = tipLy + tuy*arrowLenL - pny*arrowWidthL;
             float st[2], s1[2], s2[2];
             if (toScr(tipLx, tipLy, st[0], st[1]) && toScr(a1x, a1y, s1[0], s1[1]) && toScr(a2x, a2y, s2[0], s2[1]))
-                dl->AddTriangleFilled({st[0], st[1]}, {s1[0], s1[1]}, {s2[0], s2[1]}, dimColor);
+                ov.addTriangleFilled({st[0], st[1]}, {s1[0], s1[1]}, {s2[0], s2[1]}, dimColor);
         }
     }
 
@@ -288,17 +283,17 @@ static void renderAngleDim(ImDrawList* dl, const SketchPlane& sp, const Sketch& 
         snprintf(tmp, sizeof(tmp), "(%s)", buf);
         strncpy(buf, tmp, sizeof(buf));
     }
-    ImVec2 textSize = ImGui::CalcTextSize(buf);
+    OvVec2 textSize = ov.textSize(buf);
     float pad = 2.0f;
-    ImVec2 textPos = { tmx - textSize.x * 0.5f, tmy - textSize.y * 0.5f };
+    OvVec2 textPos = { tmx - textSize.x * 0.5f, tmy - textSize.y * 0.5f };
     float rx0 = textPos.x - pad, ry0 = textPos.y - pad;
     float rx1 = textPos.x + textSize.x + pad, ry1 = textPos.y + textSize.y + pad;
-    dl->AddRectFilled({rx0, ry0}, {rx1, ry1}, theme.dimBgColor, 2.0f);
+    ov.addRectFilled({rx0, ry0}, {rx1, ry1}, theme.dimBgColor, 2.0f);
     if (selected) {
-        dl->AddRect({rx0 - 1, ry0 - 1}, {rx1 + 1, ry1 + 1},
-            IM_COL32(255, 165, 0, 220), 2.0f, 0, 2.0f);
+        ov.addRect({rx0 - 1, ry0 - 1}, {rx1 + 1, ry1 + 1},
+            rgba32(255, 165, 0, 220), 2.0f, 0, 2.0f);
     }
-    dl->AddText(textPos, textColor, buf);
+    ov.addText(textPos, textColor, buf);
 
     if (labelRects) {
         labelRects->push_back({c.id, planeIndex, rx0, ry0, rx1, ry1});
@@ -309,19 +304,19 @@ static void renderAngleDim(ImDrawList* dl, const SketchPlane& sp, const Sketch& 
 
 void App::handleDimToolClick(Sketch& sketch) {
     int w, h;
-    glfwGetFramebufferSize(window_, &w, &h);
+    framebufferSize(w, h);
     float view[16], proj[16];
     getViewProj(w, h, view, proj);
     float apparentScale = computeApparentScale(activePlane(), view, proj, (float)w, (float)h);
 
     // When editing existing dimension, clicking elsewhere should select another dim or deselect
     if (dimTool_.editingExisting && dimTool_.phase == DimToolState::Editing) {
-        handleSelection(sketch, ImGui::GetIO().KeyCtrl);
+        handleSelection(sketch, in_.ctrl);
         return;
     }
 
     // Check if user clicked on an existing dimension label first
-    ImVec2 mouse = ImGui::GetIO().MousePos;
+    OvVec2 mouse(in_.mouseX, in_.mouseY);
     for (const auto& r : dimLabelRects_) {
         if (r.sketchPlaneIndex != activeSketchPlane_) continue;
         if (mouse.x >= r.x0 && mouse.x <= r.x1 && mouse.y >= r.y0 && mouse.y <= r.y1) {
@@ -557,240 +552,199 @@ void App::handleDimToolClick(Sketch& sketch) {
     }
 }
 
-void App::drawDimensionPanel(Sketch& sketch) {
-    ImGuiIO& io = ImGui::GetIO();
-    float panelW = 220.0f;
+// ---- Dimension panel: model and operations ------------------------------------
 
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, {10, 10});
-    ImGui::SetNextWindowPos({io.DisplaySize.x - panelW, 30});
-    ImGui::SetNextWindowSize({panelW, 0});
-    ImGui::Begin("Dimension", nullptr,
-        ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
-        ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_AlwaysAutoResize);
-
-    // Show warning if duplicate dimension was attempted
-    if (dimTool_.warningTimer > 0) {
-        dimTool_.warningTimer -= io.DeltaTime;
-        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.8f, 0.2f, 1.0f));
-        ImGui::TextWrapped("%s", dimTool_.warningMsg);
-        ImGui::PopStyleColor();
-        ImGui::Separator();
+App::DimensionPanelModel App::dimensionPanelModel() const {
+    DimensionPanelModel m;
+    m.open = tool_.type == ToolType::Dimension && activeSketchPlane_ >= 0;
+    if (!m.open) return m;
+    if (dimTool_.warningTimer > 0) m.warning = dimTool_.warningMsg;
+    m.editing = dimTool_.phase == DimToolState::Editing || dimTool_.phase == DimToolState::EditingAndPlacing;
+    if (!m.editing) {
+        m.hint = (dimTool_.selType == HitType::Point && dimTool_.entityA != NullID)
+            ? "Select second point or a line" : "Select a line, circle, or two points";
+        return m;
     }
-
-    if (dimTool_.phase == DimToolState::Selecting) {
-        if (dimTool_.selType == HitType::Point && dimTool_.entityA != NullID) {
-            ImGui::TextWrapped("Select second point or a line");
-        } else {
-            ImGui::TextWrapped("Select a line, circle, or two points");
+    // findConstraint has no const overload; this only reads.
+    Sketch& sketch = const_cast<Sketch&>(sketchPlanes_[activeSketchPlane_].sketch);
+    bool isAngle = false, isPointLine = false, isRadius = false;
+    if (dimTool_.constraintID != NullID) {
+        if (const Constraint* c = sketch.findConstraint(dimTool_.constraintID)) {
+            isAngle = c->type == ConstraintType::Angle;
+            isPointLine = c->type == ConstraintType::PointLineDistance;
+            isRadius = c->type == ConstraintType::Radius;
         }
-    } else if (dimTool_.phase == DimToolState::Editing || dimTool_.phase == DimToolState::EditingAndPlacing) {
-        // Show what's selected
-        bool isAngleConstraint = false;
-        bool isPointLineDistance = false;
-        bool isRadiusConstraint = false;
-        if (dimTool_.constraintID != NullID) {
-            Constraint* chk = sketch.findConstraint(dimTool_.constraintID);
-            if (chk && chk->type == ConstraintType::Angle) isAngleConstraint = true;
-            if (chk && chk->type == ConstraintType::PointLineDistance) isPointLineDistance = true;
-            if (chk && chk->type == ConstraintType::Radius) isRadiusConstraint = true;
+    }
+    if (isAngle) m.kind = "Angle:";
+    else if (isPointLine) m.kind = "Point-Line Distance:";
+    else if (isRadius) m.kind = "Circle Radius:";
+    else if (dimTool_.selType == HitType::Line) m.kind = "Line Distance:";
+    else if (dimTool_.selType == HitType::Circle) m.kind = "Circle Diameter:";
+    else if (dimTool_.selType == HitType::Point) m.kind = "Point Distance:";
+    if (dimTool_.phase == DimToolState::EditingAndPlacing) {
+        if (isAngle) m.placeHint = "Click to place label";
+        else if (dimTool_.selType == HitType::Line && dimTool_.entityB == NullID)
+            m.placeHint = "Click to place, or click another line for angle";
+        else if (dimTool_.selType == HitType::Circle && !isRadius)
+            m.placeHint = "Click to place, or click center for radius";
+        else m.placeHint = "Click to place label";
+    }
+    m.text = dimTool_.inputBuf;
+    m.driven = dimTool_.driven;
+    m.editingExisting = dimTool_.editingExisting;
+    m.takeFocus = dimTool_.focusNeeded || dimTool_.phase == DimToolState::EditingAndPlacing;
+    return m;
+}
+
+void App::setDimensionText(const std::string& text) {
+    snprintf(dimTool_.inputBuf, sizeof(dimTool_.inputBuf), "%s", text.c_str());
+    dimTool_.angleAutoSide = false;   // typing takes over from the mouse side
+}
+
+// Mirrors the typed value into the constraint every frame, so the label
+// follows what is being typed.
+void App::syncDimensionLive() {
+    if (dimTool_.constraintID == NullID) return;
+    Constraint* cc = activeSketch().findConstraint(dimTool_.constraintID);
+    if (!cc) return;
+    if (cc->type == ConstraintType::Angle && dimTool_.angleAutoSide) {
+        // Auto-side mode: handleSketchInput controls the value, skip live sync
+        cc->driven = dimTool_.driven;
+    } else if (cc->type == ConstraintType::Angle) {
+        float liveDeg = parseAngleInput(dimTool_.inputBuf);
+        if (liveDeg >= 0.001f && liveDeg <= 359.999f) {
+            cc->value = liveDeg;
+            cc->driven = dimTool_.driven;
         }
-        if (isAngleConstraint)
-            ImGui::Text("Angle:");
-        else if (isPointLineDistance)
-            ImGui::Text("Point-Line Distance:");
-        else if (isRadiusConstraint)
-            ImGui::Text("Circle Radius:");
-        else if (dimTool_.selType == HitType::Line)
-            ImGui::Text("Line Distance:");
-        else if (dimTool_.selType == HitType::Circle)
-            ImGui::Text("Circle Diameter:");
-        else if (dimTool_.selType == HitType::Point)
-            ImGui::Text("Point Distance:");
-
-        if (dimTool_.phase == DimToolState::EditingAndPlacing) {
-            if (isAngleConstraint)
-                ImGui::TextColored({0.6f, 0.8f, 1.0f, 1.0f}, "Click to place label");
-            else if (dimTool_.selType == HitType::Line && dimTool_.entityB == NullID)
-                ImGui::TextColored({0.6f, 0.8f, 1.0f, 1.0f}, "Click to place, or click another line for angle");
-            else if (dimTool_.selType == HitType::Circle && !isRadiusConstraint)
-                ImGui::TextColored({0.6f, 0.8f, 1.0f, 1.0f}, "Click to place, or click center for radius");
-            else
-                ImGui::TextColored({0.6f, 0.8f, 1.0f, 1.0f}, "Click to place label");
+    } else {
+        std::string liveUnit;
+        float liveInput = 0;
+        float liveMm = parseUnitInput(dimTool_.inputBuf, liveUnit, liveInput);
+        bool allowNeg = (cc->type == ConstraintType::PointLineDistance);
+        if (allowNeg ? (std::fabs(liveMm) > 0.0001f || liveMm == 0.0f) : (liveMm > 0.001f)) {
+            cc->value = liveMm;
+            cc->inputUnit = liveUnit;
+            cc->inputValue = liveInput;
+            cc->driven = dimTool_.driven;
         }
+    }
+}
 
-        ImGui::SetNextItemWidth(-1);
-        // During EditingAndPlacing, always keep input focused so user can type while placing
-        if (dimTool_.focusNeeded || dimTool_.phase == DimToolState::EditingAndPlacing) {
-            ImGui::SetKeyboardFocusHere();
-            dimTool_.focusNeeded = false;
-        }
-
-        bool entered = ImGui::InputText("##dimval", dimTool_.inputBuf, sizeof(dimTool_.inputBuf),
-            ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_AutoSelectAll);
-
-        ImGui::Checkbox("Driven (reference only)", &dimTool_.driven);
-
-        // Sync input value to constraint live (so label updates in real-time)
-        if (dimTool_.constraintID != NullID) {
-            Constraint* cc = sketch.findConstraint(dimTool_.constraintID);
-            if (cc) {
-                if (isAngleConstraint && dimTool_.angleAutoSide) {
-                    // Auto-side mode: handleSketchInput controls the value, skip live sync
-                    cc->driven = dimTool_.driven;
-                } else if (isAngleConstraint) {
-                    float liveDeg = parseAngleInput(dimTool_.inputBuf);
-                    if (liveDeg >= 0.001f && liveDeg <= 359.999f) {
-                        cc->value = liveDeg;
-                        cc->driven = dimTool_.driven;
-                    }
-                } else {
-                    std::string liveUnit;
-                    float liveInput = 0;
-                    float liveMm = parseUnitInput(dimTool_.inputBuf, liveUnit, liveInput);
-                    bool allowNeg = (cc->type == ConstraintType::PointLineDistance);
-                    if (allowNeg ? (std::fabs(liveMm) > 0.0001f || liveMm == 0.0f) : (liveMm > 0.001f)) {
-                        cc->value = liveMm;
-                        cc->inputUnit = liveUnit;
-                        cc->inputValue = liveInput;
-                        cc->driven = dimTool_.driven;
-                    }
-                }
-            }
-        }
-
-        ImGui::Separator();
-        const char* applyLabel = dimTool_.editingExisting ? "Update [Enter]" : "Apply [Enter]";
-        bool apply = ImGui::Button(applyLabel, {95, 0});
-        ImGui::SameLine();
-        if (ImGui::Button("Cancel [Esc]", {95, 0})) {
-            if (dimTool_.phase == DimToolState::EditingAndPlacing && dimTool_.constraintID != NullID) {
-                sketch.removeConstraint(dimTool_.constraintID);
-            } else if (dimTool_.editingExisting && dimTool_.constraintID != NullID) {
-                // Restore original value that live-sync may have changed
-                Constraint* cc = sketch.findConstraint(dimTool_.constraintID);
-                if (cc) cc->value = dimTool_.measuredMm;
-            }
-            dimTool_.reset();
-            selection_.clear();
-        }
-
-        if (entered || apply) {
-            bool valueOk = false;
-            Constraint* cc = sketch.findConstraint(dimTool_.constraintID);
-            if (cc) {
-                if (isAngleConstraint) {
-                    float deg = parseAngleInput(dimTool_.inputBuf);
-                    if (deg >= 0.001f && deg <= 359.999f) {
-                        // Determine correct sector (CW/CCW) for the new value
-                        LineEntity* l1 = sketch.findLine(cc->entityA);
-                        LineEntity* l2 = sketch.findLine(cc->entityB);
-                        if (l1 && l2) {
-                            PointEntity* pa1 = sketch.findPoint(l1->startPt);
-                            PointEntity* pb1 = sketch.findPoint(l1->endPt);
-                            PointEntity* pa2 = sketch.findPoint(l2->startPt);
-                            PointEntity* pb2 = sketch.findPoint(l2->endPt);
-                            if (pa1 && pb1 && pa2 && pb2) {
-                                float eps = 1e-3f;
-                                auto pEq = [eps](PointEntity* p, PointEntity* q) {
-                                    return std::fabs(p->x-q->x)<eps && std::fabs(p->y-q->y)<eps;
-                                };
-                                double vx = 0.0, vy = 0.0;
-                                bool hasV = false;
-                                if (pEq(pa1,pa2)||pEq(pa1,pb2))      { vx=pa1->x; vy=pa1->y; hasV=true; }
-                                else if (pEq(pb1,pa2)||pEq(pb1,pb2)) { vx=pb1->x; vy=pb1->y; hasV=true; }
-                                else {
-                                    double ldx1=pb1->x-pa1->x, ldy1=pb1->y-pa1->y;
-                                    double ldx2=pb2->x-pa2->x, ldy2=pb2->y-pa2->y;
-                                    double denom=ldx1*ldy2-ldy1*ldx2;
-                                    if (std::fabs(denom)>1e-6) {
-                                        double t=((pa2->x-pa1->x)*ldy2-(pa2->y-pa1->y)*ldx2)/denom;
-                                        vx=pa1->x+t*ldx1; vy=pa1->y+t*ldy1; hasV=true;
-                                    }
-                                }
-                                if (hasV) {
-                                    auto d2 = [](double ax,double ay,double bx,double by){ double dx=ax-bx,dy=ay-by; return dx*dx+dy*dy; };
-                                    PointEntity* f1=(d2(vx,vy,pb1->x,pb1->y)>=d2(vx,vy,pa1->x,pa1->y))?pb1:pa1;
-                                    PointEntity* f2=(d2(vx,vy,pb2->x,pb2->y)>=d2(vx,vy,pa2->x,pa2->y))?pb2:pa2;
-                                    double dx1=f1->x-vx, dy1=f1->y-vy;
-                                    double dx2=f2->x-vx, dy2=f2->y-vy;
-                                    double cross=dx1*dy2-dy1*dx2, dot=dx1*dx2+dy1*dy2;
-                                    double ccwRad=std::atan2(cross,dot);
-                                    if (ccwRad<0) ccwRad+=kTwoPi;
-                                    double ccwDeg=ccwRad*180.0/kPi;
-                                    double cwDeg=360.0-ccwDeg;
-                                    // Pick the sector closest to the user's typed value
-                                    cc->angleCW = (std::fabs(cwDeg-deg) < std::fabs(ccwDeg-deg));
-                                }
+void App::applyDimension() {
+    Sketch& sketch = activeSketch();
+    bool valueOk = false;
+    Constraint* cc = sketch.findConstraint(dimTool_.constraintID);
+    if (cc) {
+        if (cc->type == ConstraintType::Angle) {
+            float deg = parseAngleInput(dimTool_.inputBuf);
+            if (deg >= 0.001f && deg <= 359.999f) {
+                // Determine correct sector (CW/CCW) for the new value
+                LineEntity* l1 = sketch.findLine(cc->entityA);
+                LineEntity* l2 = sketch.findLine(cc->entityB);
+                if (l1 && l2) {
+                    PointEntity* pa1 = sketch.findPoint(l1->startPt);
+                    PointEntity* pb1 = sketch.findPoint(l1->endPt);
+                    PointEntity* pa2 = sketch.findPoint(l2->startPt);
+                    PointEntity* pb2 = sketch.findPoint(l2->endPt);
+                    if (pa1 && pb1 && pa2 && pb2) {
+                        float eps = 1e-3f;
+                        auto pEq = [eps](PointEntity* p, PointEntity* q) {
+                            return std::fabs(p->x-q->x)<eps && std::fabs(p->y-q->y)<eps;
+                        };
+                        double vx = 0.0, vy = 0.0;
+                        bool hasV = false;
+                        if (pEq(pa1,pa2)||pEq(pa1,pb2))      { vx=pa1->x; vy=pa1->y; hasV=true; }
+                        else if (pEq(pb1,pa2)||pEq(pb1,pb2)) { vx=pb1->x; vy=pb1->y; hasV=true; }
+                        else {
+                            double ldx1=pb1->x-pa1->x, ldy1=pb1->y-pa1->y;
+                            double ldx2=pb2->x-pa2->x, ldy2=pb2->y-pa2->y;
+                            double denom=ldx1*ldy2-ldy1*ldx2;
+                            if (std::fabs(denom)>1e-6) {
+                                double t=((pa2->x-pa1->x)*ldy2-(pa2->y-pa1->y)*ldx2)/denom;
+                                vx=pa1->x+t*ldx1; vy=pa1->y+t*ldy1; hasV=true;
                             }
                         }
-                        cc->value = deg;
-                        cc->driven = dimTool_.driven;
-                        valueOk = true;
-                    }
-                } else {
-                    std::string unitName;
-                    float inputValue = 0;
-                    float valueMm = parseUnitInput(dimTool_.inputBuf, unitName, inputValue);
-                    bool allowNeg = (cc->type == ConstraintType::PointLineDistance);
-                    if (allowNeg ? true : (valueMm > 0.001f)) {
-                        cc->value = valueMm;
-                        cc->inputUnit = unitName;
-                        cc->inputValue = inputValue;
-                        cc->driven = dimTool_.driven;
-                        valueOk = true;
-                    }
-                }
-
-                if (valueOk && !cc->driven) {
-                    auto geoBak = sketch.captureGeometry();
-                    PointEntity* pinA = nullptr, *pinB = nullptr;
-                    bool wasA = false, wasB = false;
-                    if (cc->type == ConstraintType::PointLineDistance) {
-                        LineEntity* refLine = sketch.findLine(cc->entityB);
-                        if (refLine) {
-                            pinA = sketch.findPoint(refLine->startPt);
-                            pinB = sketch.findPoint(refLine->endPt);
-                            if (pinA) { wasA = pinA->projected; pinA->projected = true; }
-                            if (pinB) { wasB = pinB->projected; pinB->projected = true; }
+                        if (hasV) {
+                            auto d2 = [](double ax,double ay,double bx,double by){ double dx=ax-bx,dy=ay-by; return dx*dx+dy*dy; };
+                            PointEntity* f1=(d2(vx,vy,pb1->x,pb1->y)>=d2(vx,vy,pa1->x,pa1->y))?pb1:pa1;
+                            PointEntity* f2=(d2(vx,vy,pb2->x,pb2->y)>=d2(vx,vy,pa2->x,pa2->y))?pb2:pa2;
+                            double dx1=f1->x-vx, dy1=f1->y-vy;
+                            double dx2=f2->x-vx, dy2=f2->y-vy;
+                            double cross=dx1*dy2-dy1*dx2, dot=dx1*dx2+dy1*dy2;
+                            double ccwRad=std::atan2(cross,dot);
+                            if (ccwRad<0) ccwRad+=kTwoPi;
+                            double ccwDeg=ccwRad*180.0/kPi;
+                            double cwDeg=360.0-ccwDeg;
+                            // Pick the sector closest to the user's typed value
+                            cc->angleCW = (std::fabs(cwDeg-deg) < std::fabs(ccwDeg-deg));
                         }
                     }
-                    auto res = solver_.solve(sketch);
-                    lastSketchDof_ = res.dof;
-                    if (pinA) pinA->projected = wasA;
-                    if (pinB) pinB->projected = wasB;
-                    if (!res.ok) {
-                        sketch.restoreGeometry(geoBak);
-                        cc->driven = true;
-                        dimTool_.driven = true;
-                    }
                 }
+                cc->value = deg;
+                cc->driven = dimTool_.driven;
+                valueOk = true;
             }
-
-            if (valueOk) {
-                history_.pushState(sketch);
-                dimTool_.reset();
-                selection_.clear();
+        } else {
+            std::string unitName;
+            float inputValue = 0;
+            float valueMm = parseUnitInput(dimTool_.inputBuf, unitName, inputValue);
+            bool allowNeg = (cc->type == ConstraintType::PointLineDistance);
+            if (allowNeg ? true : (valueMm > 0.001f)) {
+                cc->value = valueMm;
+                cc->inputUnit = unitName;
+                cc->inputValue = inputValue;
+                cc->driven = dimTool_.driven;
+                valueOk = true;
             }
         }
 
-        if (ImGui::IsKeyPressed(ImGuiKey_Escape)) {
-            if (dimTool_.phase == DimToolState::EditingAndPlacing && dimTool_.constraintID != NullID) {
-                sketch.removeConstraint(dimTool_.constraintID);
-            } else if (dimTool_.editingExisting && dimTool_.constraintID != NullID) {
-                Constraint* cc = sketch.findConstraint(dimTool_.constraintID);
-                if (cc) cc->value = dimTool_.measuredMm;
+        if (valueOk && !cc->driven) {
+            auto geoBak = sketch.captureGeometry();
+            PointEntity* pinA = nullptr, *pinB = nullptr;
+            bool wasA = false, wasB = false;
+            if (cc->type == ConstraintType::PointLineDistance) {
+                LineEntity* refLine = sketch.findLine(cc->entityB);
+                if (refLine) {
+                    pinA = sketch.findPoint(refLine->startPt);
+                    pinB = sketch.findPoint(refLine->endPt);
+                    if (pinA) { wasA = pinA->projected; pinA->projected = true; }
+                    if (pinB) { wasB = pinB->projected; pinB->projected = true; }
+                }
             }
-            dimTool_.reset();
-            selection_.clear();
+            auto res = solver_.solve(sketch);
+            lastSketchDof_ = res.dof;
+            if (pinA) pinA->projected = wasA;
+            if (pinB) pinB->projected = wasB;
+            if (!res.ok) {
+                sketch.restoreGeometry(geoBak);
+                cc->driven = true;
+                dimTool_.driven = true;
+            }
         }
     }
 
-    ImGui::End();
-    ImGui::PopStyleVar();
+    if (valueOk) {
+        history_.pushState(sketch);
+        dimTool_.reset();
+        selection_.clear();
+    }
+}
+
+void App::cancelDimension() {
+    Sketch& sketch = activeSketch();
+    if (dimTool_.phase == DimToolState::EditingAndPlacing && dimTool_.constraintID != NullID) {
+        sketch.removeConstraint(dimTool_.constraintID);
+    } else if (dimTool_.editingExisting && dimTool_.constraintID != NullID) {
+        // Restore original value that live-sync may have changed
+        Constraint* cc = sketch.findConstraint(dimTool_.constraintID);
+        if (cc) cc->value = dimTool_.measuredMm;
+    }
+    dimTool_.reset();
+    selection_.clear();
 }
 
 void App::renderDimensions(const float view[16], const float proj[16], float vpW, float vpH) {
-    ImDrawList* dl = ImGui::GetForegroundDrawList();
+    Overlay2D& ov = overlay_;
     const auto& theme = activeTheme();
     const float arrowLen = 8.0f;
     const float arrowWidth = 3.5f;
@@ -831,7 +785,7 @@ void App::renderDimensions(const float view[16], const float proj[16], float vpW
                 if (!circle) continue;
                 Point2D center = sketch.getPointPos(circle->centerPt);
                 Point2D edge = { center.x + circle->radius, center.y };
-                renderTwoPointDim(dl, sp, c, center, edge, "R ",
+                renderTwoPointDim(ov, sp, c, center, edge, "R ",
                     view, proj, vpW, vpH, theme, arrowLen, arrowWidth, extGap, extOvershoot,
                     pxPerLocal, sel, &labelRects, pi);
                 continue;
@@ -846,7 +800,7 @@ void App::renderDimensions(const float view[16], const float proj[16], float vpW
                 Point2D center = sketch.getPointPos(circle->centerPt);
                 Point2D left = { center.x - circle->radius, center.y };
                 Point2D right = { center.x + circle->radius, center.y };
-                renderTwoPointDim(dl, sp, c, left, right, "\xC3\xB8 ",
+                renderTwoPointDim(ov, sp, c, left, right, "\xC3\xB8 ",
                     view, proj, vpW, vpH, theme, arrowLen, arrowWidth, extGap, extOvershoot,
                     pxPerLocal, sel, &labelRects, pi);
                 continue;
@@ -858,7 +812,7 @@ void App::renderDimensions(const float view[16], const float proj[16], float vpW
                 if (!line) continue;
                 Point2D a2d = sketch.getPointPos(line->startPt);
                 Point2D b2d = sketch.getPointPos(line->endPt);
-                renderTwoPointDim(dl, sp, c, a2d, b2d, "",
+                renderTwoPointDim(ov, sp, c, a2d, b2d, "",
                     view, proj, vpW, vpH, theme, arrowLen, arrowWidth, extGap, extOvershoot,
                     pxPerLocal, sel, &labelRects, pi);
                 continue;
@@ -876,7 +830,7 @@ void App::renderDimensions(const float view[16], const float proj[16], float vpW
                 if (len2 < 1e-12) continue;
                 double t = ((pt2d.x - la.x)*ldx + (pt2d.y - la.y)*ldy) / len2;
                 Point2D projPt = {la.x + t*ldx, la.y + t*ldy};
-                renderTwoPointDim(dl, sp, c, pt2d, projPt, "",
+                renderTwoPointDim(ov, sp, c, pt2d, projPt, "",
                     view, proj, vpW, vpH, theme, arrowLen, arrowWidth, extGap, extOvershoot,
                     pxPerLocal, sel, &labelRects, pi);
                 continue;
@@ -886,7 +840,7 @@ void App::renderDimensions(const float view[16], const float proj[16], float vpW
             if (c.type == ConstraintType::PointDistance) {
                 Point2D a2d = sketch.getPointPos(c.entityA);
                 Point2D b2d = sketch.getPointPos(c.entityB);
-                renderTwoPointDim(dl, sp, c, a2d, b2d, "",
+                renderTwoPointDim(ov, sp, c, a2d, b2d, "",
                     view, proj, vpW, vpH, theme, arrowLen, arrowWidth, extGap, extOvershoot,
                     pxPerLocal, sel, &labelRects, pi);
                 continue;
@@ -894,7 +848,7 @@ void App::renderDimensions(const float view[16], const float proj[16], float vpW
 
             // --- Angle constraint ---
             if (c.type == ConstraintType::Angle) {
-                renderAngleDim(dl, sp, sketch, c,
+                renderAngleDim(ov, sp, sketch, c,
                     view, proj, vpW, vpH, theme,
                     pxPerLocal, sel, &labelRects, pi);
                 continue;
@@ -913,12 +867,12 @@ void App::renderDimensions(const float view[16], const float proj[16], float vpW
         const Sketch& sketch = sp.sketch;
 
         // Collect icons to draw: (screenX, screenY, label, color)
-        struct CIcon { float sx, sy; const char* label; ImU32 col; };
+        struct CIcon { float sx, sy; const char* label; Color32 col; };
         std::vector<CIcon> icons;
 
-        ImU32 iconCol = IM_COL32((int)(prefs_.conTextCol[0]*255), (int)(prefs_.conTextCol[1]*255),
+        Color32 iconCol = rgba32((int)(prefs_.conTextCol[0]*255), (int)(prefs_.conTextCol[1]*255),
                                   (int)(prefs_.conTextCol[2]*255), (int)(prefs_.conTextCol[3]*255));
-        ImU32 iconBg  = IM_COL32((int)(prefs_.conBgCol[0]*255), (int)(prefs_.conBgCol[1]*255),
+        Color32 iconBg  = rgba32((int)(prefs_.conBgCol[0]*255), (int)(prefs_.conBgCol[1]*255),
                                   (int)(prefs_.conBgCol[2]*255), (int)(prefs_.conBgCol[3]*255));
 
         auto toScreen = [&](Point2D local, float& sx, float& sy) -> bool {
@@ -1062,18 +1016,17 @@ void App::renderDimensions(const float view[16], const float proj[16], float vpW
         }
 
         // Draw all icons
-        ImFont* font = ImGui::GetFont();
-        float fontSize = ImGui::GetFontSize() * 0.85f;
+        const float iconScale = 0.85f; // relative to the UI font
         for (const auto& ic : icons) {
-            ImVec2 textSize = font->CalcTextSizeA(fontSize, FLT_MAX, 0, ic.label);
+            OvVec2 textSize = ov.textSize(ic.label, iconScale);
             float px = ic.sx - textSize.x * 0.5f;
             float py = ic.sy - textSize.y * 0.5f;
             // Background pill
             float pad = 2.0f;
-            dl->AddRectFilled(ImVec2(px - pad, py - pad),
-                              ImVec2(px + textSize.x + pad, py + textSize.y + pad),
+            ov.addRectFilled(OvVec2(px - pad, py - pad),
+                              OvVec2(px + textSize.x + pad, py + textSize.y + pad),
                               iconBg, 3.0f);
-            dl->AddText(font, fontSize, ImVec2(px, py), ic.col, ic.label);
+            ov.addText(OvVec2(px, py), ic.col, ic.label, iconScale);
         }
     }
 }
