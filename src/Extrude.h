@@ -6,19 +6,6 @@
 
 namespace shitcad {
 
-// Result from shape-building operations, with optional error message.
-struct ShapeResult {
-    TopoDS_Shape shape;
-    std::string error;  // non-empty on failure
-    bool ok() const { return !shape.IsNull() && error.empty(); }
-};
-
-// Extrude a closed profile into a 3D OCCT shape (prism).
-// Sketch points are in the plane's local 2D coords, transformed to 3D via the plane.
-// Extrudes along the plane normal by the given height.
-TopoDS_Shape extrudeProfile(const Sketch& sketch, const ClosedProfile& profile,
-                            float height, const SketchPlane& plane);
-
 // Extended extrusion with offset and support for negative height (other-side direction).
 // offset: translates base face along normal before extruding.
 // height: can be negative (extrudes in -normal direction).
@@ -27,13 +14,6 @@ TopoDS_Shape extrudeProfileEx(const Sketch& sketch, const ClosedProfile& profile
 
 struct ExtrudeToolState; // forward decl
 
-// Build a combined OCCT tool shape from the extrude tool state (selected profiles).
-// Returns ShapeResult with error details on failure.
-ShapeResult buildExtrudeToolShapeEx(const ExtrudeToolState& state,
-                                    const Sketch& sketch,
-                                    const SketchPlane& plane);
-
-// Legacy wrapper (returns shape only, no error).
 TopoDS_Shape buildExtrudeToolShape(const ExtrudeToolState& state,
                                    const Sketch& sketch,
                                    const SketchPlane& plane);
@@ -47,11 +27,6 @@ TopoDS_Shape revolveProfile(const Sketch& sketch, const ClosedProfile& profile,
 
 struct RevolveToolState; // forward decl
 
-// Build a combined OCCT tool shape from the revolve tool state.
-ShapeResult buildRevolveToolShapeEx(const RevolveToolState& state,
-                                    const Sketch& sketch,
-                                    const SketchPlane& plane);
-
 TopoDS_Shape buildRevolveToolShape(const RevolveToolState& state,
                                    const Sketch& sketch,
                                    const SketchPlane& plane);
@@ -63,7 +38,6 @@ struct LoftWireInput {
     const ClosedProfile* profile;
     const SketchPlane* plane;
 };
-ShapeResult loftProfilesEx(const std::vector<LoftWireInput>& sections, bool solid);
 TopoDS_Shape loftProfiles(const std::vector<LoftWireInput>& sections, bool solid);
 
 // Enumerate disconnected solids in a shape.

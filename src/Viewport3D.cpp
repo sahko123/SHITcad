@@ -1,4 +1,5 @@
 #include "Viewport3D.h"
+#include "Constants.h"
 #include "Preferences.h"
 #include "Section.h"
 #include <cstring>
@@ -9,7 +10,6 @@ namespace shitcad {
 
 // ---- Math helpers ----
 
-static constexpr float kPi = 3.14159265358979323846f;
 static float toRad(float deg) { return deg * kPi / 180.0f; }
 
 static void mat4Identity(float* m) {

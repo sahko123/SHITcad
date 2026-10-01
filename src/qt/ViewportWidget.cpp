@@ -275,7 +275,6 @@ void ViewportWidget::paintGL() {
     }
     profiler.end();
 
-    profiler.recordFrameEnd();
     profiler.endFrame();
     inFrame_ = false;
 }

@@ -228,7 +228,6 @@ public:
         std::vector<Row> bodies;
     };
     ObjectTreeModel objectTreeModel() const;
-    bool objectTreeOpen() const { return objectTreeOpen_; }
     void setObjectTreeOpen(bool open) { objectTreeOpen_ = open; }
     void setPlaneVisible(int planeIndex, bool visible);
     void setSketchVisible(int planeIndex, bool visible);
@@ -486,20 +485,14 @@ public:
     void finishSketch(bool recordFeature = true);
 
     void enterExtrudeMode();
-    bool isExtrudeActive() const { return tool_.type == ToolType::Extrude; }
 
     void enterRevolveMode();
-    bool isRevolveActive() const { return tool_.type == ToolType::Revolve; }
 
     void enterLoftMode();
-    bool isLoftActive() const { return tool_.type == ToolType::Loft; }
 
     void enterBooleanMode(BooleanOperation op);
     bool isBooleanActive() const { return tool_.type == ToolType::BooleanUnion || tool_.type == ToolType::BooleanSubtract; }
 
-    static constexpr int kXYPlane = 0;
-    static constexpr int kXZPlane = 1;
-    static constexpr int kYZPlane = 2;
     static constexpr int kRefPlaneCount = 3;
 
 private:

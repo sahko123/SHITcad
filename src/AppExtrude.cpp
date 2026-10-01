@@ -219,11 +219,11 @@ void App::handleExtrudeInput(float vpW, float vpH) {
         if (extrudeTool_.height < 0.1f) extrudeTool_.height = 0.1f;
         snprintf(extrudeTool_.heightBuf, sizeof(extrudeTool_.heightBuf), "%.1f", extrudeTool_.height);
 
-        // Throttle: only rebuild preview every 50ms during drag
+        // Throttle: only rebuild the preview every kPreviewThrottleMs during drag
         auto now = std::chrono::steady_clock::now();
         auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
             now - extrudeTool_.lastPreviewTime).count();
-        if (elapsed >= 50) {
+        if (elapsed >= kPreviewThrottleMs) {
             extrudeTool_.previewDirty = true;
             extrudeTool_.lastPreviewTime = now;
         }
@@ -286,7 +286,6 @@ void App::setExtrudeOffsetText(const std::string& text) {
 }
 
 // Helper: build the tool shape from selected profiles for current extrude settings
-// buildExtrudeToolShape and enumerateSolids are now in Extrude.h/cpp
 
 
 void App::updateExtrudePreview() {

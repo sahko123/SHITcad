@@ -6,12 +6,10 @@ namespace shitcad {
 constexpr float kPi    = 3.14159265358979f;
 constexpr float kTwoPi = 2.0f * kPi;
 constexpr float kDegToRad = kPi / 180.0f;
-constexpr float kRadToDeg = 180.0f / kPi;
 
 // ─── Constraint solver ──────────────────────────────────────────────
 constexpr int   kSolverMaxIterations     = 40;
 constexpr float kSolverConvergenceTol    = 1e-6f;   // per-constraint convergence threshold
-constexpr float kSolverDistanceTol       = 1e-4f;   // general distance comparison epsilon
 constexpr int   kProjectedPointRefCount  = 10000;    // ref count for immovable projected points
 // Adaptive under-relaxation: the solver takes full Gauss-Seidel steps while the residual is
 // shrinking and halves the step whenever a pass makes things worse, so that mutually
@@ -36,7 +34,6 @@ constexpr int   kSplineSampleCount       = 64;       // sample count for spline 
 constexpr int   kPreviewThrottleMs       = 50;       // minimum ms between preview rebuilds
 
 // ─── Geometry tolerances ────────────────────────────────────────────
-constexpr float kDegenerateLen           = 1e-6f;    // length below which geometry is degenerate
 constexpr float kMinLineLength           = 0.001f;   // minimum line/radius to create
 
 // ─── Rendering helpers ──────────────────────────────────────────────

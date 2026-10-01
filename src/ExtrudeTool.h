@@ -28,7 +28,6 @@ enum class ExtrudeDirection : uint8_t {
 
 enum class ExtrudePhase : uint8_t {
     SelectingProfiles,
-    DraggingHeight,
 };
 
 // Pre-computed tessellation + ear-clipping for profile rendering/hit testing

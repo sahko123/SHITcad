@@ -161,21 +161,6 @@ inline double polygonSignedArea(const std::vector<Point2D>& poly) {
     return area;
 }
 
-// Ray-casting point-in-polygon test.
-inline bool pointInsidePolygon(const std::vector<Point2D>& poly, Point2D p) {
-    int n = (int)poly.size();
-    if (n < 3) return false;
-    bool inside = false;
-    for (int i = 0, j = n - 1; i < n; j = i++) {
-        Point2D a = poly[i], b = poly[j];
-        if (((a.y > p.y) != (b.y > p.y)) &&
-            (p.x < (b.x - a.x) * (p.y - a.y) / (b.y - a.y) + a.x)) {
-            inside = !inside;
-        }
-    }
-    return inside;
-}
-
 // Winding number test: returns the winding number of a polygon around point p.
 // Non-zero winding number means the point is inside (handles complex/self-intersecting cases).
 inline int windingNumber(const std::vector<Point2D>& poly, Point2D p) {
@@ -199,11 +184,6 @@ inline int windingNumber(const std::vector<Point2D>& poly, Point2D p) {
         }
     }
     return wn;
-}
-
-// Point-in-polygon using winding number (more robust than ray-casting for edge cases).
-inline bool pointInsidePolygonWinding(const std::vector<Point2D>& poly, Point2D p) {
-    return windingNumber(poly, p) != 0;
 }
 
 // Detect all closed profiles using the custom half-edge tracer.

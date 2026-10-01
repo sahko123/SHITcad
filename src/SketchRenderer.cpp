@@ -407,7 +407,7 @@ void SketchRenderer::renderSketch(const SketchPlane& plane, const float* view,
                        : activeTheme().sketchLine;
         float r = tc[0], g = tc[1], bl = tc[2];
 
-        auto pts = sampleSpline(sp, plane.sketch, 64);
+        auto pts = sampleSpline(sp, plane.sketch, kSplineSampleCount);
         for (int i = 0; i + 1 < (int)pts.size(); i++) {
             float wx0, wy0, wz0, wx1, wy1, wz1;
             plane.localToWorld(f(pts[i].x), f(pts[i].y), wx0, wy0, wz0);

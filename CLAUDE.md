@@ -213,7 +213,7 @@ Global undo stack with typed commands: `AddFeature`, `DeleteFeature`, `SuppressF
 | `kCircleTessSteps` | 72 | Circle tessellation subdivisions |
 | `kArcTessDegreesPerStep` | 5.0 | Arc tessellation resolution |
 | `kPreviewThrottleMs` | 50 | Min ms between 3D preview rebuilds |
-| `kDegenerateLen` | 1e-6 | Length below which geometry is degenerate |
+| `kMinLineLength` | 0.001 | Smallest line / radius / rectangle side a tool will create |
 
 ## Common pitfalls
 

@@ -201,9 +201,6 @@ struct Sketch {
     // Remove all constraints that reference a given entity
     void removeConstraintsReferencing(EntityID id);
 
-    // Find nearest point within tolerance (world units). Returns NullID if none.
-    EntityID findPointNear(double wx, double wy, double tolerance) const;
-
     Point2D getPointPos(EntityID id) const;
 
     // Recompute arc start/end angles from current point positions
@@ -214,7 +211,6 @@ struct Sketch {
     void restoreGeometry(const SketchGeometrySnapshot& snap);
 
     void clear();
-    void clearProjected();
 
     // Rebuild O(1) lookup indices. Call after bulk modifications.
     void rebuildIndices();

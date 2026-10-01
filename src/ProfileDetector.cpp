@@ -63,7 +63,6 @@ struct SubEdge {
     float arcFromAngle = 0;
     float arcToAngle = 0;
     bool isArc() const { return origCircleID != NullID || origArcID != NullID; }
-    bool isCurve() const { return isArc() || origEllipseID != NullID || origEllipseArcID != NullID || origSplineID != NullID; }
 };
 
 struct SubHalfEdge {
@@ -171,7 +170,7 @@ static void buildSubdivision(const Sketch& sketch,
     for (int ei = 0; ei < numEllipses; ei++) {
         Point2D center = sketch.getPointPos(sketch.ellipses[ei].centerPt);
         ellipseSamples[ei] = sampleEllipse(center, sketch.ellipses[ei].semiMajor,
-                                            sketch.ellipses[ei].semiMinor, sketch.ellipses[ei].rotation, 64);
+                                            sketch.ellipses[ei].semiMinor, sketch.ellipses[ei].rotation, kEllipseSampleCount);
     }
     std::vector<std::vector<Point2D>> ellipseArcSamples(numEllipseArcs);
     for (int ei = 0; ei < numEllipseArcs; ei++) {
@@ -183,7 +182,7 @@ static void buildSubdivision(const Sketch& sketch,
     std::vector<std::vector<Point2D>> splineSamples(numSplines);
     for (int si = 0; si < numSplines; si++) {
         if (sketch.splines[si].controlPtIDs.size() < 2) continue;
-        splineSamples[si] = sampleSpline(sketch.splines[si], sketch, 64);
+        splineSamples[si] = sampleSpline(sketch.splines[si], sketch, kSplineSampleCount);
     }
 
     for (const auto& ix : lineLineIx) {
@@ -927,7 +926,7 @@ std::vector<ClosedProfile> detectClosedProfilesCustom(const Sketch& sketch) {
         for (int j = i - 1; j >= 0; j--) {
             if (sharesVertex(rawBoundaries[order[i]], rawBoundaries[order[j]]))
                 continue;
-            if (pointInsidePolygonWinding(tessCache[order[j]], sample)) {
+            if (windingNumber(tessCache[order[j]], sample) != 0) {
                 parent[i] = j;
                 break;
             }

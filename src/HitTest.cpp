@@ -58,7 +58,7 @@ double pointToArcDist(Point2D p, Point2D center, double radius, double startAngl
 double pointToEllipseDist(Point2D p, Point2D center, double semiMajor, double semiMinor, double rotation) {
     // Sample the ellipse and find closest point
     double bestDist = std::numeric_limits<double>::max();
-    int segments = 64;
+    int segments = kEllipseSampleCount;
     double cosR = std::cos(rotation), sinR = std::sin(rotation);
     for (int i = 0; i < segments; i++) {
         double a0 = kTwoPi * i / segments;
@@ -185,7 +185,7 @@ HitResult hitTest(Point2D cursorWorld, float pixelsPerUnit,
 
     for (const auto& sp : sketch.splines) {
         if (sp.controlPtIDs.size() < 2) continue;
-        auto pts = sampleSpline(sp, sketch, 64);
+        auto pts = sampleSpline(sp, sketch, kSplineSampleCount);
         double dist = pointToSplineDist(cursorWorld, pts);
         double screenDist = dist * pixelsPerUnit;
         if (screenDist < tolerancePx && screenDist < best.distance) {
@@ -202,15 +202,6 @@ HitResult hitTest(Point2D cursorWorld, float pixelsPerUnit,
 
 bool pointInRect(Point2D p, Point2D mn, Point2D mx) {
     return p.x >= mn.x && p.x <= mx.x && p.y >= mn.y && p.y <= mx.y;
-}
-
-bool segmentInRect(Point2D a, Point2D b, Point2D mn, Point2D mx) {
-    return pointInRect(a, mn, mx) && pointInRect(b, mn, mx);
-}
-
-bool circleInRect(Point2D center, double radius, Point2D mn, Point2D mx) {
-    return (center.x - radius) >= mn.x && (center.x + radius) <= mx.x &&
-           (center.y - radius) >= mn.y && (center.y + radius) <= mx.y;
 }
 
 bool pointInPolygon(Point2D p, const std::vector<Point2D>& poly) {

@@ -58,11 +58,9 @@ struct InputFrame {
     std::u32string typed;
 
     bool keyPressed(Key k) const { return pressed[(size_t)k]; }
-    bool mouseDown(MouseButton b) const { return down[(int)b]; }
     bool mouseClicked(MouseButton b) const { return clicked[(int)b]; }
     bool mouseReleased(MouseButton b) const { return released[(int)b]; }
     bool mouseDoubleClicked(MouseButton b) const { return doubleClicked[(int)b]; }
-    bool anyMouseDown() const { return down[0] || down[1] || down[2]; }
 
     // Held, and has moved at least `threshold` pixels from the press since.
     bool dragging(MouseButton b, float threshold) const {

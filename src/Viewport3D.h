@@ -58,7 +58,6 @@ public:
     ShaderProgram& gridShader() { return gridShader_; }
 
     void handleInput(const InputFrame& in, float canvasX, float canvasY, float canvasW, float canvasH);
-    void rebuildGrid() { if (gridVAO_) { glDeleteVertexArrays(1, &gridVAO_); gridVAO_ = 0; } if (gridVBO_) { glDeleteBuffers(1, &gridVBO_); gridVBO_ = 0; } buildGrid(); }
 
 private:
     OrbitCamera camera_;

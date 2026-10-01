@@ -201,7 +201,7 @@ SnapResult SnapEngine::snap(Point2D cursorWorld, float pixelsPerUnit,
         // Nearest point on ellipse edge
         for (const auto& ellipse : sketch.ellipses) {
             Point2D center = sketch.getPointPos(ellipse.centerPt);
-            auto pts = sampleEllipse(center, ellipse.semiMajor, ellipse.semiMinor, ellipse.rotation, 64);
+            auto pts = sampleEllipse(center, ellipse.semiMajor, ellipse.semiMinor, ellipse.rotation, kEllipseSampleCount);
             for (int i = 0; i + 1 < (int)pts.size(); i++) {
                 double segDist = pointToSegmentDist(cursorWorld, pts[i], pts[i + 1]);
                 if (segDist < curveTolerance && segDist < bestDist) {
@@ -238,7 +238,7 @@ SnapResult SnapEngine::snap(Point2D cursorWorld, float pixelsPerUnit,
         // Nearest point on spline edge
         for (const auto& sp : sketch.splines) {
             if (sp.controlPtIDs.size() < 2) continue;
-            auto pts = sampleSpline(sp, sketch, 64);
+            auto pts = sampleSpline(sp, sketch, kSplineSampleCount);
             for (int i = 0; i + 1 < (int)pts.size(); i++) {
                 double segDist = pointToSegmentDist(cursorWorld, pts[i], pts[i + 1]);
                 if (segDist < curveTolerance && segDist < bestDist) {

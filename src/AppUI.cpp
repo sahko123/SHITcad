@@ -31,7 +31,6 @@ void App::setPreferences(const Preferences& p) {
     if (themeChanged) {
         // Resets the user-adjustable colours to the new theme's defaults.
         prefs_.applyTheme();
-        viewport3D_.rebuildGrid();
     }
     auto toU32 = [](const float c[4]) -> Color32 {
         return rgba32((int)(c[0]*255), (int)(c[1]*255), (int)(c[2]*255), (int)(c[3]*255));

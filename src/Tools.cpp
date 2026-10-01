@@ -1,4 +1,5 @@
 #include "Tools.h"
+#include "Constants.h"
 #include <cmath>
 
 namespace shitcad {
@@ -253,7 +254,7 @@ bool handleLineTool(Sketch& sketch, ToolState& tool, Point2D worldPos, EntityID 
     // Prevent zero-length lines (same point clicked twice, or solver moved first point)
     if (endPtID == tool.firstPointID) return false;
     Point2D endPos = sketch.getPointPos(endPtID);
-    if (distance(sketch.getPointPos(tool.firstPointID), endPos) < 0.001f) {
+    if (distance(sketch.getPointPos(tool.firstPointID), endPos) < kMinLineLength) {
         if (snapPointID == NullID) sketch.removePoint(endPtID);
         return false;
     }
@@ -289,7 +290,7 @@ bool handleCircleTool(Sketch& sketch, ToolState& tool, Point2D worldPos, EntityI
     // Compute radius from center to click position (use snap position if snapped)
     Point2D radiusPos = (snapPointID != NullID) ? sketch.getPointPos(snapPointID) : worldPos;
     double radius = distance(tool.firstPoint, radiusPos);
-    if (radius > 0.001f) {
+    if (radius > kMinLineLength) {
         sketch.addCircle(tool.firstPointID, radius);
     } else {
         // Near-zero radius — reject; clean up a freshly created center point
@@ -319,7 +320,7 @@ bool handleRectangleTool(Sketch& sketch, ToolState& tool, Point2D worldPos, Enti
     double x2 = worldPos.x, y2 = worldPos.y;
 
     // Reject degenerate rectangles (zero-width or zero-height)
-    if (std::fabs(x2 - x1) < 0.001 || std::fabs(y2 - y1) < 0.001) {
+    if (std::fabs(x2 - x1) < kMinLineLength || std::fabs(y2 - y1) < kMinLineLength) {
         if (!sketch.isPointReferenced(tool.firstPointID))
             sketch.removePoint(tool.firstPointID);
         tool.hasFirstPoint = false;
@@ -488,7 +489,7 @@ bool handleArcCenterTool(Sketch& sketch, ArcToolState& arcTool, Point2D worldPos
 
     // Click 3: end point — project onto circle at locked radius
     double radius = distance(arcTool.point1, arcTool.point2);
-    if (radius < 0.001) {
+    if (radius < kMinLineLength) {
         // Degenerate: clean up freshly created points before resetting
         if (!sketch.isPointReferenced(arcTool.point2ID))
             sketch.removePoint(arcTool.point2ID);
@@ -547,7 +548,7 @@ bool handleCenterRectTool(Sketch& sketch, ToolState& tool, Point2D worldPos, Ent
     double dx = worldPos.x - cx, dy = worldPos.y - cy;
 
     // Reject degenerate (zero-width or zero-height)
-    if (std::fabs(dx) < 0.001 || std::fabs(dy) < 0.001) {
+    if (std::fabs(dx) < kMinLineLength || std::fabs(dy) < kMinLineLength) {
         tool.hasFirstPoint = false;
         tool.firstPointID = NullID;
         return false;

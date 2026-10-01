@@ -47,12 +47,6 @@ HitResult hitTest(Point2D cursorWorld, float pixelsPerUnit,
 // Point inside axis-aligned rect [min, max]
 bool pointInRect(Point2D p, Point2D min, Point2D max);
 
-// Line segment fully inside rect (both endpoints)
-bool segmentInRect(Point2D a, Point2D b, Point2D min, Point2D max);
-
-// Circle fully inside rect (center ± radius)
-bool circleInRect(Point2D center, double radius, Point2D min, Point2D max);
-
 // Point inside arbitrary polygon (ray-casting algorithm)
 bool pointInPolygon(Point2D p, const std::vector<Point2D>& poly);
 

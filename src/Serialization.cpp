@@ -1030,7 +1030,7 @@ bool exportDXF(const std::string& filepath, const Sketch& sketch) {
     // Splines: export as polyline approximation
     for (const auto& sp : sketch.splines) {
         if (sp.controlPtIDs.size() < 2) continue;
-        auto pts = sampleSpline(sp, sketch, 64);
+        auto pts = sampleSpline(sp, sketch, kSplineSampleCount);
         if (pts.size() < 2) continue;
         out << "0\nPOLYLINE\n8\n0\n66\n1\n70\n0\n";
         for (const auto& p : pts) {
