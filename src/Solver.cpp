@@ -10,6 +10,34 @@ namespace shitcad {
 // Sentinel returned by the pair-weight helpers: neither side of the constraint may move.
 static constexpr double kBothLocked = -1.0;
 
+// Two lines and their four endpoints, the way the line-pair constraints (EqualLength,
+// Perpendicular, Parallel, Collinear) all begin: d is the direction a -> b, len its length.
+struct LinePair {
+    LineEntity *l1 = nullptr, *l2 = nullptr;
+    PointEntity *a1 = nullptr, *b1 = nullptr, *a2 = nullptr, *b2 = nullptr;
+    double dx1 = 0, dy1 = 0, dx2 = 0, dy2 = 0;
+    double len1 = 0, len2 = 0;
+
+    bool degenerate() const { return len1 < 1e-6 || len2 < 1e-6; }
+};
+
+// False if either line, or any of its endpoints, is missing.
+static bool loadLinePair(Sketch& sketch, const Constraint& c, LinePair& p) {
+    p.l1 = sketch.findLine(c.entityA);
+    p.l2 = sketch.findLine(c.entityB);
+    if (!p.l1 || !p.l2) return false;
+    p.a1 = sketch.findPoint(p.l1->startPt);
+    p.b1 = sketch.findPoint(p.l1->endPt);
+    p.a2 = sketch.findPoint(p.l2->startPt);
+    p.b2 = sketch.findPoint(p.l2->endPt);
+    if (!p.a1 || !p.b1 || !p.a2 || !p.b2) return false;
+    p.dx1 = p.b1->x - p.a1->x; p.dy1 = p.b1->y - p.a1->y;
+    p.dx2 = p.b2->x - p.a2->x; p.dy2 = p.b2->y - p.a2->y;
+    p.len1 = std::sqrt(p.dx1*p.dx1 + p.dy1*p.dy1);
+    p.len2 = std::sqrt(p.dx2*p.dx2 + p.dy2*p.dy2);
+    return true;
+}
+
 SolveResult Solver::solvePass(Sketch& sketch, EntityID draggedPoint) {
     SolveResult result;
     result.ok = true;
@@ -189,6 +217,40 @@ SolveResult Solver::solvePass(Sketch& sketch, EntityID draggedPoint) {
     auto moveTo = [&](PointEntity* p, double tx, double ty) {
         if (!p || lockedSet.count(p->id)) return;
         moveBy(p, tx - p->x, ty - p->y);
+    };
+
+    // Rotate line 1 by rot1 and line 2 by rot2 (radians). Lines that meet at a vertex rotate
+    // about it, so the corner is not torn apart (the Coincident constraint would drag it back
+    // and the two would fight, the sketch visibly thrashing); otherwise each turns about its
+    // own midpoint.
+    auto rotateLines = [&](const LinePair& p, double rot1, double rot2) {
+        auto rotatePt = [&](PointEntity* pt, double ox, double oy, double cosR, double sinR) {
+            double rx = pt->x - ox, ry = pt->y - oy;
+            moveTo(pt, ox + rx*cosR - ry*sinR, oy + rx*sinR + ry*cosR);
+        };
+        auto dist2 = [](double ax, double ay, double bx, double by) {
+            double ddx = ax - bx, ddy = ay - by;
+            return ddx*ddx + ddy*ddy;
+        };
+        const double cos1 = std::cos(rot1), sin1 = std::sin(rot1);
+        const double cos2 = std::cos(rot2), sin2 = std::sin(rot2);
+
+        EntityID svID = sharedVertexOf(p.l1, p.l2);
+        const PointEntity* sv = (svID != NullID) ? sketch.findPoint(svID) : nullptr;
+        if (sv) {
+            const double vx = sv->x, vy = sv->y;
+            PointEntity* far1 = (dist2(vx, vy, p.b1->x, p.b1->y) >= dist2(vx, vy, p.a1->x, p.a1->y)) ? p.b1 : p.a1;
+            PointEntity* far2 = (dist2(vx, vy, p.b2->x, p.b2->y) >= dist2(vx, vy, p.a2->x, p.a2->y)) ? p.b2 : p.a2;
+            rotatePt(far1, vx, vy, cos1, sin1);
+            rotatePt(far2, vx, vy, cos2, sin2);
+        } else {
+            double mx1 = (p.a1->x + p.b1->x) * 0.5, my1 = (p.a1->y + p.b1->y) * 0.5;
+            rotatePt(p.a1, mx1, my1, cos1, sin1);
+            rotatePt(p.b1, mx1, my1, cos1, sin1);
+            double mx2 = (p.a2->x + p.b2->x) * 0.5, my2 = (p.a2->y + p.b2->y) * 0.5;
+            rotatePt(p.a2, mx2, my2, cos2, sin2);
+            rotatePt(p.b2, mx2, my2, cos2, sin2);
+        }
     };
 
     for (int iter = 0; iter < kSolverMaxIterations; iter++) {
@@ -625,20 +687,9 @@ SolveResult Solver::solvePass(Sketch& sketch, EntityID draggedPoint) {
                 }
 
                 case ConstraintType::EqualLength: {
-                    LineEntity* l1 = sketch.findLine(c.entityA);
-                    LineEntity* l2 = sketch.findLine(c.entityB);
-                    if (!l1 || !l2) break;
-                    PointEntity* a1 = sketch.findPoint(l1->startPt);
-                    PointEntity* b1 = sketch.findPoint(l1->endPt);
-                    PointEntity* a2 = sketch.findPoint(l2->startPt);
-                    PointEntity* b2 = sketch.findPoint(l2->endPt);
-                    if (!a1 || !b1 || !a2 || !b2) break;
-
-                    double dx1 = b1->x-a1->x, dy1 = b1->y-a1->y;
-                    double dx2 = b2->x-a2->x, dy2 = b2->y-a2->y;
-                    double len1 = std::sqrt(dx1*dx1 + dy1*dy1);
-                    double len2 = std::sqrt(dx2*dx2 + dy2*dy2);
-                    if (len1 < 1e-6 || len2 < 1e-6) break;
+                    LinePair lp;
+                    if (!loadLinePair(sketch, c, lp) || lp.degenerate()) break;
+                    auto& [l1, l2, a1, b1, a2, b2, dx1, dy1, dx2, dy2, len1, len2] = lp;
 
                     if (std::fabs(len1 - len2) < 1e-6) break;
 
@@ -669,20 +720,9 @@ SolveResult Solver::solvePass(Sketch& sketch, EntityID draggedPoint) {
                 }
 
                 case ConstraintType::Perpendicular: {
-                    LineEntity* l1 = sketch.findLine(c.entityA);
-                    LineEntity* l2 = sketch.findLine(c.entityB);
-                    if (!l1 || !l2) break;
-                    PointEntity* a1 = sketch.findPoint(l1->startPt);
-                    PointEntity* b1 = sketch.findPoint(l1->endPt);
-                    PointEntity* a2 = sketch.findPoint(l2->startPt);
-                    PointEntity* b2 = sketch.findPoint(l2->endPt);
-                    if (!a1 || !b1 || !a2 || !b2) break;
-
-                    double dx1 = b1->x-a1->x, dy1 = b1->y-a1->y;
-                    double dx2 = b2->x-a2->x, dy2 = b2->y-a2->y;
-                    double len1 = std::sqrt(dx1*dx1 + dy1*dy1);
-                    double len2 = std::sqrt(dx2*dx2 + dy2*dy2);
-                    if (len1 < 1e-6 || len2 < 1e-6) break;
+                    LinePair lp;
+                    if (!loadLinePair(sketch, c, lp) || lp.degenerate()) break;
+                    auto& [l1, l2, a1, b1, a2, b2, dx1, dy1, dx2, dy2, len1, len2] = lp;
 
                     double dot = (dx1*dx2 + dy1*dy2) / (len1*len2);
                     if (std::fabs(dot) < 1e-6) break; // already perpendicular
@@ -703,61 +743,15 @@ SolveResult Solver::solvePass(Sketch& sketch, EntityID draggedPoint) {
                     double rot2 = totalRot * w1;
                     double rot1 = -totalRot * (1.0 - w1);
 
-                    auto dist2 = [](double ax,double ay,double bx,double by){ double ddx=ax-bx,ddy=ay-by; return ddx*ddx+ddy*ddy; };
-                    // Shared vertex by identity, so a corner that has not yet converged to within
-                    // a positional epsilon is still recognised as a corner and rotated about
-                    // rather than torn apart.
-                    double cx = 0, cy = 0;
-                    bool shared = false;
-                    if (EntityID svID = sharedVertexOf(l1, l2)) {
-                        if (const PointEntity* sv = sketch.findPoint(svID)) {
-                            cx = sv->x; cy = sv->y; shared = true;
-                        }
-                    }
-
-                    auto rotatePt = [&](PointEntity* pt, double ox, double oy, double cosR, double sinR) {
-                        double rx = pt->x-ox, ry = pt->y-oy;
-                        moveTo(pt, ox + rx*cosR - ry*sinR, oy + rx*sinR + ry*cosR);
-                    };
-
-                    if (shared) {
-                        // Rotate far endpoints around shared vertex
-                        PointEntity* far1 = (dist2(cx,cy,b1->x,b1->y)>=dist2(cx,cy,a1->x,a1->y)) ? b1 : a1;
-                        PointEntity* far2 = (dist2(cx,cy,b2->x,b2->y)>=dist2(cx,cy,a2->x,a2->y)) ? b2 : a2;
-                        double cos1 = std::cos(rot1), sin1 = std::sin(rot1);
-                        double cos2 = std::cos(rot2), sin2 = std::sin(rot2);
-                        rotatePt(far1, cx, cy, cos1, sin1);
-                        rotatePt(far2, cx, cy, cos2, sin2);
-                    } else {
-                        // Rotate each line around its midpoint
-                        double cos1 = std::cos(rot1), sin1 = std::sin(rot1);
-                        double cos2 = std::cos(rot2), sin2 = std::sin(rot2);
-                        double mx1 = (a1->x+b1->x)*0.5, my1 = (a1->y+b1->y)*0.5;
-                        rotatePt(a1, mx1, my1, cos1, sin1);
-                        rotatePt(b1, mx1, my1, cos1, sin1);
-                        double mx2 = (a2->x+b2->x)*0.5, my2 = (a2->y+b2->y)*0.5;
-                        rotatePt(a2, mx2, my2, cos2, sin2);
-                        rotatePt(b2, mx2, my2, cos2, sin2);
-                    }
+                    rotateLines(lp, rot1, rot2);
                     changed = true;
                     break;
                 }
 
                 case ConstraintType::Parallel: {
-                    LineEntity* l1 = sketch.findLine(c.entityA);
-                    LineEntity* l2 = sketch.findLine(c.entityB);
-                    if (!l1 || !l2) break;
-                    PointEntity* a1 = sketch.findPoint(l1->startPt);
-                    PointEntity* b1 = sketch.findPoint(l1->endPt);
-                    PointEntity* a2 = sketch.findPoint(l2->startPt);
-                    PointEntity* b2 = sketch.findPoint(l2->endPt);
-                    if (!a1 || !b1 || !a2 || !b2) break;
-
-                    double dx1 = b1->x-a1->x, dy1 = b1->y-a1->y;
-                    double dx2 = b2->x-a2->x, dy2 = b2->y-a2->y;
-                    double len1 = std::sqrt(dx1*dx1 + dy1*dy1);
-                    double len2 = std::sqrt(dx2*dx2 + dy2*dy2);
-                    if (len1 < 1e-6 || len2 < 1e-6) break;
+                    LinePair lp;
+                    if (!loadLinePair(sketch, c, lp) || lp.degenerate()) break;
+                    auto& [l1, l2, a1, b1, a2, b2, dx1, dy1, dx2, dy2, len1, len2] = lp;
 
                     double cross = dx1*dy2 - dy1*dx2;
                     if (std::fabs(cross) < 1e-6 * len1 * len2) break; // already parallel
@@ -771,55 +765,15 @@ SolveResult Solver::solvePass(Sketch& sketch, EntityID draggedPoint) {
                     double rot2 = -totalAngle * w1;         // line2 rotates toward line1
                     double rot1 = totalAngle * (1.0 - w1); // line1 rotates toward line2
 
-                    auto rotatePt = [&](PointEntity* p, double ox, double oy, double cosR, double sinR) {
-                        double rx = p->x-ox, ry = p->y-oy;
-                        moveTo(p, ox + rx*cosR - ry*sinR, oy + rx*sinR + ry*cosR);
-                    };
-
-                    double cos1 = std::cos(rot1), sin1 = std::sin(rot1);
-                    double cos2 = std::cos(rot2), sin2 = std::sin(rot2);
-
-                    // If the two lines meet at a shared vertex, rotate about it. Rotating each
-                    // line about its own midpoint (the only thing this did before) pulls the
-                    // shared corner apart every pass, which the Coincident constraint then drags
-                    // back -- the two constraints fight, and the sketch visibly thrashes.
-                    // Perpendicular has always handled this; Parallel did not.
-                    EntityID svID = sharedVertexOf(l1, l2);
-                    const PointEntity* sv = (svID != NullID) ? sketch.findPoint(svID) : nullptr;
-                    if (sv) {
-                        auto dist2 = [](double ax,double ay,double bx,double by){ double ddx=ax-bx,ddy=ay-by; return ddx*ddx+ddy*ddy; };
-                        double vx = sv->x, vy = sv->y;
-                        PointEntity* far1 = (dist2(vx,vy,b1->x,b1->y) >= dist2(vx,vy,a1->x,a1->y)) ? b1 : a1;
-                        PointEntity* far2 = (dist2(vx,vy,b2->x,b2->y) >= dist2(vx,vy,a2->x,a2->y)) ? b2 : a2;
-                        rotatePt(far1, vx, vy, cos1, sin1);
-                        rotatePt(far2, vx, vy, cos2, sin2);
-                    } else {
-                        double mx1 = (a1->x+b1->x)*0.5, my1 = (a1->y+b1->y)*0.5;
-                        rotatePt(a1, mx1, my1, cos1, sin1);
-                        rotatePt(b1, mx1, my1, cos1, sin1);
-                        double mx2 = (a2->x+b2->x)*0.5, my2 = (a2->y+b2->y)*0.5;
-                        rotatePt(a2, mx2, my2, cos2, sin2);
-                        rotatePt(b2, mx2, my2, cos2, sin2);
-                    }
+                    rotateLines(lp, rot1, rot2);
                     changed = true;
                     break;
                 }
 
                 case ConstraintType::Collinear: {
-                    LineEntity* l1 = sketch.findLine(c.entityA);
-                    LineEntity* l2 = sketch.findLine(c.entityB);
-                    if (!l1 || !l2) break;
-                    PointEntity* a1 = sketch.findPoint(l1->startPt);
-                    PointEntity* b1 = sketch.findPoint(l1->endPt);
-                    PointEntity* a2 = sketch.findPoint(l2->startPt);
-                    PointEntity* b2 = sketch.findPoint(l2->endPt);
-                    if (!a1 || !b1 || !a2 || !b2) break;
-
-                    double dx1 = b1->x-a1->x, dy1 = b1->y-a1->y;
-                    double dx2 = b2->x-a2->x, dy2 = b2->y-a2->y;
-                    double len1 = std::sqrt(dx1*dx1 + dy1*dy1);
-                    double len2 = std::sqrt(dx2*dx2 + dy2*dy2);
-                    if (len1 < 1e-6 || len2 < 1e-6) break;
+                    LinePair lp;
+                    if (!loadLinePair(sketch, c, lp) || lp.degenerate()) break;
+                    auto& [l1, l2, a1, b1, a2, b2, dx1, dy1, dx2, dy2, len1, len2] = lp;
 
                     double w1 = weightLL(l1, l2);
                     if (w1 == kBothLocked) break;
@@ -831,28 +785,7 @@ SolveResult Solver::solvePass(Sketch& sketch, EntityID draggedPoint) {
                         double totalAngle = std::atan2(cross, dot);
                         double rot2 = -totalAngle * w1;
                         double rot1 =  totalAngle * (1.0 - w1);
-                        auto rotatePt = [&](PointEntity* p, double ox, double oy, double cosR, double sinR) {
-                            double rx = p->x-ox, ry = p->y-oy;
-                            moveTo(p, ox + rx*cosR - ry*sinR, oy + rx*sinR + ry*cosR);
-                        };
-                        double cos1 = std::cos(rot1), sin1 = std::sin(rot1);
-                        double cos2 = std::cos(rot2), sin2 = std::sin(rot2);
-                        // Rotate about a shared vertex when there is one, as Parallel does.
-                        EntityID svID = sharedVertexOf(l1, l2);
-                        const PointEntity* sv = (svID != NullID) ? sketch.findPoint(svID) : nullptr;
-                        if (sv) {
-                            auto d2 = [](double ax,double ay,double bx,double by){ double ex=ax-bx,ey=ay-by; return ex*ex+ey*ey; };
-                            double vx = sv->x, vy = sv->y;
-                            rotatePt((d2(vx,vy,b1->x,b1->y) >= d2(vx,vy,a1->x,a1->y)) ? b1 : a1, vx, vy, cos1, sin1);
-                            rotatePt((d2(vx,vy,b2->x,b2->y) >= d2(vx,vy,a2->x,a2->y)) ? b2 : a2, vx, vy, cos2, sin2);
-                        } else {
-                            double mx1 = (a1->x+b1->x)*0.5, my1 = (a1->y+b1->y)*0.5;
-                            rotatePt(a1, mx1, my1, cos1, sin1);
-                            rotatePt(b1, mx1, my1, cos1, sin1);
-                            double mx2 = (a2->x+b2->x)*0.5, my2 = (a2->y+b2->y)*0.5;
-                            rotatePt(a2, mx2, my2, cos2, sin2);
-                            rotatePt(b2, mx2, my2, cos2, sin2);
-                        }
+                        rotateLines(lp, rot1, rot2);
                         // Refresh direction after rotation
                         dx1 = b1->x-a1->x; dy1 = b1->y-a1->y;
                         len1 = std::sqrt(dx1*dx1 + dy1*dy1);
@@ -1443,69 +1376,32 @@ SolveResult Solver::solvePass(Sketch& sketch, EntityID draggedPoint) {
                 break;
             }
             case ConstraintType::EqualLength: {
-                LineEntity* l1 = sketch.findLine(c.entityA);
-                LineEntity* l2 = sketch.findLine(c.entityB);
-                if (!l1 || !l2) break;
-                PointEntity* a1 = sketch.findPoint(l1->startPt);
-                PointEntity* b1 = sketch.findPoint(l1->endPt);
-                PointEntity* a2 = sketch.findPoint(l2->startPt);
-                PointEntity* b2 = sketch.findPoint(l2->endPt);
-                if (!a1||!b1||!a2||!b2) break;
-                double dx1=b1->x-a1->x, dy1=b1->y-a1->y;
-                double dx2=b2->x-a2->x, dy2=b2->y-a2->y;
-                err = std::fabs(std::sqrt(dx1*dx1+dy1*dy1) - std::sqrt(dx2*dx2+dy2*dy2));
+                LinePair lp;
+                if (!loadLinePair(sketch, c, lp)) break;
+                err = std::fabs(lp.len1 - lp.len2);
                 break;
             }
             case ConstraintType::Perpendicular: {
-                LineEntity* l1 = sketch.findLine(c.entityA);
-                LineEntity* l2 = sketch.findLine(c.entityB);
-                if (!l1 || !l2) break;
-                PointEntity* a1 = sketch.findPoint(l1->startPt);
-                PointEntity* b1 = sketch.findPoint(l1->endPt);
-                PointEntity* a2 = sketch.findPoint(l2->startPt);
-                PointEntity* b2 = sketch.findPoint(l2->endPt);
-                if (!a1||!b1||!a2||!b2) break;
-                double dx1=b1->x-a1->x, dy1=b1->y-a1->y;
-                double dx2=b2->x-a2->x, dy2=b2->y-a2->y;
-                double len1=std::sqrt(dx1*dx1+dy1*dy1), len2=std::sqrt(dx2*dx2+dy2*dy2);
-                if (len1>1e-6 && len2>1e-6)
-                    err = std::fabs(dx1*dx2+dy1*dy2) / (len1*len2);
+                LinePair lp;
+                if (!loadLinePair(sketch, c, lp)) break;
+                if (!lp.degenerate())
+                    err = std::fabs(lp.dx1*lp.dx2 + lp.dy1*lp.dy2) / (lp.len1*lp.len2);
                 break;
             }
             case ConstraintType::Parallel: {
-                LineEntity* l1 = sketch.findLine(c.entityA);
-                LineEntity* l2 = sketch.findLine(c.entityB);
-                if (!l1 || !l2) break;
-                PointEntity* a1 = sketch.findPoint(l1->startPt);
-                PointEntity* b1 = sketch.findPoint(l1->endPt);
-                PointEntity* a2 = sketch.findPoint(l2->startPt);
-                PointEntity* b2 = sketch.findPoint(l2->endPt);
-                if (!a1||!b1||!a2||!b2) break;
-                double dx1=b1->x-a1->x, dy1=b1->y-a1->y;
-                double dx2=b2->x-a2->x, dy2=b2->y-a2->y;
-                double len1=std::sqrt(dx1*dx1+dy1*dy1), len2=std::sqrt(dx2*dx2+dy2*dy2);
-                if (len1>1e-6 && len2>1e-6)
-                    err = std::fabs(dx1*dy2-dy1*dx2) / (len1*len2);
+                LinePair lp;
+                if (!loadLinePair(sketch, c, lp)) break;
+                if (!lp.degenerate())
+                    err = std::fabs(lp.dx1*lp.dy2 - lp.dy1*lp.dx2) / (lp.len1*lp.len2);
                 break;
             }
             case ConstraintType::Collinear: {
-                LineEntity* l1 = sketch.findLine(c.entityA);
-                LineEntity* l2 = sketch.findLine(c.entityB);
-                if (!l1 || !l2) break;
-                PointEntity* a1 = sketch.findPoint(l1->startPt);
-                PointEntity* b1 = sketch.findPoint(l1->endPt);
-                PointEntity* a2 = sketch.findPoint(l2->startPt);
-                if (!a1||!b1||!a2) break;
-                double dx1=b1->x-a1->x, dy1=b1->y-a1->y;
-                double len1=std::sqrt(dx1*dx1+dy1*dy1);
-                if (len1 > 1e-6) {
-                    // Max of: angle error + distance error
-                    LineEntity* l2b = sketch.findLine(c.entityB);
-                    PointEntity* b2 = sketch.findPoint(l2b->endPt);
-                    double dx2=b2->x-a2->x, dy2=b2->y-a2->y;
-                    double len2=std::sqrt(dx2*dx2+dy2*dy2);
-                    double angleErr = len2>1e-6 ? std::fabs(dx1*dy2-dy1*dx2)/(len1*len2) : 0.0;
-                    double distErr  = std::fabs((a2->x-a1->x)*dy1 - (a2->y-a1->y)*dx1) / len1;
+                LinePair lp;
+                if (!loadLinePair(sketch, c, lp)) break;
+                if (lp.len1 > 1e-6) {
+                    // Angle error plus distance error
+                    double angleErr = lp.len2 > 1e-6 ? std::fabs(lp.dx1*lp.dy2 - lp.dy1*lp.dx2) / (lp.len1*lp.len2) : 0.0;
+                    double distErr  = std::fabs((lp.a2->x - lp.a1->x)*lp.dy1 - (lp.a2->y - lp.a1->y)*lp.dx1) / lp.len1;
                     err = angleErr + distErr;
                 }
                 break;
