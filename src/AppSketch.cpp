@@ -1634,31 +1634,7 @@ void App::handleSelection(Sketch& sketch, bool ctrlHeld) {
         Constraint* cc = sketch.findConstraint(dimHitID);
         if (cc && !ctrlHeld && in_.mouseDoubleClicked(MouseButton::Left)) {
             tool_.type = ToolType::Dimension;
-            dimTool_.reset();
-            dimTool_.phase = DimToolState::Editing;
-            dimTool_.constraintID = dimHitID;
-            dimTool_.editingExisting = true;
-            dimTool_.driven = cc->driven;
-            // Infer selType from constraint type
-            if (cc->type == ConstraintType::Distance)
-                dimTool_.selType = HitType::Line;
-            else if (cc->type == ConstraintType::Diameter || cc->type == ConstraintType::Radius)
-                dimTool_.selType = HitType::Circle;
-            else if (cc->type == ConstraintType::PointDistance || cc->type == ConstraintType::PointLineDistance)
-                dimTool_.selType = HitType::Point;
-            else if (cc->type == ConstraintType::Angle)
-                dimTool_.selType = HitType::Line;
-            dimTool_.entityA = cc->entityA;
-            dimTool_.entityB = cc->entityB;
-            dimTool_.measuredMm = f(cc->value);
-            // Fill input buffer with current value
-            if (cc->type == ConstraintType::Angle)
-                formatAngleText(dimTool_.inputBuf, sizeof(dimTool_.inputBuf), f(cc->value));
-            else if (!cc->inputUnit.empty())
-                snprintf(dimTool_.inputBuf, sizeof(dimTool_.inputBuf), "%.4g%s", cc->inputValue, cc->inputUnit.c_str());
-            else
-                snprintf(dimTool_.inputBuf, sizeof(dimTool_.inputBuf), "%.4gmm", cc->value);
-            dimTool_.focusNeeded = true;
+            beginEditDimension(*cc);
         }
         return;
     }

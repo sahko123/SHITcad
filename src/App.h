@@ -767,6 +767,7 @@ private:
     void handleDeletion(Sketch& sketch);
     void syncDimensionLive();          // typed dimension value into its constraint, every frame
     void handleDimToolClick(Sketch& sketch);
+    void beginEditDimension(const Constraint& cc);   // dimension tool: edit this constraint
     bool deleteSelectedFeature();      // the Delete key on the timeline selection
     void replayAllFeatures();
     void globalUndo();

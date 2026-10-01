@@ -63,6 +63,25 @@ void SketchRenderer::shutdown() {
     if (dynamicVBO_) { glDeleteBuffers(1, &dynamicVBO_); dynamicVBO_ = 0; }
 }
 
+void SketchRenderer::drawDynamic(GLenum mode, const void* data, int vertexCount, bool colored) {
+    const GLsizei stride = (GLsizei)(colored ? sizeof(ColorVertex) : 3 * sizeof(float));
+    glBindVertexArray(dynamicVAO_);
+    glBindBuffer(GL_ARRAY_BUFFER, dynamicVBO_);
+    glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)vertexCount * stride, data, GL_STREAM_DRAW);
+
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, stride, (void*)0);
+    if (colored) {
+        glEnableVertexAttribArray(1);
+        glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, stride, (void*)(3 * sizeof(float)));
+    } else {
+        glDisableVertexAttribArray(1);
+    }
+
+    glDrawArrays(mode, 0, vertexCount);
+    glBindVertexArray(0);
+}
+
 void SketchRenderer::drawLines(const float* view, const float* proj,
                                 const ColorVertex* verts, int count) {
     if (count < 2) return;
@@ -70,17 +89,7 @@ void SketchRenderer::drawLines(const float* view, const float* proj,
     lineShader_.setMat4("uView", view);
     lineShader_.setMat4("uProj", proj);
 
-    glBindVertexArray(dynamicVAO_);
-    glBindBuffer(GL_ARRAY_BUFFER, dynamicVBO_);
-    glBufferData(GL_ARRAY_BUFFER, count * sizeof(ColorVertex), verts, GL_STREAM_DRAW);
-
-    glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(ColorVertex), (void*)0);
-    glEnableVertexAttribArray(1);
-    glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, sizeof(ColorVertex), (void*)(3 * sizeof(float)));
-
-    glDrawArrays(GL_LINES, 0, count);
-    glBindVertexArray(0);
+    drawDynamic(GL_LINES, verts, count, true);
 }
 
 void SketchRenderer::drawPoints(const float* view, const float* proj,
@@ -90,18 +99,8 @@ void SketchRenderer::drawPoints(const float* view, const float* proj,
     lineShader_.setMat4("uView", view);
     lineShader_.setMat4("uProj", proj);
 
-    glBindVertexArray(dynamicVAO_);
-    glBindBuffer(GL_ARRAY_BUFFER, dynamicVBO_);
-    glBufferData(GL_ARRAY_BUFFER, count * sizeof(ColorVertex), verts, GL_STREAM_DRAW);
-
-    glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(ColorVertex), (void*)0);
-    glEnableVertexAttribArray(1);
-    glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, sizeof(ColorVertex), (void*)(3 * sizeof(float)));
-
     glPointSize(size);
-    glDrawArrays(GL_POINTS, 0, count);
-    glBindVertexArray(0);
+    drawDynamic(GL_POINTS, verts, count, true);
 }
 
 void SketchRenderer::drawQuad(const float* view, const float* proj,
@@ -122,16 +121,7 @@ void SketchRenderer::drawQuad(const float* view, const float* proj,
         corners[9], corners[10], corners[11],
     };
 
-    glBindVertexArray(dynamicVAO_);
-    glBindBuffer(GL_ARRAY_BUFFER, dynamicVBO_);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(verts), verts, GL_STREAM_DRAW);
-
-    glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*)0);
-    glDisableVertexAttribArray(1);
-
-    glDrawArrays(GL_TRIANGLES, 0, 6);
-    glBindVertexArray(0);
+    drawDynamic(GL_TRIANGLES, verts, 6, false);
 }
 
 void SketchRenderer::renderReferencePlanes(const SketchPlane* planes, int count,
@@ -723,14 +713,7 @@ void SketchRenderer::renderProfileHighlights(const SketchPlane& plane, const flo
                 verts.push_back(wx1 + nx); verts.push_back(wy1 + ny); verts.push_back(wz1 + nz);
             }
 
-            glBindVertexArray(dynamicVAO_);
-            glBindBuffer(GL_ARRAY_BUFFER, dynamicVBO_);
-            glBufferData(GL_ARRAY_BUFFER, verts.size() * sizeof(float), verts.data(), GL_STREAM_DRAW);
-            glEnableVertexAttribArray(0);
-            glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*)0);
-            glDisableVertexAttribArray(1);
-            glDrawArrays(GL_TRIANGLES, 0, (int)(verts.size() / 3));
-            glBindVertexArray(0);
+            drawDynamic(GL_TRIANGLES, verts.data(), (int)(verts.size() / 3), false);
 
             // Boundary ring
             float edgeColor[4];
@@ -830,14 +813,7 @@ void SketchRenderer::renderProfileHighlights(const SketchPlane& plane, const flo
                 }
             }
 
-            glBindVertexArray(dynamicVAO_);
-            glBindBuffer(GL_ARRAY_BUFFER, dynamicVBO_);
-            glBufferData(GL_ARRAY_BUFFER, verts.size() * sizeof(float), verts.data(), GL_STREAM_DRAW);
-            glEnableVertexAttribArray(0);
-            glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*)0);
-            glDisableVertexAttribArray(1);
-            glDrawArrays(GL_TRIANGLES, 0, (int)(verts.size() / 3));
-            glBindVertexArray(0);
+            drawDynamic(GL_TRIANGLES, verts.data(), (int)(verts.size() / 3), false);
 
             // Boundary edges (outer + holes)
             float edgeColor[4];

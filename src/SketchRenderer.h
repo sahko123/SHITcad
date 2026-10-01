@@ -53,6 +53,10 @@ private:
     GLuint dynamicVAO_ = 0;
     GLuint dynamicVBO_ = 0;
 
+    // Upload vertices to the shared dynamic buffer and draw them: position + RGBA colour per
+    // vertex (ColorVertex) or, if not `colored`, position only.
+    void drawDynamic(GLenum mode, const void* data, int vertexCount, bool colored);
+
     struct ColorVertex { float x, y, z, r, g, b, a; };
 
     void drawLines(const float* view, const float* proj,
