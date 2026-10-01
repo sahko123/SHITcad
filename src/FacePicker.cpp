@@ -271,6 +271,64 @@ static EntityID addProjectedPoint(const SketchPlane& plane, Sketch& sketch,
     return ptID;
 }
 
+static EntityID addProjectedPoint(const SketchPlane& plane, Sketch& sketch, const gp_Pnt& p) {
+    return addProjectedPoint(plane, sketch, p);
+}
+
+static void addProjectedLine(Sketch& sketch, EntityID startPt, EntityID endPt) {
+    LineEntity line;
+    line.id = sketch.genID();
+    line.startPt = startPt;
+    line.endPt = endPt;
+    line.projected = true;
+    sketch.lines.push_back(line);
+}
+
+// A curve that projects onto the sketch plane as an ellipse: a full ellipse, or the arc between
+// the curve's end parameters, centred at `center3D`.
+static void addProjectedEllipse(const SketchPlane& plane, Sketch& sketch, const BRepAdaptor_Curve& curve,
+                                const gp_Pnt& center3D, float semiMajor, float semiMinor, float rotation) {
+    const double uFirst = curve.FirstParameter();
+    const double uLast = curve.LastParameter();
+    EntityID centerPtID = addProjectedPoint(plane, sketch, center3D);
+
+    if (std::fabs((uLast - uFirst) - kTwoPiD) < 1e-3) {
+        EllipseEntity ee;
+        ee.id = sketch.genID();
+        ee.centerPt = centerPtID;
+        ee.semiMajor = semiMajor;
+        ee.semiMinor = semiMinor;
+        ee.rotation = rotation;
+        ee.projected = true;
+        sketch.ellipses.push_back(ee);
+        return;
+    }
+
+    gp_Pnt startPt3D = curve.Value(uFirst);
+    gp_Pnt endPt3D = curve.Value(uLast);
+    EntityID startPtID = addProjectedPoint(plane, sketch, startPt3D);
+    EntityID endPtID = addProjectedPoint(plane, sketch, endPt3D);
+
+    EllipseArcEntity ea;
+    ea.id = sketch.genID();
+    ea.centerPt = centerPtID;
+    ea.startPt = startPtID;
+    ea.endPt = endPtID;
+    ea.semiMajor = semiMajor;
+    ea.semiMinor = semiMinor;
+    ea.rotation = rotation;
+    ea.projected = true;
+
+    // Angles from the projected 2D positions
+    float clx, cly, slx, sly, elx, ely;
+    plane.worldToLocal((float)center3D.X(), (float)center3D.Y(), (float)center3D.Z(), clx, cly);
+    plane.worldToLocal((float)startPt3D.X(), (float)startPt3D.Y(), (float)startPt3D.Z(), slx, sly);
+    plane.worldToLocal((float)endPt3D.X(), (float)endPt3D.Y(), (float)endPt3D.Z(), elx, ely);
+    ea.startAngle = std::atan2(sly - cly, slx - clx);
+    ea.endAngle = std::atan2(ely - cly, elx - clx);
+    sketch.ellipseArcs.push_back(ea);
+}
+
 void projectFaceOntoSketch(const TopoDS_Face& face, const SketchPlane& plane, Sketch& sketch) {
     // For cylindrical/conical faces, replace the seam edge with silhouette lines
     BRepAdaptor_Surface surfAdaptor(face);
@@ -337,13 +395,7 @@ void projectFaceOntoSketch(const TopoDS_Face& face, const SketchPlane& plane, Sk
                     EntityID startPt = addProjectedPoint(plane, sketch, bx, by, bz);
                     EntityID endPt = addProjectedPoint(plane, sketch, tx, ty, tz);
 
-                    EntityID lineID = sketch.genID();
-                    LineEntity line;
-                    line.id = lineID;
-                    line.startPt = startPt;
-                    line.endPt = endPt;
-                    line.projected = true;
-                    sketch.lines.push_back(line);
+                    addProjectedLine(sketch, startPt, endPt);
                 }
             }
         }
@@ -376,18 +428,10 @@ void projectFaceOntoSketch(const TopoDS_Face& face, const SketchPlane& plane, Sk
             gp_Pnt p1 = curve.Value(curve.FirstParameter());
             gp_Pnt p2 = curve.Value(curve.LastParameter());
 
-            EntityID startPt = addProjectedPoint(plane, sketch,
-                (float)p1.X(), (float)p1.Y(), (float)p1.Z());
-            EntityID endPt = addProjectedPoint(plane, sketch,
-                (float)p2.X(), (float)p2.Y(), (float)p2.Z());
+            EntityID startPt = addProjectedPoint(plane, sketch, p1);
+            EntityID endPt = addProjectedPoint(plane, sketch, p2);
 
-            EntityID lineID = sketch.genID();
-            LineEntity line;
-            line.id = lineID;
-            line.startPt = startPt;
-            line.endPt = endPt;
-            line.projected = true;
-            sketch.lines.push_back(line);
+            addProjectedLine(sketch, startPt, endPt);
 
         } else if (curveType == GeomAbs_Circle) {
             gp_Circ circ = curve.Circle();
@@ -427,24 +471,15 @@ void projectFaceOntoSketch(const TopoDS_Face& face, const SketchPlane& plane, Sk
                           center3D.Y() - lineDir3D.Y() * radius,
                           center3D.Z() - lineDir3D.Z() * radius);
 
-                EntityID startPt = addProjectedPoint(plane, sketch,
-                    (float)p1.X(), (float)p1.Y(), (float)p1.Z());
-                EntityID endPt = addProjectedPoint(plane, sketch,
-                    (float)p2.X(), (float)p2.Y(), (float)p2.Z());
+                EntityID startPt = addProjectedPoint(plane, sketch, p1);
+                EntityID endPt = addProjectedPoint(plane, sketch, p2);
 
-                EntityID lineID = sketch.genID();
-                LineEntity line;
-                line.id = lineID;
-                line.startPt = startPt;
-                line.endPt = endPt;
-                line.projected = true;
-                sketch.lines.push_back(line);
+                addProjectedLine(sketch, startPt, endPt);
 
             } else if (absDot > 0.99f) {
                 // Circle is nearly parallel to sketch plane — projects as a circle
                 if (isFullCircle) {
-                    EntityID centerPtID = addProjectedPoint(plane, sketch,
-                        (float)center3D.X(), (float)center3D.Y(), (float)center3D.Z());
+                    EntityID centerPtID = addProjectedPoint(plane, sketch, center3D);
 
                     EntityID circID = sketch.genID();
                     CircleEntity ce;
@@ -457,12 +492,9 @@ void projectFaceOntoSketch(const TopoDS_Face& face, const SketchPlane& plane, Sk
                     gp_Pnt startPt3D = curve.Value(uFirst);
                     gp_Pnt endPt3D = curve.Value(uLast);
 
-                    EntityID centerPtID = addProjectedPoint(plane, sketch,
-                        (float)center3D.X(), (float)center3D.Y(), (float)center3D.Z());
-                    EntityID startPtID = addProjectedPoint(plane, sketch,
-                        (float)startPt3D.X(), (float)startPt3D.Y(), (float)startPt3D.Z());
-                    EntityID endPtID = addProjectedPoint(plane, sketch,
-                        (float)endPt3D.X(), (float)endPt3D.Y(), (float)endPt3D.Z());
+                    EntityID centerPtID = addProjectedPoint(plane, sketch, center3D);
+                    EntityID startPtID = addProjectedPoint(plane, sketch, startPt3D);
+                    EntityID endPtID = addProjectedPoint(plane, sketch, endPt3D);
 
                     EntityID arcID = sketch.genID();
                     ArcEntity arc;
@@ -504,49 +536,7 @@ void projectFaceOntoSketch(const TopoDS_Face& face, const SketchPlane& plane, Sk
                                        majorAxis3D.Z() * plane.vAxis[2]);
                 float rotation = std::atan2(vComp, uComp);
 
-                if (isFullCircle) {
-                    EntityID centerPtID = addProjectedPoint(plane, sketch,
-                        (float)center3D.X(), (float)center3D.Y(), (float)center3D.Z());
-
-                    EntityID ellipseID = sketch.genID();
-                    EllipseEntity ee;
-                    ee.id = ellipseID;
-                    ee.centerPt = centerPtID;
-                    ee.semiMajor = semiMajor;
-                    ee.semiMinor = semiMinor;
-                    ee.rotation = rotation;
-                    ee.projected = true;
-                    sketch.ellipses.push_back(ee);
-                } else {
-                    // Sample the arc endpoints to get projected positions
-                    gp_Pnt startPt3D = curve.Value(uFirst);
-                    gp_Pnt endPt3D = curve.Value(uLast);
-
-                    EntityID centerPtID = addProjectedPoint(plane, sketch,
-                        (float)center3D.X(), (float)center3D.Y(), (float)center3D.Z());
-                    EntityID startPtID = addProjectedPoint(plane, sketch,
-                        (float)startPt3D.X(), (float)startPt3D.Y(), (float)startPt3D.Z());
-                    EntityID endPtID = addProjectedPoint(plane, sketch,
-                        (float)endPt3D.X(), (float)endPt3D.Y(), (float)endPt3D.Z());
-
-                    EntityID eaID = sketch.genID();
-                    EllipseArcEntity ea;
-                    ea.id = eaID;
-                    ea.centerPt = centerPtID;
-                    ea.startPt = startPtID;
-                    ea.endPt = endPtID;
-                    ea.semiMajor = semiMajor;
-                    ea.semiMinor = semiMinor;
-                    ea.rotation = rotation;
-                    ea.projected = true;
-
-                    float slx, sly, elx, ely;
-                    plane.worldToLocal((float)startPt3D.X(), (float)startPt3D.Y(), (float)startPt3D.Z(), slx, sly);
-                    plane.worldToLocal((float)endPt3D.X(), (float)endPt3D.Y(), (float)endPt3D.Z(), elx, ely);
-                    ea.startAngle = std::atan2(sly - cly, slx - clx);
-                    ea.endAngle = std::atan2(ely - cly, elx - clx);
-                    sketch.ellipseArcs.push_back(ea);
-                }
+                addProjectedEllipse(plane, sketch, curve, center3D, semiMajor, semiMinor, rotation);
             }
 
         } else if (curveType == GeomAbs_Ellipse) {
@@ -563,56 +553,7 @@ void projectFaceOntoSketch(const TopoDS_Face& face, const SketchPlane& plane, Sk
             float vComp = mx * plane.vAxis[0] + my * plane.vAxis[1] + mz * plane.vAxis[2];
             float rotation = std::atan2(vComp, uComp);
 
-            double uFirst = curve.FirstParameter();
-            double uLast = curve.LastParameter();
-            double span = uLast - uFirst;
-            bool isFullEllipse = (std::fabs(span - kTwoPiD) < 1e-3);
-
-            if (isFullEllipse) {
-                EntityID centerPtID = addProjectedPoint(plane, sketch,
-                    (float)center3D.X(), (float)center3D.Y(), (float)center3D.Z());
-
-                EntityID ellipseID = sketch.genID();
-                EllipseEntity ee;
-                ee.id = ellipseID;
-                ee.centerPt = centerPtID;
-                ee.semiMajor = semiMajor;
-                ee.semiMinor = semiMinor;
-                ee.rotation = rotation;
-                ee.projected = true;
-                sketch.ellipses.push_back(ee);
-            } else {
-                // Ellipse arc
-                gp_Pnt startPt3D = curve.Value(uFirst);
-                gp_Pnt endPt3D = curve.Value(uLast);
-
-                EntityID centerPtID = addProjectedPoint(plane, sketch,
-                    (float)center3D.X(), (float)center3D.Y(), (float)center3D.Z());
-                EntityID startPtID = addProjectedPoint(plane, sketch,
-                    (float)startPt3D.X(), (float)startPt3D.Y(), (float)startPt3D.Z());
-                EntityID endPtID = addProjectedPoint(plane, sketch,
-                    (float)endPt3D.X(), (float)endPt3D.Y(), (float)endPt3D.Z());
-
-                EntityID eaID = sketch.genID();
-                EllipseArcEntity ea;
-                ea.id = eaID;
-                ea.centerPt = centerPtID;
-                ea.startPt = startPtID;
-                ea.endPt = endPtID;
-                ea.semiMajor = semiMajor;
-                ea.semiMinor = semiMinor;
-                ea.rotation = rotation;
-                ea.projected = true;
-
-                // Compute angles from projected 2D positions
-                float clx, cly, slx, sly, elx, ely;
-                plane.worldToLocal((float)center3D.X(), (float)center3D.Y(), (float)center3D.Z(), clx, cly);
-                plane.worldToLocal((float)startPt3D.X(), (float)startPt3D.Y(), (float)startPt3D.Z(), slx, sly);
-                plane.worldToLocal((float)endPt3D.X(), (float)endPt3D.Y(), (float)endPt3D.Z(), elx, ely);
-                ea.startAngle = std::atan2(sly - cly, slx - clx);
-                ea.endAngle = std::atan2(ely - cly, elx - clx);
-                sketch.ellipseArcs.push_back(ea);
-            }
+            addProjectedEllipse(plane, sketch, curve, center3D, semiMajor, semiMinor, rotation);
 
         } else if (curveType == GeomAbs_BSplineCurve) {
             Handle(Geom_BSplineCurve) bspline = curve.BSpline();
@@ -627,8 +568,7 @@ void projectFaceOntoSketch(const TopoDS_Face& face, const SketchPlane& plane, Sk
             // Project control points
             for (int i = 1; i <= nbPoles; i++) {
                 gp_Pnt pole = bspline->Pole(i);
-                EntityID ptID = addProjectedPoint(plane, sketch,
-                    (float)pole.X(), (float)pole.Y(), (float)pole.Z());
+                EntityID ptID = addProjectedPoint(plane, sketch, pole);
                 sp.controlPtIDs.push_back(ptID);
             }
 
@@ -656,8 +596,7 @@ void projectFaceOntoSketch(const TopoDS_Face& face, const SketchPlane& plane, Sk
             EntityID prevPtID = NullID;
             for (int i = 1; i <= nbPts; i++) {
                 gp_Pnt p = discretizer.Value(i);
-                EntityID ptID = addProjectedPoint(plane, sketch,
-                    (float)p.X(), (float)p.Y(), (float)p.Z());
+                EntityID ptID = addProjectedPoint(plane, sketch, p);
 
                 if (prevPtID != NullID) {
                     EntityID lineID = sketch.genID();

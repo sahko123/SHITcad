@@ -3,69 +3,79 @@
 
 #include <QDialog>
 
+#include <functional>
+#include <string>
+
 #undef near
 #undef far
 
 class QComboBox;
 class QDoubleSpinBox;
+class QFormLayout;
 class QLabel;
 class QLineEdit;
 class QPushButton;
 
 namespace shitcad {
 
+// What the STL and STEP / IGES import dialogs share: the file path, a read error (which hides the
+// form), a form each fills with its own rows, the notice of why Import is unavailable, and the
+// Import / Cancel buttons.
+class ImportDialogBase : public QDialog {
+public:
+    using Action = std::function<void(App&)>;
+
+protected:
+    ImportDialogBase(App& app, Action confirm, Action cancel, QWidget* parent);
+
+    // Escape and the window's X both land here; App is told, or the next
+    // refresh would show the dialog again.
+    void reject() override;
+
+    // The first part of refresh(): show or hide the dialog and fill in the path, error and
+    // blocked notice. False when there is nothing more to show (closed, or the file failed).
+    bool refreshHead(bool open, const std::string& path, const std::string& error, const std::string& blocked);
+    // True the first time a new file is shown: the fields then take App's defaults.
+    bool isNewFile(const std::string& path);
+
+    App& app_;
+    Action cancel_;
+    std::string shownPath_;
+    QLabel* path_ = nullptr;
+    QLabel* error_ = nullptr;
+    QLabel* size_ = nullptr;
+    QLabel* warning_ = nullptr;
+    QLabel* blocked_ = nullptr;        // why Import is disabled
+    QLineEdit* name_ = nullptr;
+    QPushButton* import_ = nullptr;
+    QWidget* form_ = nullptr;          // everything hidden when the file failed to read
+    QFormLayout* formLayout_ = nullptr; // rows added by the derived dialog
+};
+
 // Qt front end for MeshImportModel:
 // STL has no units, so this asks for one while showing the resulting size.
-class MeshImportDialog : public QDialog {
+class MeshImportDialog : public ImportDialogBase {
     Q_OBJECT
 public:
     MeshImportDialog(App& app, QWidget* parent = nullptr);
     void refresh();
 
-protected:
-    // Escape and the window's X both land here; App is told, or the next
-    // refresh would show the dialog again.
-    void reject() override;
-
 private:
-    App& app_;
-    std::string shownPath_;            // reloads the fields when a new file arrives
-    QLabel* path_ = nullptr;
-    QLabel* error_ = nullptr;
     QLabel* triangles_ = nullptr;
-    QLineEdit* name_ = nullptr;
     QComboBox* unit_ = nullptr;
-    QLabel* size_ = nullptr;
-    QLabel* warning_ = nullptr;
-    QLabel* blocked_ = nullptr;        // why Import is disabled
-    QPushButton* import_ = nullptr;
-    QWidget* form_ = nullptr;          // everything hidden when the file failed to read
 };
 
 // Qt front end for CadImportModel: what a STEP / IGES file holds, and which
 // way is up in it.
-class CadImportDialog : public QDialog {
+class CadImportDialog : public ImportDialogBase {
     Q_OBJECT
 public:
     CadImportDialog(App& app, QWidget* parent = nullptr);
     void refresh();
 
-protected:
-    void reject() override;            // as MeshImportDialog
-
 private:
-    App& app_;
-    std::string shownPath_;
-    QLabel* path_ = nullptr;
-    QLabel* error_ = nullptr;
     QLabel* contents_ = nullptr;       // format, unit, solid / surface counts
-    QLabel* size_ = nullptr;
-    QLabel* warning_ = nullptr;        // curves that make no body
-    QLabel* blocked_ = nullptr;        // why Import is disabled
-    QPushButton* import_ = nullptr;
-    QLineEdit* name_ = nullptr;
     QComboBox* up_ = nullptr;
-    QWidget* form_ = nullptr;
 };
 
 // Qt front end for MeshPlaceModel:
