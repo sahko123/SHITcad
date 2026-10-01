@@ -368,6 +368,125 @@ static void tagBody(Scene3D& scene, int index, FeatureID feature, int n) {
     b.sourceIndex = n;
 }
 
+// The sketch plane a feature's source sketch lives on; null, with the reason in `why`, if
+// the sketch is gone or its plane is invalid.
+static const SketchPlane* findSourcePlane(const FeatureHistory& history,
+                                          const std::vector<SketchPlane>& planes,
+                                          FeatureID sourceSketch, const char*& why) {
+    const Feature* src = history.findFeature(sourceSketch);
+    if (!src || src->type != FeatureType::Sketch) {
+        why = "Source sketch not found";
+        return nullptr;
+    }
+    const auto& sd = std::get<SketchFeatureData>(src->data);
+    if (sd.sketchPlaneIndex < 0 || sd.sketchPlaneIndex >= (int)planes.size()) {
+        why = "Invalid sketch plane";
+        return nullptr;
+    }
+    return &planes[sd.sketchPlaneIndex];
+}
+
+struct SourceProfiles {
+    const SketchPlane* plane = nullptr;
+    std::vector<ClosedProfile> detected;
+    std::set<int> matched; // indices into `detected`
+};
+
+// Extrude and Revolve start the same way: find the sketch the feature was made from, detect
+// its closed profiles and match the recorded signatures against them. On failure the
+// feature is marked with the reason and this returns false.
+static bool resolveSourceProfiles(const FeatureHistory& history,
+                                  const std::vector<SketchPlane>& planes,
+                                  FeatureID sourceSketch,
+                                  const std::vector<ProfileSignature>& sigs,
+                                  const std::vector<int>& fallback,
+                                  Feature& feat, SourceProfiles& out) {
+    const char* why = nullptr;
+    out.plane = findSourcePlane(history, planes, sourceSketch, why);
+    if (!out.plane) {
+        feat.hasError = true;
+        feat.errorMsg = why;
+        return false;
+    }
+    const SketchPlane& plane = *out.plane;
+    const Sketch& sketch = plane.sketch;
+
+    out.detected = detectClosedProfiles(sketch, plane);
+    if (out.detected.empty()) {
+        feat.hasError = true;
+        feat.errorMsg = "No profiles detected";
+        logNoProfilesDiagnostics(feat.name.c_str(), sketch, plane);
+        return false;
+    }
+
+    out.matched = matchProfiles(sigs, fallback, out.detected, sketch);
+    if (out.matched.empty()) {
+        feat.hasError = true;
+        feat.errorMsg = "Could not match profiles";
+        logProfileDiagnostics(feat.name.c_str(), "Could not match profiles",
+                              sigs, fallback, out.detected, sketch, plane);
+        return false;
+    }
+    return true;
+}
+
+// Puts a feature's tool shape into the scene. A Cut subtracts it from every B-rep body
+// (a body that splits keeps its first piece in place and appends the rest); anything else
+// adds it as a new body and fuses it into the first existing body it joins. `label` names
+// the feature type in the diagnostics.
+static void applyToolShape(Scene3D& scene, const TopoDS_Shape& toolShape, ExtrudeOperation op,
+                           Feature& feat, int& created, const char* label) {
+    if (op == ExtrudeOperation::Cut) {
+        const std::string opName = std::string(label) + " Cut";
+        bool anyCut = false;
+        for (int i = (int)scene.bodyCount() - 1; i >= 0; i--) {
+            const auto& body = scene.getBody(i);
+            if (body.isMeshOnly()) continue; // no B-rep to cut
+            BRepAlgoAPI_Cut cutter(body.shape, toolShape);
+            if (!cutter.IsDone() || cutter.HasErrors()) {
+                logBooleanError(feat.name.c_str(), opName.c_str(), body.shape, toolShape, i, -1, cutter);
+                continue;
+            }
+
+            auto solids = enumerateSolids(cutter.Shape());
+            if (solids.empty()) {
+                scene.removeBody(i);
+            } else {
+                scene.replaceBody(i, solids[0]);
+                for (size_t j = 1; j < solids.size(); j++) {
+                    scene.addBody(solids[j]);
+                    tagBody(scene, (int)scene.bodyCount() - 1, feat.id, created++);
+                }
+            }
+            anyCut = true;
+        }
+        if (!anyCut) {
+            feat.hasError = true;
+            feat.errorMsg = "Cut boolean failed on all bodies";
+            logExtrudeToolError(feat.name.c_str(), (opName + " failed on all bodies").c_str(), toolShape, scene);
+        }
+        return;
+    }
+
+    scene.addBody(toolShape);
+    int newIdx = (int)scene.bodyCount() - 1;
+    tagBody(scene, newIdx, feat.id, created++);
+
+    for (int i = newIdx - 1; i >= 0; i--) {
+        const auto& existing = scene.getBody(i);
+        if (existing.isMeshOnly()) continue; // never fuse into a reference mesh
+        BRepAlgoAPI_Fuse fuser(existing.shape, scene.getBody(newIdx).shape);
+        if (!fuser.IsDone() || fuser.HasErrors()) continue;
+
+        auto solids = enumerateSolids(fuser.Shape());
+        if (solids.size() == 1) {
+            scene.replaceBody(i, solids[0]);
+            scene.removeBody(newIdx);
+            break;
+        }
+    }
+}
+
 void replayFeatures(FeatureHistory& history,
                     std::vector<SketchPlane>& planes,
                     Scene3D& scene) {
@@ -406,47 +525,15 @@ void replayFeatures(FeatureHistory& history,
         } else if (feat.type == FeatureType::Extrude) {
             const auto& ed = std::get<ExtrudeFeatureData>(feat.data);
 
-            // Find source sketch plane
-            const Feature* srcFeat = history.findFeature(ed.sourceSketchFeature);
-            if (!srcFeat || srcFeat->type != FeatureType::Sketch) {
-                mutableFeat.hasError = true;
-                mutableFeat.errorMsg = "Source sketch not found";
-                continue;
-            }
-
-            const auto& srcSD = std::get<SketchFeatureData>(srcFeat->data);
-            if (srcSD.sketchPlaneIndex < 0 || srcSD.sketchPlaneIndex >= (int)planes.size()) {
-                mutableFeat.hasError = true;
-                mutableFeat.errorMsg = "Invalid sketch plane";
-                continue;
-            }
-
-            const SketchPlane& plane = planes[srcSD.sketchPlaneIndex];
+            SourceProfiles src;
+            if (!resolveSourceProfiles(history, planes, ed.sourceSketchFeature, ed.profileSigs,
+                                       ed.profileIndicesFallback, mutableFeat, src)) continue;
+            const SketchPlane& plane = *src.plane;
             const Sketch& sketch = plane.sketch;
 
-            // Detect profiles
-            auto detected = detectClosedProfiles(sketch, plane);
-            if (detected.empty()) {
-                mutableFeat.hasError = true;
-                mutableFeat.errorMsg = "No profiles detected";
-                logNoProfilesDiagnostics(feat.name.c_str(), sketch, plane);
-                continue;
-            }
-
-            // Match profiles
-            auto matchedIndices = matchProfiles(ed.profileSigs, ed.profileIndicesFallback, detected, sketch);
-            if (matchedIndices.empty()) {
-                mutableFeat.hasError = true;
-                mutableFeat.errorMsg = "Could not match profiles";
-                logProfileDiagnostics(feat.name.c_str(), "Could not match profiles",
-                                      ed.profileSigs, ed.profileIndicesFallback, detected, sketch, plane);
-                continue;
-            }
-
-            // Build tool shape using the matched profiles
             ExtrudeToolState tempState;
-            tempState.allProfiles = detected;
-            tempState.selectedProfileIndices = matchedIndices;
+            tempState.allProfiles = std::move(src.detected);
+            tempState.selectedProfileIndices = std::move(src.matched);
             tempState.height = ed.height;
             tempState.offset = ed.offset;
             tempState.operation = ed.operation;
@@ -459,101 +546,19 @@ void replayFeatures(FeatureHistory& history,
                 logExtrudeToolError(feat.name.c_str(), "buildExtrudeToolShape returned null", toolShape, scene);
                 continue;
             }
-
-            // Apply the tool shape (shared logic for NewBody and Cut)
-            if (ed.operation == ExtrudeOperation::Cut) {
-                // Cut from existing bodies
-                bool anyCut = false;
-                for (int i = (int)scene.bodyCount() - 1; i >= 0; i--) {
-                    const auto& body = scene.getBody(i);
-                    if (body.isMeshOnly()) continue; // no B-rep to cut
-                    BRepAlgoAPI_Cut cutter(body.shape, toolShape);
-                    if (!cutter.IsDone() || cutter.HasErrors()) {
-                        logBooleanError(feat.name.c_str(), "Extrude Cut", body.shape, toolShape, i, -1, cutter);
-                        continue;
-                    }
-
-                    TopoDS_Shape cutResult = cutter.Shape();
-                    auto solids = enumerateSolids(cutResult);
-
-                    if (solids.empty()) {
-                        scene.removeBody(i);
-                    } else if (solids.size() == 1) {
-                        scene.replaceBody(i, solids[0]);
-                    } else {
-                        scene.replaceBody(i, solids[0]);
-                        for (size_t j = 1; j < solids.size(); j++) {
-                            scene.addBody(solids[j]);
-                            tagBody(scene, (int)scene.bodyCount() - 1, feat.id, created++);
-                        }
-                    }
-                    anyCut = true;
-                }
-                if (!anyCut) {
-                    mutableFeat.hasError = true;
-                    mutableFeat.errorMsg = "Cut boolean failed on all bodies";
-                    logExtrudeToolError(feat.name.c_str(), "Cut failed on all bodies", toolShape, scene);
-                }
-            } else {
-                // NewBody + auto-fuse
-                scene.addBody(toolShape);
-                int newIdx = (int)scene.bodyCount() - 1;
-                tagBody(scene, newIdx, feat.id, created++);
-
-                for (int i = newIdx - 1; i >= 0; i--) {
-                    const auto& existing = scene.getBody(i);
-                    if (existing.isMeshOnly()) continue; // never fuse into a reference mesh
-                    BRepAlgoAPI_Fuse fuser(existing.shape, scene.getBody(newIdx).shape);
-                    if (!fuser.IsDone() || fuser.HasErrors()) continue;
-
-                    auto solids = enumerateSolids(fuser.Shape());
-                    if (solids.size() == 1) {
-                        scene.replaceBody(i, solids[0]);
-                        scene.removeBody(newIdx);
-                        break;
-                    }
-                }
-            }
+            applyToolShape(scene, toolShape, ed.operation, mutableFeat, created, "Extrude");
         } else if (feat.type == FeatureType::Revolve) {
             const auto& rd = std::get<RevolveFeatureData>(feat.data);
 
-            const Feature* srcFeat = history.findFeature(rd.sourceSketchFeature);
-            if (!srcFeat || srcFeat->type != FeatureType::Sketch) {
-                mutableFeat.hasError = true;
-                mutableFeat.errorMsg = "Source sketch not found";
-                continue;
-            }
-
-            const auto& srcSD = std::get<SketchFeatureData>(srcFeat->data);
-            if (srcSD.sketchPlaneIndex < 0 || srcSD.sketchPlaneIndex >= (int)planes.size()) {
-                mutableFeat.hasError = true;
-                mutableFeat.errorMsg = "Invalid sketch plane";
-                continue;
-            }
-
-            const SketchPlane& plane = planes[srcSD.sketchPlaneIndex];
+            SourceProfiles src;
+            if (!resolveSourceProfiles(history, planes, rd.sourceSketchFeature, rd.profileSigs,
+                                       rd.profileIndicesFallback, mutableFeat, src)) continue;
+            const SketchPlane& plane = *src.plane;
             const Sketch& sketch = plane.sketch;
 
-            auto detected = detectClosedProfiles(sketch, plane);
-            if (detected.empty()) {
-                mutableFeat.hasError = true;
-                mutableFeat.errorMsg = "No profiles detected";
-                logNoProfilesDiagnostics(feat.name.c_str(), sketch, plane);
-                continue;
-            }
-
-            auto matchedIndices = matchProfiles(rd.profileSigs, rd.profileIndicesFallback, detected, sketch);
-            if (matchedIndices.empty()) {
-                mutableFeat.hasError = true;
-                mutableFeat.errorMsg = "Could not match profiles";
-                logProfileDiagnostics(feat.name.c_str(), "Could not match profiles",
-                                      rd.profileSigs, rd.profileIndicesFallback, detected, sketch, plane);
-                continue;
-            }
-
             RevolveToolState tempState;
-            tempState.allProfiles = detected;
-            tempState.selectedProfileIndices = matchedIndices;
+            tempState.allProfiles = std::move(src.detected);
+            tempState.selectedProfileIndices = std::move(src.matched);
             tempState.axisLineID = rd.axisLineID;
             tempState.angleDeg = rd.angleDeg;
             tempState.operation = rd.operation;
@@ -565,58 +570,7 @@ void replayFeatures(FeatureHistory& history,
                 logExtrudeToolError(feat.name.c_str(), "buildRevolveToolShape returned null", toolShape, scene);
                 continue;
             }
-
-            if (rd.operation == ExtrudeOperation::Cut) {
-                bool anyCut = false;
-                for (int i = (int)scene.bodyCount() - 1; i >= 0; i--) {
-                    const auto& body = scene.getBody(i);
-                    if (body.isMeshOnly()) continue; // no B-rep to cut
-                    BRepAlgoAPI_Cut cutter(body.shape, toolShape);
-                    if (!cutter.IsDone() || cutter.HasErrors()) {
-                        logBooleanError(feat.name.c_str(), "Revolve Cut", body.shape, toolShape, i, -1, cutter);
-                        continue;
-                    }
-
-                    TopoDS_Shape cutResult = cutter.Shape();
-                    auto solids = enumerateSolids(cutResult);
-
-                    if (solids.empty()) {
-                        scene.removeBody(i);
-                    } else if (solids.size() == 1) {
-                        scene.replaceBody(i, solids[0]);
-                    } else {
-                        scene.replaceBody(i, solids[0]);
-                        for (size_t j = 1; j < solids.size(); j++) {
-                            scene.addBody(solids[j]);
-                            tagBody(scene, (int)scene.bodyCount() - 1, feat.id, created++);
-                        }
-                    }
-                    anyCut = true;
-                }
-                if (!anyCut) {
-                    mutableFeat.hasError = true;
-                    mutableFeat.errorMsg = "Revolve cut boolean failed";
-                    logExtrudeToolError(feat.name.c_str(), "Revolve cut failed on all bodies", toolShape, scene);
-                }
-            } else {
-                scene.addBody(toolShape);
-                int newIdx = (int)scene.bodyCount() - 1;
-                tagBody(scene, newIdx, feat.id, created++);
-
-                for (int i = newIdx - 1; i >= 0; i--) {
-                    const auto& existing = scene.getBody(i);
-                    if (existing.isMeshOnly()) continue; // never fuse into a reference mesh
-                    BRepAlgoAPI_Fuse fuser(existing.shape, scene.getBody(newIdx).shape);
-                    if (!fuser.IsDone() || fuser.HasErrors()) continue;
-
-                    auto solids = enumerateSolids(fuser.Shape());
-                    if (solids.size() == 1) {
-                        scene.replaceBody(i, solids[0]);
-                        scene.removeBody(newIdx);
-                        break;
-                    }
-                }
-            }
+            applyToolShape(scene, toolShape, rd.operation, mutableFeat, created, "Revolve");
         } else if (feat.type == FeatureType::Loft) {
             const auto& ld = std::get<LoftFeatureData>(feat.data);
             if (ld.sections.size() < 2) {
@@ -632,50 +586,39 @@ void replayFeatures(FeatureHistory& history,
                 int matchedIdx;
             };
             std::vector<LoftData> loftDatas;
-            bool loftError = false;
+            const char* sectionError = nullptr;
 
-            for (size_t si = 0; si < ld.sections.size(); si++) {
-                const auto& sec = ld.sections[si];
-                const Feature* srcFeat = history.findFeature(sec.sourceSketchFeature);
-                if (!srcFeat || srcFeat->type != FeatureType::Sketch) {
-                    loftError = true; break;
-                }
-                const auto& srcSD = std::get<SketchFeatureData>(srcFeat->data);
-                if (srcSD.sketchPlaneIndex < 0 || srcSD.sketchPlaneIndex >= (int)planes.size()) {
-                    loftError = true; break;
-                }
-                const SketchPlane& plane = planes[srcSD.sketchPlaneIndex];
-                const Sketch& sketch = plane.sketch;
+            for (const auto& sec : ld.sections) {
+                const SketchPlane* plane = findSourcePlane(history, planes, sec.sourceSketchFeature, sectionError);
+                if (!plane) break;
+                const Sketch& sketch = plane->sketch;
 
                 LoftData d;
                 d.sketch = &sketch;
-                d.plane = &plane;
-                d.detected = detectClosedProfiles(sketch, plane);
+                d.plane = plane;
+                d.detected = detectClosedProfiles(sketch, *plane);
                 if (d.detected.empty()) {
-                    logNoProfilesDiagnostics(feat.name.c_str(), sketch, plane);
-                    loftError = true; break;
+                    logNoProfilesDiagnostics(feat.name.c_str(), sketch, *plane);
+                    sectionError = "No profiles detected";
+                    break;
                 }
 
                 std::vector<ProfileSignature> sigVec = {sec.profileSig};
                 std::vector<int> fbVec = {sec.profileIndexFallback};
-                auto matched = matchProfiles(sigVec, fbVec, d.detected, *d.sketch);
+                auto matched = matchProfiles(sigVec, fbVec, d.detected, sketch);
                 if (matched.empty()) {
                     logProfileDiagnostics(feat.name.c_str(), "Loft section match failed",
-                                          sigVec, fbVec, d.detected, sketch, plane);
-                }
-                if (matched.empty()) {
-                    loftError = true;
-                    mutableFeat.hasError = true;
-                    mutableFeat.errorMsg = "Could not match loft section profile";
+                                          sigVec, fbVec, d.detected, sketch, *plane);
+                    sectionError = "Could not match loft section profile";
                     break;
                 }
                 d.matchedIdx = *matched.begin();
                 loftDatas.push_back(std::move(d));
             }
 
-            if (loftError) {
+            if (sectionError) {
                 mutableFeat.hasError = true;
-                mutableFeat.errorMsg = "Loft section error";
+                mutableFeat.errorMsg = sectionError;
                 continue;
             }
 
@@ -695,43 +638,7 @@ void replayFeatures(FeatureHistory& history,
                 logExtrudeToolError(feat.name.c_str(), "loftProfiles returned null", toolShape, scene);
                 continue;
             }
-
-            if (ld.operation == ExtrudeOperation::Cut) {
-                for (int i = (int)scene.bodyCount() - 1; i >= 0; i--) {
-                    const auto& body = scene.getBody(i);
-                    if (body.isMeshOnly()) continue; // no B-rep to cut
-                    BRepAlgoAPI_Cut cutter(body.shape, toolShape);
-                    if (!cutter.IsDone() || cutter.HasErrors()) continue;
-                    auto solids = enumerateSolids(cutter.Shape());
-                    if (solids.empty()) {
-                        scene.removeBody(i);
-                    } else if (solids.size() == 1) {
-                        scene.replaceBody(i, solids[0]);
-                    } else {
-                        scene.replaceBody(i, solids[0]);
-                        for (size_t j = 1; j < solids.size(); j++) {
-                            scene.addBody(solids[j]);
-                            tagBody(scene, (int)scene.bodyCount() - 1, feat.id, created++);
-                        }
-                    }
-                }
-            } else {
-                scene.addBody(toolShape);
-                int newIdx = (int)scene.bodyCount() - 1;
-                tagBody(scene, newIdx, feat.id, created++);
-                for (int i = newIdx - 1; i >= 0; i--) {
-                    const auto& existing = scene.getBody(i);
-                    if (existing.isMeshOnly()) continue; // never fuse into a reference mesh
-                    BRepAlgoAPI_Fuse fuser(existing.shape, scene.getBody(newIdx).shape);
-                    if (!fuser.IsDone() || fuser.HasErrors()) continue;
-                    auto solids = enumerateSolids(fuser.Shape());
-                    if (solids.size() == 1) {
-                        scene.replaceBody(i, solids[0]);
-                        scene.removeBody(newIdx);
-                        break;
-                    }
-                }
-            }
+            applyToolShape(scene, toolShape, ld.operation, mutableFeat, created, "Loft");
         } else if (feat.type == FeatureType::MeshImport) {
             const auto& md = std::get<MeshImportFeatureData>(feat.data);
 
