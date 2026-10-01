@@ -779,9 +779,7 @@ void App::renderDimensions(const float view[16], const float proj[16], float vpW
 
             // --- Radius constraint (legacy) ---
             if (c.type == ConstraintType::Radius) {
-                const CircleEntity* circle = nullptr;
-                for (const auto& ci : sketch.circles)
-                    if (ci.id == c.entityA) { circle = &ci; break; }
+                const CircleEntity* circle = sketch.findCircle(c.entityA);
                 if (!circle) continue;
                 Point2D center = sketch.getPointPos(circle->centerPt);
                 Point2D edge = { center.x + circle->radius, center.y };
@@ -793,9 +791,7 @@ void App::renderDimensions(const float view[16], const float proj[16], float vpW
 
             // --- Diameter constraint ---
             if (c.type == ConstraintType::Diameter) {
-                const CircleEntity* circle = nullptr;
-                for (const auto& ci : sketch.circles)
-                    if (ci.id == c.entityA) { circle = &ci; break; }
+                const CircleEntity* circle = sketch.findCircle(c.entityA);
                 if (!circle) continue;
                 Point2D center = sketch.getPointPos(circle->centerPt);
                 Point2D left = { center.x - circle->radius, center.y };

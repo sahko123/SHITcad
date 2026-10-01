@@ -10,10 +10,7 @@ std::vector<PendingConstraint> detectLineAutoConstraints(
     const Sketch& sketch, EntityID lineID) {
     std::vector<PendingConstraint> result;
 
-    const LineEntity* line = nullptr;
-    for (const auto& l : sketch.lines) {
-        if (l.id == lineID) { line = &l; break; }
-    }
+    const LineEntity* line = sketch.findLine(lineID);
     if (!line) return result;
 
     Point2D a = sketch.getPointPos(line->startPt);

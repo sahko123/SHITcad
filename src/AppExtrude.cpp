@@ -4,6 +4,7 @@
 #include "FacePicker.h"
 #include "ExtrudeTool.h"
 #include "FeatureReplay.h"
+#include "UnitUtils.h"
 #include <BRep_Builder.hxx>
 #include <TopoDS_Compound.hxx>
 #include <BRepAlgoAPI_Cut.hxx>
@@ -19,24 +20,6 @@
 #include <string>
 
 namespace shitcad {
-
-static bool worldToScreen(const float world[3], const float view[16], const float proj[16],
-                          float vpW, float vpH, float& sx, float& sy) {
-    float vx = view[0]*world[0] + view[4]*world[1] + view[8]*world[2]  + view[12];
-    float vy = view[1]*world[0] + view[5]*world[1] + view[9]*world[2]  + view[13];
-    float vz = view[2]*world[0] + view[6]*world[1] + view[10]*world[2] + view[14];
-    float vw = view[3]*world[0] + view[7]*world[1] + view[11]*world[2] + view[15];
-    float cx = proj[0]*vx + proj[4]*vy + proj[8]*vz  + proj[12]*vw;
-    float cy = proj[1]*vx + proj[5]*vy + proj[9]*vz  + proj[13]*vw;
-    float cw = proj[3]*vx + proj[7]*vy + proj[11]*vz + proj[15]*vw;
-    if (std::fabs(cw) < 1e-6f) return false;
-    if (cw < 0) return false;
-    float ndcX = cx / cw;
-    float ndcY = cy / cw;
-    sx = (ndcX * 0.5f + 0.5f) * vpW;
-    sy = (1.0f - (ndcY * 0.5f + 0.5f)) * vpH;
-    return true;
-}
 
 void App::enterExtrudeMode() {
     int planeIdx = -1;

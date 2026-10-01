@@ -1549,10 +1549,7 @@ void App::handleToolAction(Sketch& sketch, Point2D localPos) {
 
             // Temporarily pin the start point so auto-constraints only move the new
             // free endpoint, leaving previously placed geometry undisturbed.
-            PointEntity* startPt = nullptr;
-            for (auto& pt : sketch.points) {
-                if (pt.id == startPtID) { startPt = &pt; break; }
-            }
+            PointEntity* startPt = sketch.findPoint(startPtID);
             bool wasPinned = startPt && startPt->projected;
             if (startPt) startPt->projected = true;
             lastSketchDof_ = solver_.solve(sketch).dof;
