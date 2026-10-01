@@ -19,4 +19,12 @@ std::set<int> matchProfiles(const std::vector<ProfileSignature>& sigs,
                             const std::vector<ClosedProfile>& detected,
                             const Sketch& sketch);
 
+// The inverse of matchProfiles: the signatures (and index fallbacks) a feature stores for the
+// selected profiles.
+void recordProfileSelection(const std::set<int>& selected,
+                            const std::vector<ClosedProfile>& all,
+                            const Sketch& sketch,
+                            std::vector<ProfileSignature>& sigs,
+                            std::vector<int>& fallback);
+
 } // namespace shitcad

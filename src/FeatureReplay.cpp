@@ -361,6 +361,18 @@ std::set<int> matchProfiles(const std::vector<ProfileSignature>& sigs,
     return matched;
 }
 
+void recordProfileSelection(const std::set<int>& selected,
+                            const std::vector<ClosedProfile>& all,
+                            const Sketch& sketch,
+                            std::vector<ProfileSignature>& sigs,
+                            std::vector<int>& fallback) {
+    for (int idx : selected) {
+        if (idx < 0 || idx >= (int)all.size()) continue;
+        sigs.push_back(ProfileSignature::fromProfile(all[idx], sketch));
+        fallback.push_back(idx);
+    }
+}
+
 // Give the body at `index` its identity: made by `feature`, as its n-th body.
 static void tagBody(Scene3D& scene, int index, FeatureID feature, int n) {
     Body3D& b = scene.getBodyMut(index);

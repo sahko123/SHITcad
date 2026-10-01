@@ -10,7 +10,7 @@ cmake -B build -S . -DCMAKE_TOOLCHAIN_FILE=[vcpkg-root]/scripts/buildsystems/vcp
 cmake --build build --config Release
 ```
 
-Tests are opt-in (`-DSHITCAD_BUILD_TESTS=ON`), then run `build/Release/MeshImportTest.exe`, `SimulationTest.exe` and `ReplayTest.exe`. They build on the core sources only (no `App*.cpp`, no UI). `ReplayTest` builds one history per feature type in code and checks volumes, bounds, every constraint type and save/load round trips; replay needs no GL context. `SimulationTest` compiles the shaders and picks through a section view in an offscreen Qt GL context. Manual checks: `docs/smoke-checklist.md`.
+Tests are opt-in (`-DSHITCAD_BUILD_TESTS=ON`), then run `build/Release/MeshImportTest.exe`, `SimulationTest.exe`, `ReplayTest.exe` and `ToolFlowTest.exe`. The first three build on the core sources only (no `App*.cpp`, no UI); `ToolFlowTest` also builds the App sources (`SHITCAD_APP_SOURCES`) and drives the Extrude / Revolve / Loft tools headless through commit, edit, cancel and undo in an offscreen GL context, reading App's private state as `AppTestAccess`, its friend. Shared test helpers (`CHECK`, the box-STL fixture) are in `tests/TestUtil.h`. `ReplayTest` builds one history per feature type in code and checks volumes, bounds, every constraint type and save/load round trips; replay needs no GL context. `SimulationTest` compiles the shaders and picks through a section view in an offscreen Qt GL context. Manual checks: `docs/smoke-checklist.md`.
 Run the build from PowerShell or cmd: Git Bash rewrites MSBuild's `/m` switch into a path.
 
 The UI is Qt 6 Widgets (`src/qt/`, the only place Qt is used; history in `docs/qt-migration-plan.md`). The first configure builds OpenCASCADE and qtbase through vcpkg and takes a long time. The build copies Qt's `platforms/qwindows.dll` next to the executable; without it nothing can open a window.
@@ -37,6 +37,7 @@ The `App` class is large and split across multiple .cpp files by responsibility:
 | `AppExtrude.cpp` | Extrude tool: input, panel model, preview, commit, edit |
 | `AppRevolve.cpp` | Revolve tool: input, panel model, preview, commit, edit |
 | `AppLoft.cpp` | Loft tool: input, panel model, preview, commit, edit |
+| `AppFeatureTool.cpp` | What those three share: finding the profile plane, saving the source sketch as a feature, drawing the translucent preview, leaving the tool |
 | `AppBoolean.cpp` | Boolean tool: input, panel model, preview, commit |
 
 ### UI (`src/qt/`)

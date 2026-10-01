@@ -109,41 +109,7 @@ void App::setLoftSolid(bool solid) {
 void App::updateLoftPreview() {
     loftTool_.previewDirty = false;
 
-    // Restore body visibility from any previous preview
-    if (loftTool_.hidingBodiesForPreview) {
-        for (size_t i = 0; i < scene_.bodyCount(); i++)
-            scene_.getBodyMut((int)i).visible = true;
-        loftTool_.hidingBodiesForPreview = false;
-    }
-
-    // Clean up old preview resources
-    if (loftTool_.previewBody.vao) {
-        glDeleteVertexArrays(1, &loftTool_.previewBody.vao);
-        loftTool_.previewBody.vao = 0;
-    }
-    if (loftTool_.previewBody.vbo) {
-        glDeleteBuffers(1, &loftTool_.previewBody.vbo);
-        loftTool_.previewBody.vbo = 0;
-    }
-    if (loftTool_.previewBody.edgeVAO) {
-        glDeleteVertexArrays(1, &loftTool_.previewBody.edgeVAO);
-        loftTool_.previewBody.edgeVAO = 0;
-    }
-    if (loftTool_.previewBody.edgeVBO) {
-        glDeleteBuffers(1, &loftTool_.previewBody.edgeVBO);
-        loftTool_.previewBody.edgeVBO = 0;
-    }
-    loftTool_.previewBody.vertices.clear();
-    loftTool_.previewBody.vertexCount = 0;
-    loftTool_.previewBody.edgeVertexCount = 0;
-
-    for (auto& b : loftTool_.cutPreviewBodies) {
-        if (b.vao) glDeleteVertexArrays(1, &b.vao);
-        if (b.vbo) glDeleteBuffers(1, &b.vbo);
-        if (b.edgeVAO) glDeleteVertexArrays(1, &b.edgeVAO);
-        if (b.edgeVBO) glDeleteBuffers(1, &b.edgeVBO);
-    }
-    loftTool_.cutPreviewBodies.clear();
+    loftTool_.previewBody = Body3D{};
 
     if (!loftTool_.canCommit()) {
         return;
@@ -164,70 +130,11 @@ void App::updateLoftPreview() {
         return;
     }
 
-    TopoDS_Shape previewShape = loftProfiles(inputs, loftTool_.solid);
-
-    loftTool_.previewBody = Body3D{};
-    if (!previewShape.IsNull()) {
-        Scene3D::triangulateShape(previewShape, loftTool_.previewBody.vertices);
-    }
-
-    if (loftTool_.operation == ExtrudeOperation::Cut) {
-        loftTool_.previewBody.colorR = 0.9f;
-        loftTool_.previewBody.colorG = 0.3f;
-        loftTool_.previewBody.colorB = 0.3f;
-    } else {
-        loftTool_.previewBody.colorR = 0.4f;
-        loftTool_.previewBody.colorG = 0.6f;
-        loftTool_.previewBody.colorB = 0.9f;
-    }
-    Scene3D::uploadMesh(loftTool_.previewBody);
-}
-
-void App::renderLoftPreview(const float* view, const float* proj, const float* eyePos) {
-    auto& body = loftTool_.previewBody;
-    if (body.vao == 0 || body.vertexCount == 0) return;
-
-    auto& shader = viewport3D_.meshShader();
-    shader.use();
-    shader.setMat4("uView", view);
-    shader.setMat4("uProj", proj);
-    shader.setVec3("uEyePos", eyePos[0], eyePos[1], eyePos[2]);
-    shader.setVec3("uLightDir", 0.3f, 0.8f, 0.5f);
-    applyClip(shader, nullptr); // tool previews are never sectioned
-
-    float alpha = (loftTool_.operation == ExtrudeOperation::Cut) ? 0.4f : 0.5f;
-    shader.setVec3("uColor", body.colorR, body.colorG, body.colorB);
-    shader.setFloat("uAlpha", alpha);
-
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-    glDepthMask(GL_FALSE);
-
-    glBindVertexArray(body.vao);
-    glDrawArrays(GL_TRIANGLES, 0, body.vertexCount);
-    glBindVertexArray(0);
-
-    glDepthMask(GL_TRUE);
-    glDisable(GL_BLEND);
-    shader.setFloat("uAlpha", 1.0f);
+    setToolPreview(loftTool_, loftProfiles(inputs, loftTool_.solid));
 }
 
 void App::commitLoft() {
     if (!loftTool_.canCommit()) return;
-
-    // Ensure all source sketches are saved
-    for (const auto& sec : loftTool_.sections) {
-        FeatureID srcSketch = featureHistory_.findSketchFeatureForPlane(sec.sketchPlaneIndex);
-        if (srcSketch == NullFeatureID) {
-            srcSketch = featureHistory_.addSketchFeature(sec.sketchPlaneIndex,
-                sketchPlanes_[sec.sketchPlaneIndex].sketch,
-                sketchPlanes_[sec.sketchPlaneIndex].planeID);
-            UndoCommand skCmd;
-            skCmd.type = UndoActionType::AddFeature;
-            skCmd.addedFeature = *featureHistory_.findFeature(srcSketch);
-            globalUndo_.push(std::move(skCmd)); markDirty();
-        }
-    }
 
     LoftFeatureData ld;
     ld.operation = loftTool_.operation;
@@ -235,7 +142,7 @@ void App::commitLoft() {
 
     for (const auto& sec : loftTool_.sections) {
         LoftSection ls;
-        ls.sourceSketchFeature = featureHistory_.findSketchFeatureForPlane(sec.sketchPlaneIndex);
+        ls.sourceSketchFeature = ensureSketchFeature(sec.sketchPlaneIndex);
         if (sec.profileIndex >= 0 && sec.profileIndex < (int)sec.detectedProfiles.size()) {
             ls.profileSig = ProfileSignature::fromProfile(sec.detectedProfiles[sec.profileIndex], sketchPlanes_[sec.sketchPlaneIndex].sketch);
             ls.profileIndexFallback = sec.profileIndex;
@@ -266,28 +173,16 @@ void App::commitLoft() {
     replayAllFeatures();
 
     loftTool_.reset();
-    tool_.type = ToolType::None;
-    tool_.reset();
-
-    if (mode_ == InteractionMode::Sketching) {
-        finishSketch(false);
-    }
+    finishFeatureTool(false);
 }
 
 void App::cancelLoft() {
-    if (loftTool_.hidingBodiesForPreview) {
-        for (size_t i = 0; i < scene_.bodyCount(); i++)
-            scene_.getBodyMut((int)i).visible = true;
-    }
-
     if (loftTool_.editingFeatureID != NullFeatureID) {
         featureHistory_.unsuppressFeature(loftTool_.editingFeatureID);
     }
 
     loftTool_.reset();
-    tool_.type = ToolType::None;
-    tool_.reset();
-    replayAllFeatures();
+    finishFeatureTool(true);
 }
 
 void App::editLoftFeature(FeatureID id) {

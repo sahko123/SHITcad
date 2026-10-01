@@ -41,9 +41,8 @@ set(SHITCAD_CORE_SOURCES
     src/CrashLogger.cpp
 )
 
-add_executable(SHITcad
-    ${SHITCAD_CORE_SOURCES}
-    # App: the viewport's input handling, tools and panel models
+# App: the viewport's input handling, tools and panel models (no Qt).
+set(SHITCAD_APP_SOURCES
     src/App.cpp
     src/AppSketch.cpp
     src/AppUI.cpp
@@ -51,10 +50,16 @@ add_executable(SHITcad
     src/AppExtrude.cpp
     src/AppRevolve.cpp
     src/AppLoft.cpp
+    src/AppFeatureTool.cpp
     src/AppBoolean.cpp
     src/AppSection.cpp
     src/AppSimulation.cpp
     src/AppSimulationRun.cpp
+)
+
+add_executable(SHITcad
+    ${SHITCAD_CORE_SOURCES}
+    ${SHITCAD_APP_SOURCES}
     # Qt: the window, the viewport widget and the panels
     src/qt/main.cpp
     src/qt/ViewportWidget.cpp
@@ -103,4 +108,10 @@ if(SHITCAD_BUILD_TESTS)
     # SimulationTest compiles the shaders and picks through a section, which
     # needs a GL context: an offscreen one from Qt.
     target_link_libraries(SimulationTest PRIVATE Qt6::Gui)
+    # ToolFlowTest drives App itself (the feature tools' commit / edit / cancel / undo
+    # flows) with the same kind of offscreen context.
+    add_executable(ToolFlowTest tests/ToolFlowTest.cpp ${SHITCAD_CORE_SOURCES} ${SHITCAD_APP_SOURCES})
+    target_include_directories(ToolFlowTest PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    target_link_libraries(ToolFlowTest PRIVATE glad_gl opengl32 occt_libs nlohmann_json::nlohmann_json dbghelp
+                          Qt6::Gui shell32)
 endif()

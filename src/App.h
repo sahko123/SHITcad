@@ -76,6 +76,8 @@ struct ToolbarModel {
     bool operator!=(const ToolbarModel& o) const { return !(*this == o); }
 };
 
+struct AppTestAccess; // tests/ToolFlowTest.cpp
+
 class App {
 public:
     // Called by the host once a GL context is current.
@@ -496,6 +498,8 @@ public:
     static constexpr int kRefPlaneCount = 3;
 
 private:
+    friend struct AppTestAccess;
+
     AppHost* host_ = nullptr;
     int fbW_ = 0, fbH_ = 0;               // framebuffer size for this frame
     std::vector<std::function<void()>> posted_;
@@ -769,18 +773,23 @@ private:
     void globalRedo();
     void handleExtrudeInput(float vpW, float vpH);
     void updateExtrudePreview();
-    void renderExtrudePreview(const float* view, const float* proj, const float* eyePos);
     void renderExtrudeHandle(const float* view, const float* proj, float vpW, float vpH);
     void renderDimensions(const float view[16], const float proj[16], float vpW, float vpH);
     void editExtrudeFeature(FeatureID id);
     void handleRevolveInput(float vpW, float vpH);
     void updateRevolvePreview();
-    void renderRevolvePreview(const float* view, const float* proj, const float* eyePos);
     void editRevolveFeature(FeatureID id);
     void handleLoftInput(float vpW, float vpH);
     void updateLoftPreview();
-    void renderLoftPreview(const float* view, const float* proj, const float* eyePos);
     void editLoftFeature(FeatureID id);
+    // Plumbing shared by the Extrude, Revolve and Loft tools (AppFeatureTool.cpp)
+    bool findProfilePlane(int& planeIdx, std::vector<ClosedProfile>& profiles);
+    bool loadSourceSketch(FeatureID srcSketch, int& planeIdx, std::vector<ClosedProfile>& profiles);
+    void beginProfileTool(ToolType type, ProfileToolBase& t, int planeIdx, std::vector<ClosedProfile> profiles);
+    FeatureID ensureSketchFeature(int planeIdx);
+    void setToolPreview(FeatureToolBase& t, const TopoDS_Shape& shape);
+    void renderToolPreview(const FeatureToolBase& t, const float* view, const float* proj, const float* eyePos);
+    void finishFeatureTool(bool cancelled);
     void handleBooleanInput(float vpW, float vpH);
     void updateBooleanPreview();
     void renderBooleanPreview(const float* view, const float* proj, const float* eyePos);

@@ -191,19 +191,19 @@ void App::render3DScene(int w, int h) {
     if (tool_.type == ToolType::Extrude && hasExtrudeSketch()) {
         profiler_.begin("ExtPreview");
         if (extrudeTool_.previewDirty) updateExtrudePreview();
-        renderExtrudePreview(view, proj, eye);
+        renderToolPreview(extrudeTool_, view, proj, eye);
         renderExtrudeHandle(view, proj, (float)w, (float)h);
         profiler_.end();
     }
     // Revolve preview
     if (tool_.type == ToolType::Revolve && hasRevolveSketch()) {
         if (revolveTool_.previewDirty) updateRevolvePreview();
-        renderRevolvePreview(view, proj, eye);
+        renderToolPreview(revolveTool_, view, proj, eye);
     }
     // Loft preview
     if (tool_.type == ToolType::Loft) {
         if (loftTool_.previewDirty) updateLoftPreview();
-        renderLoftPreview(view, proj, eye);
+        renderToolPreview(loftTool_, view, proj, eye);
     }
     // Boolean preview
     if (isBooleanActive()) {
@@ -939,15 +939,8 @@ void App::handleNumpadView(float vpW, float vpH) {
     }
 }
 
-// enterExtrudeMode, handleExtrudeInput, drawExtrudePanel, updateExtrudePreview,
-// renderExtrudePreview, renderExtrudeHandle, editExtrudeFeature, commitExtrude,
-// cancelExtrude are in AppExtrude.cpp
-
-// enterRevolveMode, handleRevolveInput, drawRevolvePanel, updateRevolvePreview,
-// renderRevolvePreview, commitRevolve, cancelRevolve, editRevolveFeature are in AppRevolve.cpp
-
-// enterLoftMode, handleLoftInput, drawLoftPanel, updateLoftPreview,
-// renderLoftPreview, commitLoft, cancelLoft, editLoftFeature are in AppLoft.cpp
+// The Extrude, Revolve and Loft tools are in AppExtrude.cpp, AppRevolve.cpp and AppLoft.cpp;
+// what they share (preview drawing, source-sketch handling, finishing) is in AppFeatureTool.cpp.
 
 void App::shutdown() {
     scene_.clear();
