@@ -30,7 +30,6 @@
 #include <BRep_Builder.hxx>
 #include <TopoDS_Compound.hxx>
 #include <TopExp_Explorer.hxx>
-#include <TopoDS.hxx>
 #include <cmath>
 
 #include "Constants.h"

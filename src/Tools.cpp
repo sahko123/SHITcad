@@ -6,13 +6,6 @@ namespace shitcad {
 
 // ─── Fillet helpers ────────────────────────────────────────────────────────
 
-static double normalizeAngle(double a) {
-    const double kTwoPi = 6.28318530717958647692;
-    a = std::fmod(a, kTwoPi);
-    if (a < 0.0) a += kTwoPi;
-    return a;
-}
-
 // Returns the unit direction pointing FROM vertexID along the entity (into the entity).
 static Point2D directionFromVertex(const Sketch& sketch, EntityID entityID, bool isArc, EntityID vertexID) {
     if (!isArc) {
@@ -201,13 +194,12 @@ bool applyFillet(Sketch& sketch, FilletToolState& filletTool, EntityID vertexID,
     ArcEntity* filletArc = sketch.findArc(filletArcID);
     if (filletArc) {
         double vAngle = std::atan2(V.y - CY, V.x - CX);
-        double nVA = normalizeAngle(vAngle);
-        double nSA = normalizeAngle(filletArc->startAngle);
-        double nEA = normalizeAngle(filletArc->endAngle);
-        double sweep = nEA - nSA;
-        if (sweep <= 0.0) sweep += 6.28318530717958647692;
+        double nVA = wrap2Pi(vAngle);
+        double nSA = wrap2Pi(filletArc->startAngle);
+        double nEA = wrap2Pi(filletArc->endAngle);
+        double sweep = ccwSweep(nSA, nEA);
         double toV = nVA - nSA;
-        if (toV < 0.0) toV += 6.28318530717958647692;
+        if (toV < 0.0) toV += kTwoPiD;
         if (toV >= sweep) {
             // V is outside the CCW arc — swap endpoints to flip sweep direction
             std::swap(filletArc->startPt, filletArc->endPt);
@@ -426,27 +418,19 @@ bool handleArc3PointTool(Sketch& sketch, ArcToolState& arcTool, Point2D worldPos
         double ea = arc->endAngle;
 
         // Normalize angles to [0, 2pi)
-        auto normAngle = [](double a) {
-            constexpr double kTwoPiD = 6.28318530717958647692;
-            a = std::fmod(a, kTwoPiD);
-            if (a < 0) a += kTwoPiD;
-            return a;
-        };
 
-        double nsa = normAngle(sa);
-        double nea = normAngle(ea);
-        double nta = normAngle(throughAngle);
+        double nsa = wrap2Pi(sa);
+        double nea = wrap2Pi(ea);
+        double nta = wrap2Pi(throughAngle);
 
         // CCW sweep from start to end
-        constexpr double kTwoPiD = 6.28318530717958647692;
-        double ccwSweep = nea - nsa;
-        if (ccwSweep <= 0) ccwSweep += kTwoPiD;
+        double ccw = ccwSweep(nsa, nea);
 
         // Check if through-angle is within CCW sweep
         double toThrough = nta - nsa;
         if (toThrough < 0) toThrough += kTwoPiD;
 
-        bool throughInCCW = (toThrough < ccwSweep);
+        bool throughInCCW = (toThrough < ccw);
         if (!throughInCCW) {
             // Swap start and end to reverse sweep direction
             EntityID tmp = arc->startPt;

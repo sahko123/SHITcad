@@ -162,8 +162,7 @@ void addCone(std::vector<LineVert>& out, const double p[3], const double axisIn[
     for (double& v : u) v /= m;
     const double vv[3] = {a[1] * u[2] - a[2] * u[1], a[2] * u[0] - a[0] * u[2], a[0] * u[1] - a[1] * u[0]};
 
-    const double pi = 3.14159265358979323846;
-    const double half = std::min(std::max(halfDeg, 0.5), 180.0) * pi / 180.0;
+    const double half = std::min(std::max(halfDeg, 0.5), 180.0) * kDegToRadD;
     auto point = [&](double polar, double az, double out3[3]) {
         const double ca = std::cos(polar), sa = std::sin(polar);
         for (int k = 0; k < 3; k++)
@@ -172,17 +171,17 @@ void addCone(std::vector<LineVert>& out, const double p[3], const double axisIn[
 
     const int seg = 48;
     for (int ring = 1; ring <= 3; ring++) {
-        const double polar = std::min(half * ring / 3.0, pi - 1e-3);
+        const double polar = std::min(half * ring / 3.0, kPiD - 1e-3);
         for (int s = 0; s < seg; s++) {
             double q0[3], q1[3];
-            point(polar, 2 * pi * s / seg, q0);
-            point(polar, 2 * pi * (s + 1) / seg, q1);
+            point(polar, kTwoPiD * s / seg, q0);
+            point(polar, kTwoPiD * (s + 1) / seg, q1);
             addLine(out, q0, q1, c);
         }
     }
     for (int g = 0; g < 12; g++) {
         double q[3];
-        point(std::min(half, pi - 1e-3), 2 * pi * g / 12, q);
+        point(std::min(half, kPiD - 1e-3), kTwoPiD * g / 12, q);
         addLine(out, p, q, c);
     }
     const double tip[3] = {p[0] + a[0] * len * 0.35, p[1] + a[1] * len * 0.35, p[2] + a[2] * len * 0.35};

@@ -652,7 +652,7 @@ void Sketch::clear() {
 
 // ─── Curve sampling utilities ──────────────────────────────────────
 
-// Using kTwoPi from Constants.h
+// Using kTwoPiD from Constants.h
 
 std::vector<Point2D> sampleEllipse(Point2D center, double semiMajor, double semiMinor,
                                     double rotation, int numSamples) {
@@ -660,7 +660,7 @@ std::vector<Point2D> sampleEllipse(Point2D center, double semiMajor, double semi
     pts.reserve(numSamples + 1);
     double cosR = std::cos(rotation), sinR = std::sin(rotation);
     for (int i = 0; i <= numSamples; i++) {
-        double a = kTwoPi * i / numSamples;
+        double a = kTwoPiD * i / numSamples;
         double ex = semiMajor * std::cos(a), ey = semiMinor * std::sin(a);
         pts.push_back({center.x + ex * cosR - ey * sinR,
                         center.y + ex * sinR + ey * cosR});
@@ -671,8 +671,7 @@ std::vector<Point2D> sampleEllipse(Point2D center, double semiMajor, double semi
 std::vector<Point2D> sampleEllipseArc(Point2D center, double semiMajor, double semiMinor,
                                        double rotation, double startAngle, double endAngle,
                                        int numSamples) {
-    double sweep = endAngle - startAngle;
-    if (sweep <= 0) sweep += kTwoPi;
+    double sweep = ccwSweep(startAngle, endAngle);
     int segs = std::max(8, numSamples);
     std::vector<Point2D> pts;
     pts.reserve(segs + 1);

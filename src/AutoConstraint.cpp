@@ -1,4 +1,5 @@
 #include "AutoConstraint.h"
+#include "Constants.h"
 #include <cmath>
 
 namespace shitcad {
@@ -23,7 +24,7 @@ std::vector<PendingConstraint> detectLineAutoConstraints(
     double len = std::sqrt(dx * dx + dy * dy);
     if (len < 1e-6) return result;
 
-    double sinAngle = std::sin(kAutoAngleThresholdDeg * 3.14159265 / 180.0);
+    double sinAngle = std::sin(kAutoAngleThresholdDeg * kDegToRadD);
 
     // Check horizontal: |dy/len| < sin(threshold)
     if (std::fabs(dy / len) < sinAngle) {

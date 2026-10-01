@@ -1,4 +1,5 @@
 #include "MeshImport.h"
+#include "Constants.h"
 #include "UnitUtils.h"
 #include "Utf8Path.h"
 
@@ -39,7 +40,7 @@ void axisRotation(int axis, double degrees, double out[9]) {
         c = cs[k][0];
         s = cs[k][1];
     } else {
-        const double rad = degrees * 3.14159265358979323846 / 180.0;
+        const double rad = degrees * kDegToRadD;
         c = std::cos(rad);
         s = std::sin(rad);
     }

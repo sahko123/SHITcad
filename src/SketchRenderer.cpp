@@ -270,8 +270,8 @@ void SketchRenderer::renderSketch(const SketchPlane& plane, const float* view,
 
         int segments = 64;
         for (int i = 0; i < segments; i++) {
-            float a0 = 2.0f * kPi * i / segments;
-            float a1 = 2.0f * kPi * (i + 1) / segments;
+            float a0 = kTwoPi * i / segments;
+            float a1 = kTwoPi * (i + 1) / segments;
             double lx0 = center->x + circle.radius * std::cos(a0);
             double ly0 = center->y + circle.radius * std::sin(a0);
             double lx1 = center->x + circle.radius * std::cos(a1);
@@ -303,8 +303,8 @@ void SketchRenderer::renderSketch(const SketchPlane& plane, const float* view,
         float r = tc[0], g = tc[1], bl = tc[2];
 
         float sweep = arc.endAngle - arc.startAngle;
-        if (sweep <= 0) sweep += 2.0f * kPi;
-        int segments = std::max(8, (int)(std::fabs(sweep) / (2.0f * kPi) * 64));
+        if (sweep <= 0) sweep += kTwoPi;
+        int segments = std::max(8, (int)(std::fabs(sweep) / (kTwoPi) * 64));
         for (int i = 0; i < segments; i++) {
             float a0 = arc.startAngle + sweep * i / segments;
             float a1 = arc.startAngle + sweep * (i + 1) / segments;
@@ -339,8 +339,8 @@ void SketchRenderer::renderSketch(const SketchPlane& plane, const float* view,
         int segments = 64;
         double cosR = std::cos(ellipse.rotation), sinR = std::sin(ellipse.rotation);
         for (int i = 0; i < segments; i++) {
-            float a0 = 2.0f * kPi * i / segments;
-            float a1 = 2.0f * kPi * (i + 1) / segments;
+            float a0 = kTwoPi * i / segments;
+            float a1 = kTwoPi * (i + 1) / segments;
             double ex0 = ellipse.semiMajor * std::cos(a0), ey0 = ellipse.semiMinor * std::sin(a0);
             double ex1 = ellipse.semiMajor * std::cos(a1), ey1 = ellipse.semiMinor * std::sin(a1);
             double lx0 = center->x + ex0 * cosR - ey0 * sinR;
@@ -372,8 +372,8 @@ void SketchRenderer::renderSketch(const SketchPlane& plane, const float* view,
         float r = tc[0], g = tc[1], bl = tc[2];
 
         float sweep = ea.endAngle - ea.startAngle;
-        if (sweep <= 0) sweep += 2.0f * kPi;
-        int segments = std::max(8, (int)(std::fabs(sweep) / (2.0f * kPi) * 64));
+        if (sweep <= 0) sweep += kTwoPi;
+        int segments = std::max(8, (int)(std::fabs(sweep) / (kTwoPi) * 64));
         double cosR = std::cos(ea.rotation), sinR = std::sin(ea.rotation);
         for (int i = 0; i < segments; i++) {
             float a0 = ea.startAngle + sweep * i / segments;
@@ -535,8 +535,8 @@ void SketchRenderer::renderToolPreview(const SketchPlane& plane, const float* vi
             int segments = 64;
             double radius = distance(tool.firstPoint, cursorLocal);
             for (int i = 0; i < segments; i++) {
-                float a0 = 2.0f * kPi * i / segments;
-                float a1 = 2.0f * kPi * (i + 1) / segments;
+                float a0 = kTwoPi * i / segments;
+                float a1 = kTwoPi * (i + 1) / segments;
                 addSeg(tool.firstPoint.x + radius * std::cos(a0),
                        tool.firstPoint.y + radius * std::sin(a0),
                        tool.firstPoint.x + radius * std::cos(a1),
@@ -588,17 +588,11 @@ void SketchRenderer::renderToolPreview(const SketchPlane& plane, const float* vi
                     double ta = std::atan2(p2.y-uy, p2.x-ux);
 
                     // Determine sweep direction so arc passes through p2
-                    auto normA = [](double ang) {
-                        ang = std::fmod(ang, (double)kTwoPi);
-                        if (ang < 0) ang += kTwoPi;
-                        return ang;
-                    };
-                    double nsa = normA(sa), nea = normA(ea), nta = normA(ta);
-                    double ccwSweep = nea - nsa;
-                    if (ccwSweep <= 0) ccwSweep += 6.28318530718;
+                    double nsa = wrap2Pi(sa), nea = wrap2Pi(ea), nta = wrap2Pi(ta);
+                    double ccw = ccwSweep(nsa, nea);
                     double toThrough = nta - nsa;
-                    if (toThrough < 0) toThrough += 6.28318530718;
-                    double sweep = (toThrough < ccwSweep) ? ccwSweep : -(6.28318530718 - ccwSweep);
+                    if (toThrough < 0) toThrough += kTwoPiD;
+                    double sweep = (toThrough < ccw) ? ccw : -(kTwoPiD - ccw);
 
                     int segs = std::max(8, (int)(std::fabs(sweep) / (2.0*kPi) * 64));
                     for (int i = 0; i < segs; i++) {
@@ -618,8 +612,8 @@ void SketchRenderer::renderToolPreview(const SketchPlane& plane, const float* vi
                 addSeg(arcTool.point1.x, arcTool.point1.y, cursorLocal.x, cursorLocal.y);
                 int segments = 64;
                 for (int i = 0; i < segments; i++) {
-                    float a0 = 2.0f * kPi * i / segments;
-                    float a1 = 2.0f * kPi * (i + 1) / segments;
+                    float a0 = kTwoPi * i / segments;
+                    float a1 = kTwoPi * (i + 1) / segments;
                     addSeg(arcTool.point1.x + rad * std::cos(a0),
                            arcTool.point1.y + rad * std::sin(a0),
                            arcTool.point1.x + rad * std::cos(a1),
@@ -709,8 +703,8 @@ void SketchRenderer::renderProfileHighlights(const SketchPlane& plane, const flo
 
             std::vector<float> verts;
             for (int s = 0; s < segments; s++) {
-                float a0 = 2.0f * kPi * s / segments;
-                float a1 = 2.0f * kPi * (s + 1) / segments;
+                float a0 = kTwoPi * s / segments;
+                float a1 = kTwoPi * (s + 1) / segments;
 
                 float wcx, wcy, wcz;
                 plane.localToWorld(f(center.x), f(center.y), wcx, wcy, wcz);
@@ -747,8 +741,8 @@ void SketchRenderer::renderProfileHighlights(const SketchPlane& plane, const flo
             }
             std::vector<ColorVertex> edgeVerts;
             for (int s = 0; s < segments; s++) {
-                float a0 = 2.0f * kPi * s / segments;
-                float a1 = 2.0f * kPi * (s + 1) / segments;
+                float a0 = kTwoPi * s / segments;
+                float a1 = kTwoPi * (s + 1) / segments;
                 float wx0, wy0, wz0, wx1, wy1, wz1;
                 plane.localToWorld(f(center.x + circle->radius * std::cos(a0)),
                                    f(center.y + circle->radius * std::sin(a0)), wx0, wy0, wz0);

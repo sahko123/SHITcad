@@ -177,16 +177,16 @@ static void renderAngleDim(Overlay2D& ov, const SketchPlane& sp, const Sketch& s
     double crossV = dx1*dy2 - dy1*dx2;
     double dotV = dx1*dx2 + dy1*dy2;
     double ccwRad = std::atan2(crossV, dotV);
-    if (ccwRad < 0) ccwRad += 2.0 * 3.14159265358979;
-    double ccwDeg = ccwRad * 180.0 / 3.14159265358979;
+    if (ccwRad < 0) ccwRad += kTwoPiD;
+    double ccwDeg = ccwRad * kRadToDegD;
     double cwDeg = 360.0 - ccwDeg;
 
     // If c.value is closer to the CCW angle, sweep CCW; otherwise sweep CW
     double spanRad;
     if (std::fabs(c.value - ccwDeg) <= std::fabs(c.value - cwDeg))
-        spanRad = c.value * 3.14159265358979 / 180.0;   // CCW (positive)
+        spanRad = c.value * kDegToRadD;   // CCW (positive)
     else
-        spanRad = -c.value * 3.14159265358979 / 180.0;  // CW (negative)
+        spanRad = -c.value * kDegToRadD;  // CW (negative)
 
     // Arc radius in local coords — use dimOffset to control, default ~20% of shortest line
     double arcRadiusLocal = std::min(len1, len2) * 0.3;
@@ -672,8 +672,8 @@ void App::applyDimension() {
                             double dx2=f2->x-vx, dy2=f2->y-vy;
                             double cross=dx1*dy2-dy1*dx2, dot=dx1*dx2+dy1*dy2;
                             double ccwRad=std::atan2(cross,dot);
-                            if (ccwRad<0) ccwRad+=kTwoPi;
-                            double ccwDeg=ccwRad*180.0/kPi;
+                            if (ccwRad<0) ccwRad+=kTwoPiD;
+                            double ccwDeg=ccwRad*kRadToDegD;
                             double cwDeg=360.0-ccwDeg;
                             // Pick the sector closest to the user's typed value
                             cc->angleCW = (std::fabs(cwDeg-deg) < std::fabs(ccwDeg-deg));

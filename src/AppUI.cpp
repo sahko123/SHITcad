@@ -742,7 +742,7 @@ void App::frameBounds(const double lo[3], const double hi[3]) {
     int w, h;
     framebufferSize(w, h);
     const float aspect = (w > 0 && h > 0) ? std::min(1.0f, (float)w / (float)h) : 1.0f;
-    const float halfFov = 22.5f * 3.14159265f / 180.0f;
+    const float halfFov = 22.5f * kDegToRad;
     to.distance = cam.orthographic ? radius * 1.15f / aspect
                                    : radius * 1.15f / (std::sin(halfFov) * aspect);
     to.orthographic = cam.orthographic;

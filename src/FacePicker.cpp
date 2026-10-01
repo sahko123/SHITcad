@@ -1,4 +1,5 @@
 #include "FacePicker.h"
+#include "Constants.h"
 
 #include <BRep_Tool.hxx>
 #include <BRepAdaptor_Surface.hxx>
@@ -408,7 +409,7 @@ void projectFaceOntoSketch(const TopoDS_Face& face, const SketchPlane& plane, Sk
             double uFirst = curve.FirstParameter();
             double uLast = curve.LastParameter();
             double span = uLast - uFirst;
-            bool isFullCircle = (std::fabs(span - 2.0 * 3.14159265358979) < 1e-3);
+            bool isFullCircle = (std::fabs(span - kTwoPiD) < 1e-3);
 
             if (absDot < 0.05f) {
                 // Circle is nearly perpendicular to sketch plane — projects as a line segment
@@ -565,7 +566,7 @@ void projectFaceOntoSketch(const TopoDS_Face& face, const SketchPlane& plane, Sk
             double uFirst = curve.FirstParameter();
             double uLast = curve.LastParameter();
             double span = uLast - uFirst;
-            bool isFullEllipse = (std::fabs(span - 2.0 * 3.14159265358979) < 1e-3);
+            bool isFullEllipse = (std::fabs(span - kTwoPiD) < 1e-3);
 
             if (isFullEllipse) {
                 EntityID centerPtID = addProjectedPoint(plane, sketch,
@@ -743,7 +744,7 @@ bool buildCylinderTangentPlane(const TopoDS_Face& face, float angleDeg,
     radial.Normalize();
 
     // Rotate radial direction by angleDeg around the cylinder axis
-    double angleRad = angleDeg * 3.14159265358979 / 180.0;
+    double angleRad = angleDeg * kDegToRadD;
     gp_Vec perpToRadial = axisV.Crossed(radial);
     gp_Vec rotatedRadial = radial * std::cos(angleRad) + perpToRadial * std::sin(angleRad);
     rotatedRadial.Normalize();

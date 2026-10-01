@@ -1005,8 +1005,8 @@ bool exportDXF(const std::string& filepath, const Sketch& sketch) {
         Point2D c = sketch.getPointPos(arc.centerPt);
         Point2D sp = sketch.getPointPos(arc.startPt);
         double radius = std::sqrt((sp.x - c.x) * (sp.x - c.x) + (sp.y - c.y) * (sp.y - c.y));
-        double startDeg = arc.startAngle * 180.0 / 3.14159265358979;
-        double endDeg = arc.endAngle * 180.0 / 3.14159265358979;
+        double startDeg = arc.startAngle * kRadToDegD;
+        double endDeg = arc.endAngle * kRadToDegD;
         out << "0\nARC\n8\n0\n"
             << "10\n" << c.x << "\n20\n" << c.y << "\n30\n0.0\n"
             << "40\n" << radius << "\n"

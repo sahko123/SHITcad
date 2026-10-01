@@ -33,12 +33,11 @@ double pointToArcDist(Point2D p, Point2D center, double radius, double startAngl
     double angle = std::atan2(p.y - center.y, p.x - center.x);
 
     // Normalize sweep to CCW
-    double sweep = endAngle - startAngle;
-    if (sweep <= 0) sweep += kTwoPi;
+    double sweep = ccwSweep(startAngle, endAngle);
 
     // Normalize angle relative to start
     double rel = angle - startAngle;
-    double twoPi = kTwoPi;
+    double twoPi = kTwoPiD;
     rel = std::fmod(rel, twoPi);
     if (rel < 0) rel += twoPi;
 
@@ -61,8 +60,8 @@ double pointToEllipseDist(Point2D p, Point2D center, double semiMajor, double se
     int segments = kEllipseSampleCount;
     double cosR = std::cos(rotation), sinR = std::sin(rotation);
     for (int i = 0; i < segments; i++) {
-        double a0 = kTwoPi * i / segments;
-        double a1 = kTwoPi * (i + 1) / segments;
+        double a0 = kTwoPiD * i / segments;
+        double a1 = kTwoPiD * (i + 1) / segments;
 
         double ex0 = semiMajor * std::cos(a0), ey0 = semiMinor * std::sin(a0);
         double ex1 = semiMajor * std::cos(a1), ey1 = semiMinor * std::sin(a1);
@@ -161,9 +160,8 @@ HitResult hitTest(Point2D cursorWorld, float pixelsPerUnit,
         Point2D center = sketch.getPointPos(ea.centerPt);
         // Sample the ellipse arc and find closest segment
         double cosR = std::cos(ea.rotation), sinR = std::sin(ea.rotation);
-        double sweep = ea.endAngle - ea.startAngle;
-        if (sweep <= 0) sweep += kTwoPi;
-        int segments = std::max(8, (int)(std::fabs(sweep) / (kTwoPi) * 64));
+        double sweep = ccwSweep(ea.startAngle, ea.endAngle);
+        int segments = std::max(8, (int)(std::fabs(sweep) / (kTwoPiD) * 64));
         double bestSegDist = std::numeric_limits<double>::max();
         for (int i = 0; i < segments; i++) {
             double a0 = ea.startAngle + sweep * i / segments;
@@ -225,7 +223,7 @@ bool circleInPolygon(Point2D center, double radius, const std::vector<Point2D>& 
     if (!pointInPolygon(center, poly)) return false;
     // Sample 16 points on circumference
     for (int i = 0; i < 16; i++) {
-        double angle = kTwoPi * i / 16.0;
+        double angle = kTwoPiD * i / 16.0;
         Point2D p = {center.x + radius * std::cos(angle),
                      center.y + radius * std::sin(angle)};
         if (!pointInPolygon(p, poly)) return false;

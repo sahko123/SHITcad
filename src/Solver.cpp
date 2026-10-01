@@ -422,22 +422,22 @@ SolveResult Solver::solvePass(Sketch& sketch, EntityID draggedPoint) {
                     double dot = dx1*dx2 + dy1*dy2;
                     double cross = dx1*dy2 - dy1*dx2;
                     double ccwRad = std::atan2(cross, dot);
-                    if (ccwRad < 0) ccwRad += kTwoPi;
-                    double cwRad = kTwoPi - ccwRad;
+                    if (ccwRad < 0) ccwRad += kTwoPiD;
+                    double cwRad = kTwoPiD - ccwRad;
                     // Use the stored sector (CW or CCW) from when the constraint was created
                     double currentAngle, targetAngle;
                     bool cwSector = c.angleCW;
                     if (!cwSector) {
                         currentAngle = ccwRad;
-                        targetAngle = c.value * kPi / 180.0;
+                        targetAngle = c.value * kDegToRadD;
                     } else {
                         currentAngle = cwRad;
-                        targetAngle = c.value * kPi / 180.0;
+                        targetAngle = c.value * kDegToRadD;
                     }
 
                     double diff = targetAngle - currentAngle;
-                    if (diff > kPi) diff -= kTwoPi;
-                    if (diff < -kPi) diff += kTwoPi;
+                    if (diff > kPiD) diff -= kTwoPiD;
+                    if (diff < -kPiD) diff += kTwoPiD;
                     if (std::fabs(diff) < 1e-6) break;
 
                     // CW sector: rotation direction is inverted
@@ -690,10 +690,10 @@ SolveResult Solver::solvePass(Sketch& sketch, EntityID draggedPoint) {
                     // Total rotation needed to make lines perpendicular
                     double cross = dx1*dy2 - dy1*dx2;
                     double curAngle = std::atan2(cross, dx1*dx2 + dy1*dy2);
-                    double targetAngle = (curAngle >= 0) ? kPi * 0.5 : -kPi * 0.5;
+                    double targetAngle = (curAngle >= 0) ? kPiD * 0.5 : -kPiD * 0.5;
                     double totalRot = targetAngle - curAngle;
-                    while (totalRot > kPi) totalRot -= 2*kPi;
-                    while (totalRot < -kPi) totalRot += 2*kPi;
+                    while (totalRot > kPiD) totalRot -= kTwoPiD;
+                    while (totalRot < -kPiD) totalRot += kTwoPiD;
                     if (std::fabs(totalRot) < 1e-6) break;
 
                     // Weight: more-constrained line rotates less
@@ -1380,8 +1380,8 @@ SolveResult Solver::solvePass(Sketch& sketch, EntityID draggedPoint) {
                 double dot = dx1*dx2 + dy1*dy2;
                 double cross = dx1*dy2 - dy1*dx2;
                 double ccwRad = std::atan2(cross, dot);
-                if (ccwRad < 0) ccwRad += 2.0 * 3.14159265358979;
-                double ccwDeg = ccwRad * 180.0 / 3.14159265358979;
+                if (ccwRad < 0) ccwRad += kTwoPiD;
+                double ccwDeg = ccwRad * kRadToDegD;
                 double cwDeg = 360.0 - ccwDeg;
                 // Use the stored sector
                 double currentDeg = c.angleCW ? cwDeg : ccwDeg;

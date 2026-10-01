@@ -243,10 +243,10 @@ static void buildSubdivision(const Sketch& sketch,
     // ---- Arc-line intersections ----
     auto angleInArcRange = [](float angle, float startA, float endA) -> bool {
         float sweep = endA - startA;
-        if (sweep <= 0) sweep += 2.0f * kPi;
+        if (sweep <= 0) sweep += kTwoPi;
         float rel = angle - startA;
-        rel = std::fmod(rel, 2.0f * kPi);
-        if (rel < 0) rel += 2.0f * kPi;
+        rel = std::fmod(rel, kTwoPi);
+        if (rel < 0) rel += kTwoPi;
         return rel <= sweep + 1e-5f;
     };
 
@@ -567,7 +567,7 @@ static void buildSubdivision(const Sketch& sketch,
             float toAngle = deduped[next].first;
 
             // Ensure we go CCW from fromAngle to toAngle
-            if (toAngle <= fromAngle) toAngle += 2.0f * kPi;
+            if (toAngle <= fromAngle) toAngle += kTwoPi;
 
             SubEdge e;
             e.fromVtx = fromVtx;
@@ -850,12 +850,12 @@ std::vector<ClosedProfile> detectClosedProfilesCustom(const Sketch& sketch) {
                     seg.arcEndAngle = edge.arcToAngle;
                     // Ensure CCW span is positive (raw atan2 values may cross ±π boundary)
                     if (seg.arcEndAngle <= seg.arcStartAngle)
-                        seg.arcEndAngle += 2.0f * kPi;
+                        seg.arcEndAngle += kTwoPi;
                 } else {
                     seg.arcStartAngle = edge.arcToAngle;
                     seg.arcEndAngle = edge.arcFromAngle;
                     if (seg.arcEndAngle >= seg.arcStartAngle)
-                        seg.arcEndAngle -= 2.0f * kPi;
+                        seg.arcEndAngle -= kTwoPi;
                 }
             }
             profile.segments.push_back(seg);
