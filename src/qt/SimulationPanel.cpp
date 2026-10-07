@@ -492,13 +492,93 @@ void SimulationPanel::refresh() {
     if (viewBody_->isVisible()) section_->refresh(app_.sectionModel());
 }
 
+// The skins of one import: keep / flip each, normal arrows, and the shortcut
+// for a solid-wall export (keep only its inside). Rebuilt with the row.
+void SimulationPanel::addSkinRows(QVBoxLayout* rc, QWidget* row, const App::SimSetupModel::Surface& s) {
+    App* a = &app_;
+    const uint32_t feature = s.feature;
+    auto* tools = new QHBoxLayout;
+    tools->setContentsMargins(12, 0, 0, 0);
+    auto* normals = new QCheckBox("Show normals", row);
+    normals->setFocusPolicy(Qt::NoFocus);
+    normals->setChecked(s.showNormals);
+    normals->setToolTip("Arrows on the kept skins, pointing away from the fluid. A nozzle placed on a "
+                        "surface sprays against them.");
+    connect(normals, &QCheckBox::toggled, this, [a, feature](bool on) { a->post([a, feature, on] { a->setNormalsShown(feature, on); }); });
+    tools->addWidget(normals);
+    tools->addStretch(1);
+    if (!s.skinError.empty() || s.hasSkinChoice) {
+        auto* reset = new QPushButton("Reset skins", row);
+        reset->setFocusPolicy(Qt::NoFocus);
+        reset->setToolTip("Keep every skin, each facing the automatic way.");
+        connect(reset, &QPushButton::clicked, this, [a, feature] { a->post([a, feature] { a->resetSkins(feature); }); });
+        tools->addWidget(reset);
+    }
+    rc->addLayout(tools);
+    if (!s.skinError.empty()) {
+        rc->addWidget(note(QString("  skins: %1").arg(QString::fromStdString(s.skinError)), row, "#d05050"));
+        return;
+    }
+    if (s.skins.empty()) return;
+
+    int cavities = 0;
+    bool onlyCavities = true;
+    for (const auto& k : s.skins) {
+        cavities += k.cavity;
+        onlyCavities = onlyCavities && k.kept == k.cavity;
+    }
+    if (cavities > 0 && cavities < (int)s.skins.size() && !onlyCavities) {
+        auto* shortcut = new QPushButton("Keep the inside only", row);
+        shortcut->setFocusPolicy(Qt::NoFocus);
+        shortcut->setToolTip("This file is a solid: the outside of the wall and the inside (the cavity) in one STL. "
+                             "Only the inside is wall that gets sprayed.");
+        connect(shortcut, &QPushButton::clicked, this, [a, feature] { a->post([a, feature] { a->keepCavitySkins(feature); }); });
+        auto* line = new QHBoxLayout;
+        line->setContentsMargins(12, 0, 0, 0);
+        line->addWidget(shortcut);
+        line->addStretch(1);
+        rc->addLayout(line);
+    }
+
+    for (int i = 0; i < (int)s.skins.size(); i++) {
+        const auto& k = s.skins[i];
+        auto* line = new QHBoxLayout;
+        line->setContentsMargins(12, 0, 0, 0);
+        const QString what = k.cavity ? "inside of a solid" : k.closed ? "closed" : "open";
+        auto* keep = new QCheckBox(QString("Skin %1: %2 x %3 x %4 mm, %5")
+                                       .arg(i + 1)
+                                       .arg(k.sizeMm[0], 0, 'f', 0)
+                                       .arg(k.sizeMm[1], 0, 'f', 0)
+                                       .arg(k.sizeMm[2], 0, 'f', 0)
+                                       .arg(what), row);
+        keep->setFocusPolicy(Qt::NoFocus);
+        keep->setChecked(k.kept);
+        keep->setToolTip(QString("%1 triangles. Unticked skins are not drawn, picked or simulated.").arg(k.triangles));
+        connect(keep, &QCheckBox::toggled, this, [a, feature, i](bool on) { a->post([a, feature, i, on] { a->setSkinKept(feature, i, on); }); });
+        line->addWidget(keep, 1);
+        auto* flip = new QPushButton(k.userFlipped ? "Flip*" : "Flip", row);
+        flip->setFocusPolicy(Qt::NoFocus);
+        flip->setEnabled(k.kept);
+        flip->setToolTip(k.userFlipped ? "Turned round by hand. Click to go back to the automatic facing."
+                                       : k.flipped ? "Turned round automatically (an inward-wound cavity). Click to override."
+                                                   : "Facing as the file winds it. Click to turn it round.");
+        connect(flip, &QPushButton::clicked, this, [a, feature, i] { a->post([a, feature, i] { a->flipSkin(feature, i); }); });
+        line->addWidget(flip);
+        rc->addLayout(line);
+    }
+}
+
 void SimulationPanel::refreshSetup(const App::SimSetupModel& m) {
     App* a = &app_;
 
-    // Surfaces: rows rebuilt when the set of imports changes
+    // Surfaces: rows rebuilt when the set of imports or their skins change
     std::string key;
-    for (const auto& s : m.surfaces)
-        key += std::to_string(s.feature) + ":" + s.name + (s.active ? "+" : "-") + (s.failed ? "!" + s.errorMsg : "") + "\n";
+    for (const auto& s : m.surfaces) {
+        key += std::to_string(s.feature) + ":" + s.name + (s.active ? "+" : "-") + (s.failed ? "!" + s.errorMsg : "");
+        key += (s.showNormals ? "N" : "n") + std::string(s.hasSkinChoice ? "C" : "c") + s.skinError;
+        for (const auto& k : s.skins) key += std::string(k.kept ? "K" : "k") + (k.flipped ? "F" : "f") + (k.userFlipped ? "U" : "u");
+        key += "\n";
+    }
     if (key != shownSurfaces_) {
         shownSurfaces_ = key;
         roleCombos_.clear();
@@ -522,6 +602,7 @@ void SimulationPanel::refreshSetup(const App::SimSetupModel& m) {
             rc->addLayout(h);
             if (s.failed) rc->addWidget(note(QString("  left out: %1").arg(QString::fromStdString(s.errorMsg)), row, "#d05050"));
             else if (!s.active) rc->addWidget(note("  left out: suppressed or rolled back", row));
+            addSkinRows(rc, row, s);
             surfaceRows_->addWidget(row);
             roleCombos_.push_back(role);
         }

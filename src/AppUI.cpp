@@ -290,6 +290,11 @@ App::MeshImportModel App::meshImportModel() const {
     // of 1000 or 25.4, so a size check catches them where nothing else can.
     m.sizeSuspicious = m.maxExtMm < 20.0f || m.maxExtMm > 100000.0f;
     if (!canImport()) m.blocked = "Finish the sketch or the active tool first.";
+    m.skins = (int)d.info.skins.size();
+    const int cavities = (int)std::count_if(d.info.skins.begin(), d.info.skins.end(),
+                                            [](const MeshSkinInfo& s) { return s.isCavity(); });
+    m.solidWall = cavities > 0 && cavities < m.skins;
+    m.keepInside = d.keepInside;
     return m;
 }
 
@@ -301,12 +306,19 @@ void App::setMeshImportUnit(int unitIndex) {
     if (unitIndex >= 0 && unitIndex < kUnitCount) meshImportDialog_.unitIndex = unitIndex;
 }
 
+void App::setMeshImportKeepInside(bool keep) { meshImportDialog_.keepInside = keep; }
+
 void App::confirmMeshImport() {
     auto& d = meshImportDialog_;
     if (!d.open || !d.error.empty() || !canImport()) return;
     MeshImportFeatureData md;
     md.sourcePath = d.path;
     md.unit = kUnits[d.unitIndex].name;
+    if (d.keepInside && meshImportModel().solidWall) {
+        // A solid-wall export: only its inside is sprayed wall (MeshSkinChoice).
+        for (const auto& s : d.info.skins)
+            if (s.isCavity()) md.skins.keep.push_back({s.point[0], s.point[1], s.point[2]});
+    }
     std::string name = d.nameBuf[0] ? d.nameBuf : "Mesh";
 
     rollForwardForNewFeature();
@@ -474,7 +486,7 @@ void App::cancelMeshImport() { meshImportDialog_.reset(); }
 
 
 static bool sameMeshImportData(const MeshImportFeatureData& a, const MeshImportFeatureData& b) {
-    if (a.sourcePath != b.sourcePath || a.unit != b.unit) return false;
+    if (a.sourcePath != b.sourcePath || a.unit != b.unit || !(a.skins == b.skins)) return false;
     for (int i = 0; i < 9; i++) if (a.transform.r[i] != b.transform.r[i]) return false;
     for (int i = 0; i < 3; i++) if (a.transform.t[i] != b.transform.t[i]) return false;
     return true;

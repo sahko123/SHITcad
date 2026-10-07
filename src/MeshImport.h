@@ -1,5 +1,6 @@
 #pragma once
 #include "Scene3D.h"
+#include <array>
 #include <cstdint>
 #include <filesystem>
 #include <string>
@@ -15,6 +16,27 @@ struct UnitInfo;
 // say what the numbers mean; everything inside SHITcad is mm.
 const UnitInfo* findLengthUnit(const std::string& name);
 
+// A skin: triangles joined through shared vertices (identical coordinates).
+// An Onshape export of a vessel modelled as a solid is two skins in one file -
+// the outside of the wall and the inside, which is the cavity - and only the
+// inner one is wall that gets sprayed.
+struct MeshSkinInfo {
+    size_t triangleCount = 0;
+    size_t firstTriangle = 0;     // skins are numbered by this, ascending
+    bool closed = false;
+    // File units cubed. > 0: the triangles wind outward, the usual export of
+    // a solid's outside. < 0 on a closed skin: it faces inward - the inside
+    // wall of a solid, i.e. a cavity.
+    double signedVolume = 0.0;
+    float rawMin[3] = {0, 0, 0};
+    float rawMax[3] = {0, 0, 0};
+    // On the skin (centroid of firstTriangle), file coordinates. What a spec
+    // selects it by: cip-sim keeps the skin nearest each point it is given.
+    double point[3] = {0, 0, 0};
+
+    bool isCavity() const { return closed && signedVolume < 0.0; }
+};
+
 struct MeshFileInfo {
     size_t triangleCount = 0;
     // Every edge shared by exactly two triangles. Only a closed surface can be
@@ -22,7 +44,46 @@ struct MeshFileInfo {
     bool closed = false;
     float rawMin[3] = {0, 0, 0}; // in the file's own (unknown) units
     float rawMax[3] = {0, 0, 0};
+    std::vector<MeshSkinInfo> skins;
 };
+
+// Which skins of a file to use and which to turn round, each named by a point
+// in FILE coordinates (as a cip-sim spec does), not by number: numbering
+// follows triangle order, which changes on every re-export, and file
+// coordinates do not move when the import is re-placed or its unit changes.
+//
+// Orientation convention: normals point away from the fluid, so a nozzle
+// placed on a surface sprays along -normal. A closed skin that winds inward
+// (a cavity) is turned round automatically; `flip` reverses that choice.
+struct MeshSkinChoice {
+    std::vector<std::array<double, 3>> keep; // empty = keep every skin
+    std::vector<std::array<double, 3>> flip; // skins oriented against the automatic choice
+    bool empty() const { return keep.empty() && flip.empty(); }
+    bool operator==(const MeshSkinChoice& o) const { return keep == o.keep && flip == o.flip; }
+};
+
+// Orientation a skin gets without a user flip: cavities are turned round.
+inline bool skinAutoFlipped(const MeshSkinInfo& s) { return s.isCavity(); }
+
+// A skin point further than this fraction of the file's diagonal from every
+// triangle was picked on a different file. Same tolerance as cip-sim.
+inline constexpr double kSkinPointTolerance = 0.01;
+
+// The skin nearest each point (indices into MeshFileInfo::skins). Fails, naming
+// the file, if a point is off the geometry - the file was re-exported into
+// something else since the skins were picked.
+bool resolveSkins(const std::string& path, const std::vector<std::array<double, 3>>& points,
+                  std::vector<int>& out, std::string& error);
+
+// Per skin of a file under a choice: kept? and is its winding reversed from
+// the file's? Empty choice: all kept, cavities reversed.
+struct MeshSkinState {
+    bool kept = true;
+    bool flipped = false;     // final orientation is opposite to the file's winding
+    bool userFlipped = false; // ... because of an entry in choice.flip
+};
+bool skinStates(const std::string& path, const MeshSkinChoice& choice,
+                std::vector<MeshSkinState>& out, std::string& error);
 
 // Placement of an imported mesh: p' = R * p + t, applied after the file's
 // coordinates are scaled to mm. The file itself is never modified.
@@ -62,6 +123,13 @@ bool trianglesAreClosed(const float* xyz, size_t triangles);
 // modification time: an unchanged file is read once, and a re-exported file is
 // picked up automatically on the next replay.
 bool loadMeshFile(const std::string& path, const std::string& unit,
+                  std::vector<MeshVertex>& outMm, MeshFileInfo& info, std::string& error);
+
+// The same, keeping only the chosen skins and orienting each by the convention
+// above (flipped triangles are rewound, not just given negated normals, so
+// anything that derives a normal from winding agrees). `info.closed` then
+// describes the kept triangles; `info.skins` still lists every skin.
+bool loadMeshFile(const std::string& path, const std::string& unit, const MeshSkinChoice& skins,
                   std::vector<MeshVertex>& outMm, MeshFileInfo& info, std::string& error);
 
 // Identity of a file for the import caches: size, modification time and a

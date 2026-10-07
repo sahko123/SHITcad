@@ -1,6 +1,7 @@
 #include "MeshDialogs.h"
 #include "UnitUtils.h"
 
+#include <QCheckBox>
 #include <QComboBox>
 #include <QDoubleSpinBox>
 #include <QFormLayout>
@@ -118,8 +119,13 @@ MeshImportDialog::MeshImportDialog(App& app, QWidget* parent)
     formLayout_->addRow("Unit of the numbers in this file", unit_);
     formLayout_->addRow(size_);
     formLayout_->addRow(warning_);
+    keepInside_ = new QCheckBox("Keep only the inside of the wall (the cavity)", form_);
+    keepInside_->setToolTip("This file is a solid: the outside and the inside of the vessel wall in one STL. "
+                            "Only the inside is wall that gets sprayed. Change it later under Simulation > Surfaces.");
+    formLayout_->addRow(keepInside_);
 
     App* a = &app_;
+    connect(keepInside_, &QCheckBox::toggled, this, [a](bool on) { a->post([a, on] { a->setMeshImportKeepInside(on); }); });
     connect(name_, &QLineEdit::textEdited, this, [a](const QString& t) {
         const std::string s = t.toUtf8().toStdString();
         a->post([a, s] { a->setMeshImportName(s); });
@@ -139,13 +145,19 @@ void MeshImportDialog::refresh() {
         name_->setText(QString::fromStdString(m.name));
         unit_->setCurrentIndex(m.unitIndex);
     }
-    triangles_->setText(QString("%1 triangles").arg(m.triangles));
     if (m.maxExtMm >= 1000.0f)
         size_->setText(QString("Size: %1 x %2 x %3 m").arg(m.extMm[0] / 1000.0, 0, 'g', 4)
                            .arg(m.extMm[1] / 1000.0, 0, 'g', 4).arg(m.extMm[2] / 1000.0, 0, 'g', 4));
     else
         size_->setText(QString("Size: %1 x %2 x %3 mm").arg(m.extMm[0], 0, 'g', 4)
                            .arg(m.extMm[1], 0, 'g', 4).arg(m.extMm[2], 0, 'g', 4));
+    keepInside_->setVisible(m.solidWall);
+    if (keepInside_->isChecked() != m.keepInside) {
+        const QSignalBlocker b(keepInside_);
+        keepInside_->setChecked(m.keepInside);
+    }
+    triangles_->setText(m.skins > 1 ? QString("%1 triangles in %2 separate skins").arg(m.triangles).arg(m.skins)
+                                    : QString("%1 triangles").arg(m.triangles));
     warning_->setVisible(m.sizeSuspicious);
     if (m.sizeSuspicious)
         warning_->setText(QString("That is %1 mm across. If the real part is not that size, "

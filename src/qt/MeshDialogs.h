@@ -9,6 +9,7 @@
 #undef near
 #undef far
 
+class QCheckBox;
 class QComboBox;
 class QDoubleSpinBox;
 class QFormLayout;
@@ -63,6 +64,7 @@ public:
 private:
     QLabel* triangles_ = nullptr;
     QComboBox* unit_ = nullptr;
+    QCheckBox* keepInside_ = nullptr;  // shown for a solid-wall export
 };
 
 // Qt front end for CadImportModel: what a STEP / IGES file holds, and which

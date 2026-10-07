@@ -13,6 +13,7 @@
 #include "Scene3D.h"
 #include "Serialization.h"
 #include "SketchPlane.h"
+#include "Simulation.h"
 
 #include <nlohmann/json.hpp>
 
@@ -442,6 +443,155 @@ static void testReplay(const fs::path& dir, const fs::path& box) {
     CHECK(sm.bodyCount() == 1, "bodies=%zu", sm.bodyCount());
 }
 
+// A vessel modelled as a solid, exported whole: the outside of the wall wound
+// outward, then the inside (the cavity) wound inward - what Onshape gives.
+static void writeSolidWall(const fs::path& path) {
+    auto tris = boxTriangles(-0.3f, -0.3f, 0.0f, 0.3f, 0.3f, 1.3f);
+    for (Tri t : boxTriangles(-0.25f, -0.25f, 0.05f, 0.25f, 0.25f, 1.25f)) {
+        for (int a = 0; a < 3; a++) std::swap(t.v[3 + a], t.v[6 + a]);
+        tris.push_back(t);
+    }
+    writeBinaryStl(path, tris);
+}
+
+// Winding normal z of the lowest triangle inside the inner box - the cavity
+// floor at z = 50 mm. From the winding, as the picker works it out.
+static float floorNormalZ(const std::vector<MeshVertex>& v) {
+    float best = 1e30f, nz = 0;
+    for (size_t t = 0; t + 2 < v.size(); t += 3) {
+        const float cz = (v[t].pz + v[t + 1].pz + v[t + 2].pz) / 3.0f;
+        const bool inner = std::fabs(v[t].px) < 260 && std::fabs(v[t].py) < 260;
+        if (inner && cz > 25 && cz < best) {
+            best = cz;
+            const float ax = v[t + 1].px - v[t].px, ay = v[t + 1].py - v[t].py;
+            const float bx = v[t + 2].px - v[t].px, by = v[t + 2].py - v[t].py;
+            nz = ax * by - ay * bx;
+        }
+    }
+    return nz;
+}
+
+static void testSkins(const fs::path& dir) {
+    std::printf("skins\n");
+    const fs::path wall = dir / "solid_wall.stl";
+    writeSolidWall(wall);
+    MeshFileInfo info;
+    std::string err;
+    CHECK(probeMeshFile(wall.string(), info, err), "%s", err.c_str());
+    CHECK(info.skins.size() == 2, "skins=%zu", info.skins.size());
+    if (info.skins.size() != 2) return;
+    const MeshSkinInfo outer = info.skins[0];
+    const MeshSkinInfo inner = info.skins[1];
+    CHECK(outer.closed && inner.closed, "both skins are closed boxes");
+    CHECK(outer.triangleCount == 12 && inner.triangleCount == 12, "%zu / %zu", outer.triangleCount, inner.triangleCount);
+    CHECK(nearRel(outer.signedVolume, 0.6 * 0.6 * 1.3, 1e-5), "outer volume %g", outer.signedVolume);
+    CHECK(nearRel(inner.signedVolume, -0.5 * 0.5 * 1.2, 1e-5), "inner volume %g", inner.signedVolume);
+    CHECK(!outer.isCavity() && inner.isCavity(), "the inward-wound skin is the cavity");
+
+    // Points select skins; an off-geometry point is refused, not guessed.
+    std::vector<int> found;
+    const std::array<double, 3> innerPt{inner.point[0], inner.point[1], inner.point[2]};
+    const std::vector<int> justInner{1};
+    bool ok = resolveSkins(wall.string(), {innerPt}, found, err) && found == justInner;
+    CHECK(ok, "inner point -> %d", found.empty() ? -1 : found[0]);
+    const std::array<double, 3> nearFloor{0.0, 0.0, 0.06}, middle{0.0, 0.0, 0.65};
+    ok = resolveSkins(wall.string(), {nearFloor}, found, err) && found == justInner;
+    CHECK(ok, "a point 10 mm above the cavity floor is still the cavity");
+    ok = resolveSkins(wall.string(), {middle}, found, err);
+    CHECK(!ok, "a point 0.4 m from any wall resolved");
+    CHECK(err.find("has changed since its skins were picked") != std::string::npos, "%s", err.c_str());
+
+    // No choice: both skins, and the cavity turned to face away from its fluid
+    // (its floor normal points down, into the wall).
+    std::vector<MeshVertex> v;
+    CHECK(loadMeshFile(wall.string(), "m", MeshSkinChoice{}, v, info, err), "%s", err.c_str());
+    CHECK(v.size() == 72, "vertices=%zu", v.size());
+    CHECK(floorNormalZ(v) < 0, "cavity floor normal z=%g, want down", floorNormalZ(v));
+    CHECK(info.closed, "all skins kept: closed");
+
+    // Keep the cavity only.
+    MeshSkinChoice keepInner;
+    keepInner.keep = {innerPt};
+    CHECK(loadMeshFile(wall.string(), "m", keepInner, v, info, err), "%s", err.c_str());
+    CHECK(v.size() == 36, "vertices=%zu", v.size());
+    float hi = 0;
+    for (const auto& q : v) hi = std::max(hi, std::fabs(q.px));
+    CHECK(near(hi, 250.0, 1e-3), "kept geometry reaches x=%g, outer skin is at 300", hi);
+    CHECK(info.closed, "the kept cavity is closed");
+
+    // A user flip undoes the automatic one.
+    MeshSkinChoice flipped = keepInner;
+    flipped.flip = {innerPt};
+    CHECK(loadMeshFile(wall.string(), "m", flipped, v, info, err), "%s", err.c_str());
+    CHECK(floorNormalZ(v) > 0, "flipped cavity floor normal z=%g, want up", floorNormalZ(v));
+    std::vector<MeshSkinState> st;
+    CHECK(skinStates(wall.string(), flipped, st, err) && st.size() == 2, "%s", err.c_str());
+    if (st.size() == 2) {
+        CHECK(!st[0].kept && st[1].kept, "kept flags");
+        CHECK(st[1].userFlipped && !st[1].flipped, "user flip cancels the automatic one");
+    }
+
+    // Through the feature: replay, picking, the spec and the project file.
+    auto planes = referencePlanes();
+    FeatureHistory h;
+    MeshImportFeatureData md;
+    md.sourcePath = wall.string();
+    md.unit = "m";
+    md.skins = keepInner;
+    FeatureID fid = h.addMeshImportFeature(md, "tank");
+    Scene3D scene;
+    replayFeatures(h, planes, scene);
+    CHECK(scene.bodyCount() == 1 && scene.getBody(0).vertexCount == 36, "replayed body vertices=%d",
+          scene.bodyCount() ? scene.getBody(0).vertexCount : -1);
+    // From above: the outer lid is gone, so the ray lands on the cavity roof,
+    // whose normal now points up - away from the fluid.
+    const float o[3] = {10, 10, 5000}, d[3] = {0, 0, -1};
+    MeshPickResult r = pickMesh(scene, o, d);
+    CHECK(r.hit && near(r.hitWorld[2], 1250.0, 1e-2), "picked z=%g", r.hitWorld[2]);
+    CHECK(r.normal[2] > 0.99f, "cavity roof normal z=%g", r.normal[2]);
+
+    SimulationSetup sim;
+    SimNozzle n;
+    n.hostFeature = fid;
+    n.position[2] = 600;
+    sim.addNozzle(n);
+    std::string spec;
+    std::vector<std::string> warnings;
+    CHECK(buildTier1Spec(sim, h, spec, warnings, err), "%s", err.c_str());
+    if (!spec.empty()) {
+        auto doc = nlohmann::json::parse(spec);
+        const auto& s0 = doc["surfaces"][0];
+        const bool one = s0.contains("skins") && s0["skins"].size() == 1;
+        CHECK(one, "spec skins: %s", s0.dump().c_str());
+        using P3 = std::array<double, 3>;
+        if (one) CHECK(s0["skins"][0].get<P3>() == innerPt, "spec names the cavity by a point on it");
+    }
+
+    const fs::path proj = dir / "skins.shitcad";
+    CHECK(saveProject(proj.string(), h, planes), "%s", lastLoadError().c_str());
+    {
+        std::ifstream in(proj);
+        auto pj = nlohmann::json::parse(in);
+        CHECK(pj["version"] == 4, "a skin choice must save as version 4, got %d", pj["version"].get<int>());
+    }
+    FeatureHistory loaded;
+    std::vector<SketchPlane> lp;
+    CHECK(loadProject(proj.string(), loaded, lp), "%s", lastLoadError().c_str());
+    const Feature* lf = loaded.findFeature(fid);
+    CHECK(lf && std::get<MeshImportFeatureData>(lf->data).skins == keepInner, "skin choice did not round-trip");
+
+    // Re-exported as a different shape: the choice no longer fits, and the
+    // import says so instead of quietly showing everything.
+    // (Not 10..11 exactly: those floats are all printable bytes, and OCCT then
+    // takes the binary file for ASCII.)
+    writeBoxStl(wall, 10.3f, 10.3f, 10.3f, 11.7f, 11.7f, 11.7f);
+    Scene3D scene2;
+    replayFeatures(h, planes, scene2);
+    const Feature* f2 = h.findFeature(fid);
+    CHECK(f2 && f2->hasError && f2->errorMsg.find("Pick them again") != std::string::npos, "stale choice: %s",
+          f2 ? f2->errorMsg.c_str() : "?");
+}
+
 int main() {
     const fs::path dir = fs::temp_directory_path() / "shitcad_mesh_import_test";
     fs::create_directories(dir);
@@ -455,6 +605,7 @@ int main() {
     testSaveLoad(dir, box);
 
     testReplay(dir, box);
+    testSkins(dir);
 
     std::printf("\n%d checks, %d failed\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;

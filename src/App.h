@@ -128,10 +128,16 @@ public:
         float maxExtMm = 0.0f;
         bool sizeSuspicious = false;     // outside what cip-sim will trace
         std::string blocked;             // why Import is unavailable right now, else empty
+        int skins = 0;
+        // Inside and outside of a solid's wall in one file (some skins are
+        // cavities, some not): offer to keep only the inside.
+        bool solidWall = false;
+        bool keepInside = true;
     };
     MeshImportModel meshImportModel() const;
     void setMeshImportName(const std::string& name);
     void setMeshImportUnit(int unitIndex);
+    void setMeshImportKeepInside(bool keep);
     void confirmMeshImport();            // adds the feature, then opens placement
     void cancelMeshImport();
 
@@ -370,6 +376,21 @@ public:
             bool active;               // not suppressed, rolled back or failed
             bool failed;               // its STL could not be loaded
             std::string errorMsg;
+            // Skins of the file (see MeshSkinInfo). Listed only when there is
+            // more than one, or one that is turned round.
+            struct Skin {
+                size_t triangles = 0;
+                float sizeMm[3] = {0, 0, 0};
+                bool closed = false;
+                bool cavity = false;       // closed and wound inward: the inside of a solid
+                bool kept = true;
+                bool flipped = false;      // facing opposite to the file's winding
+                bool userFlipped = false;  // ... by the user rather than automatically
+            };
+            std::vector<Skin> skins;
+            std::string skinError;     // the choice no longer fits the file
+            bool hasSkinChoice = false;
+            bool showNormals = false;
         };
         std::vector<Surface> surfaces;
         bool placing = false;          // the next surface click places a nozzle
@@ -388,6 +409,13 @@ public:
     };
     SimSetupModel simSetupModel() const;
     void setSurfaceRole(uint32_t meshFeature, int role);   // commits
+    // Skins of a mesh import. Each commits one undo step and replays. Hiding
+    // the last kept skin is refused.
+    void setSkinKept(uint32_t meshFeature, int skin, bool keep);
+    void flipSkin(uint32_t meshFeature, int skin);
+    void keepCavitySkins(uint32_t meshFeature);   // keep only the inward-wound skins
+    void resetSkins(uint32_t meshFeature);        // all skins, automatic facing
+    void setNormalsShown(uint32_t meshFeature, bool show); // view only: arrows on the kept skins
     void setNozzlePlacing(bool placing) { simUi_.placing = placing; }
     void setNozzleStandoff(float mm) { simUi_.standoffMm = std::max(0.0f, mm); }
     void selectNozzle(uint32_t id) { simUi_.selectedNozzle = id; }
@@ -603,6 +631,7 @@ private:
         std::string path;
         char nameBuf[128] = {};
         int unitIndex = 1; // index into kUnits; 1 = mm
+        bool keepInside = true;
         MeshFileInfo info;
         std::string error;
         void reset() { *this = {}; }
@@ -657,8 +686,10 @@ private:
         std::vector<std::string> warnings;
         float sceneExtentMm = 1000.0f; // cached for cone display length
         size_t sceneExtentKey = 0;
+        std::set<uint32_t> normalsShown; // mesh imports drawing their normal arrows
     };
     SimUiState simUi_;
+    void setMeshSkinChoice(uint32_t meshFeature, const MeshSkinChoice& skins); // one undo step
     GLuint simLineVAO_ = 0;
     GLuint simLineVBO_ = 0;
 

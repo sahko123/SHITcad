@@ -41,6 +41,7 @@ private:
     QWidget* buildRun();
     QWidget* buildResults();
     void refreshSetup(const App::SimSetupModel& m);
+    void addSkinRows(QVBoxLayout* rc, QWidget* row, const App::SimSetupModel::Surface& s);
     void refreshRun(const App::SimRunModel& m);
     void refreshResults(const App::SimResultsModel& m);
     void pushPosition();

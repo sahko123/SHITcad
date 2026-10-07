@@ -657,7 +657,7 @@ void replayFeatures(FeatureHistory& history,
             Body3D body;
             MeshFileInfo info;
             std::string err;
-            if (!loadMeshFile(md.sourcePath, md.unit, body.vertices, info, err)) {
+            if (!loadMeshFile(md.sourcePath, md.unit, md.skins, body.vertices, info, err)) {
                 // Referenced, not embedded: a moved or deleted file is an error on
                 // this feature, not a silently missing body.
                 mutableFeat.hasError = true;
