@@ -40,9 +40,12 @@ private:
     QWidget* buildRunSettings();
     QWidget* buildRun();
     QWidget* buildResults();
+    QWidget* buildCfd();
     void refreshSetup(const App::SimSetupModel& m);
+    void addSkinRows(QVBoxLayout* rc, QWidget* row, const App::SimSetupModel::Surface& s);
     void refreshRun(const App::SimRunModel& m);
     void refreshResults(const App::SimResultsModel& m);
+    void refreshCfd(const App::CfdCaseModel& m);
     void pushPosition();
     void pushAxis();
 
@@ -92,6 +95,16 @@ private:
     QTableWidget* coverage_ = nullptr;
     std::string shownCoverage_;
     QLabel* paraview_ = nullptr;
+
+    QLineEdit* cfdDir_ = nullptr;
+    QCheckBox* cfdMesh_ = nullptr;
+    QPushButton* cfdButton_ = nullptr;
+    QPushButton* cfdCancel_ = nullptr;
+    QLabel* cfdStatus_ = nullptr;
+    QLabel* cfdSummary_ = nullptr;
+    QLabel* cfdError_ = nullptr;
+    QLabel* cfdWarnings_ = nullptr;
+    QPushButton* cfdOpen_ = nullptr;
 
     QLabel* message_ = nullptr;
 };

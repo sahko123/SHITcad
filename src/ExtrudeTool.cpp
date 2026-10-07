@@ -6,61 +6,6 @@
 
 namespace shitcad {
 
-void ExtrudeToolState::reset() {
-    allProfiles.clear();
-    selectedProfileIndices.clear();
-    height = 10.0f;
-    offset = 0.0f;
-    operation = ExtrudeOperation::NewBody;
-    direction = ExtrudeDirection::OneSide;
-    phase = ExtrudePhase::SelectingProfiles;
-    isDragging = false;
-    previewDirty = true;
-    snprintf(heightBuf, sizeof(heightBuf), "10.0");
-    snprintf(offsetBuf, sizeof(offsetBuf), "0.0");
-    sketchPlaneIndex = -1;
-    editingFeatureID = 0;
-
-    // Body3D RAII: move-assign empty Body3D frees old GL resources
-    previewBody = Body3D{};
-    cutPreviewBodies.clear(); // destructors free GL resources
-    hidingBodiesForPreview = false;
-    renderCache.clear();
-    handleVisible = false;
-    handleBaseWorld[0] = handleBaseWorld[1] = handleBaseWorld[2] = 0;
-}
-
-void RevolveToolState::reset() {
-    allProfiles.clear();
-    selectedProfileIndices.clear();
-    axisLineID = NullID;
-    angleDeg = 360.0f;
-    operation = ExtrudeOperation::NewBody;
-    phase = RevolvePhase::SelectingProfiles;
-    previewDirty = true;
-    snprintf(angleBuf, sizeof(angleBuf), "360.0");
-    sketchPlaneIndex = -1;
-    editingFeatureID = 0;
-
-    previewBody = Body3D{};
-    cutPreviewBodies.clear();
-    hidingBodiesForPreview = false;
-    renderCache.clear();
-}
-
-void LoftToolState::reset() {
-    sections.clear();
-    operation = ExtrudeOperation::NewBody;
-    solid = true;
-    activeSection = -1;
-    editingFeatureID = 0;
-    previewDirty = true;
-
-    previewBody = Body3D{};
-    cutPreviewBodies.clear();
-    hidingBodiesForPreview = false;
-}
-
 // Ray-casting point-in-polygon on pre-tessellated boundary
 static bool pointInTessellation(const std::vector<Point2D>& tess, Point2D localPos) {
     int tn = (int)tess.size();

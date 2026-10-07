@@ -125,7 +125,6 @@ public:
     void addMeshBody(Body3D&& body);
     void replaceBody(int index, const TopoDS_Shape& newShape);
     void removeBody(int index);
-    void removeLastBody();
     void clear();
     // Back to the theme's body colour (or the file's), after a tool tinted bodies.
     void resetBodyColors();

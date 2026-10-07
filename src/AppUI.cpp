@@ -31,7 +31,6 @@ void App::setPreferences(const Preferences& p) {
     if (themeChanged) {
         // Resets the user-adjustable colours to the new theme's defaults.
         prefs_.applyTheme();
-        viewport3D_.rebuildGrid();
     }
     auto toU32 = [](const float c[4]) -> Color32 {
         return rgba32((int)(c[0]*255), (int)(c[1]*255), (int)(c[2]*255), (int)(c[3]*255));
@@ -291,6 +290,10 @@ App::MeshImportModel App::meshImportModel() const {
     // of 1000 or 25.4, so a size check catches them where nothing else can.
     m.sizeSuspicious = m.maxExtMm < 20.0f || m.maxExtMm > 100000.0f;
     if (!canImport()) m.blocked = "Finish the sketch or the active tool first.";
+    m.skins = (int)d.info.skins.size();
+    m.solidWall = false;
+    for (size_t k = 0; k < d.info.skins.size(); k++) m.solidWall = m.solidWall || isWallOutside(d.info, k);
+    m.keepInside = d.keepInside;
     return m;
 }
 
@@ -302,12 +305,22 @@ void App::setMeshImportUnit(int unitIndex) {
     if (unitIndex >= 0 && unitIndex < kUnitCount) meshImportDialog_.unitIndex = unitIndex;
 }
 
+void App::setMeshImportKeepInside(bool keep) { meshImportDialog_.keepInside = keep; }
+
 void App::confirmMeshImport() {
     auto& d = meshImportDialog_;
     if (!d.open || !d.error.empty() || !canImport()) return;
     MeshImportFeatureData md;
     md.sourcePath = d.path;
     md.unit = kUnits[d.unitIndex].name;
+    if (d.keepInside && meshImportModel().solidWall) {
+        // A solid-wall export: drop the outside of the wall, keep everything
+        // else - the cavity and any internals exported as their own solids.
+        for (size_t k = 0; k < d.info.skins.size(); k++) {
+            const auto& s = d.info.skins[k];
+            if (!isWallOutside(d.info, k)) md.skins.keep.push_back({s.point[0], s.point[1], s.point[2]});
+        }
+    }
     std::string name = d.nameBuf[0] ? d.nameBuf : "Mesh";
 
     rollForwardForNewFeature();
@@ -475,7 +488,7 @@ void App::cancelMeshImport() { meshImportDialog_.reset(); }
 
 
 static bool sameMeshImportData(const MeshImportFeatureData& a, const MeshImportFeatureData& b) {
-    if (a.sourcePath != b.sourcePath || a.unit != b.unit) return false;
+    if (a.sourcePath != b.sourcePath || a.unit != b.unit || !(a.skins == b.skins)) return false;
     for (int i = 0; i < 9; i++) if (a.transform.r[i] != b.transform.r[i]) return false;
     for (int i = 0; i < 3; i++) if (a.transform.t[i] != b.transform.t[i]) return false;
     return true;
@@ -743,7 +756,7 @@ void App::frameBounds(const double lo[3], const double hi[3]) {
     int w, h;
     framebufferSize(w, h);
     const float aspect = (w > 0 && h > 0) ? std::min(1.0f, (float)w / (float)h) : 1.0f;
-    const float halfFov = 22.5f * 3.14159265f / 180.0f;
+    const float halfFov = 22.5f * kDegToRad;
     to.distance = cam.orthographic ? radius * 1.15f / aspect
                                    : radius * 1.15f / (std::sin(halfFov) * aspect);
     to.orthographic = cam.orthographic;

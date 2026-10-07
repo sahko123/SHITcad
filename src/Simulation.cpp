@@ -210,6 +210,8 @@ bool buildTier1Spec(const SimulationSetup& sim, const FeatureHistory& history,
         s["file"] = posixPath(md.sourcePath);
         s["units"] = md.unit;
         s["scored"] = surfaceRoleScored(role);
+        // What the surface is, for CFD case generation (cip-sim spec `role`).
+        s["role"] = surfaceRoleName(role);
         if (!md.transform.isIdentity()) {
             // Spec semantics match MeshTransform exactly: rotation applied to the
             // unit-scaled file coordinates, translation in the spec's units (mm).
@@ -217,6 +219,26 @@ bool buildTier1Spec(const SimulationSetup& sim, const FeatureHistory& history,
                 {"rotation", std::vector<double>(md.transform.r, md.transform.r + 9)},
                 {"translation", std::vector<double>(md.transform.t, md.transform.t + 3)},
             };
+        }
+        if (!md.skins.keep.empty()) {
+            // One point ON each kept skin, so cip-sim picks the same skins
+            // whatever its nearest-skin rule does with a point between two.
+            // The stored points may sit a little off a re-exported file.
+            std::vector<int> kept;
+            std::string err;
+            MeshFileInfo info;
+            if (!resolveSkins(md.sourcePath, md.skins.keep, kept, err) || !probeMeshFile(md.sourcePath, info, err)) {
+                error = "'" + f.name + "': " + err;
+                return false;
+            }
+            std::sort(kept.begin(), kept.end());
+            kept.erase(std::unique(kept.begin(), kept.end()), kept.end());
+            json pts = json::array();
+            for (int k : kept) {
+                const double* p = info.skins[k].point;
+                pts.push_back({p[0], p[1], p[2]});
+            }
+            s["skins"] = pts;
         }
         s["meta"] = {{"role", surfaceRoleName(role)}, {"shitcad_feature_id", f.id}};
         surfaces.push_back(s);

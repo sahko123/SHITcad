@@ -4,6 +4,7 @@
 #include "FacePicker.h"
 #include "ExtrudeTool.h"
 #include "FeatureReplay.h"
+#include "UnitUtils.h"
 #include <BRep_Builder.hxx>
 #include <TopoDS_Compound.hxx>
 #include <BRepAlgoAPI_Cut.hxx>
@@ -20,74 +21,21 @@
 
 namespace shitcad {
 
-static bool worldToScreen(const float world[3], const float view[16], const float proj[16],
-                          float vpW, float vpH, float& sx, float& sy) {
-    float vx = view[0]*world[0] + view[4]*world[1] + view[8]*world[2]  + view[12];
-    float vy = view[1]*world[0] + view[5]*world[1] + view[9]*world[2]  + view[13];
-    float vz = view[2]*world[0] + view[6]*world[1] + view[10]*world[2] + view[14];
-    float vw = view[3]*world[0] + view[7]*world[1] + view[11]*world[2] + view[15];
-    float cx = proj[0]*vx + proj[4]*vy + proj[8]*vz  + proj[12]*vw;
-    float cy = proj[1]*vx + proj[5]*vy + proj[9]*vz  + proj[13]*vw;
-    float cw = proj[3]*vx + proj[7]*vy + proj[11]*vz + proj[15]*vw;
-    if (std::fabs(cw) < 1e-6f) return false;
-    if (cw < 0) return false;
-    float ndcX = cx / cw;
-    float ndcY = cy / cw;
-    sx = (ndcX * 0.5f + 0.5f) * vpW;
-    sy = (1.0f - (ndcY * 0.5f + 0.5f)) * vpH;
-    return true;
-}
-
 void App::enterExtrudeMode() {
     int planeIdx = -1;
     std::vector<ClosedProfile> profiles;
-
-    if (activeSketchPlane_ >= 0) {
-        // In sketch mode: use current sketch
-        planeIdx = activeSketchPlane_;
-        profiles = detectClosedProfiles(activeSketch(), activePlane());
-    } else {
-        // In navigate mode: find the first sketch plane with closed profiles
-        for (int i = 0; i < (int)sketchPlanes_.size(); i++) {
-            auto& sp = sketchPlanes_[i];
-            if (sp.sketch.points.empty() && sp.sketch.lines.empty() && sp.sketch.circles.empty())
-                continue;
-            auto p = detectClosedProfiles(sp.sketch, sp);
-            if (!p.empty()) {
-                if (profiles.empty() || p.size() > profiles.size()) {
-                    planeIdx = i;
-                    profiles = std::move(p);
-                }
-            }
-        }
-    }
-
-    if (planeIdx < 0 || profiles.empty()) {
+    if (!findProfilePlane(planeIdx, profiles)) {
         fprintf(stderr, "No closed profiles found in any sketch\n");
         return;
     }
 
-    tool_.type = ToolType::Extrude;
-    tool_.reset();
-    selection_.clear();
-
     extrudeTool_.reset();
-    extrudeTool_.sketchPlaneIndex = planeIdx;
-    extrudeTool_.allProfiles = std::move(profiles);
-
-    // Pre-compute tessellation + ear-clipping for all profiles (done once)
-    buildProfileRenderCaches(
-        sketchPlanes_[planeIdx].sketch,
-        extrudeTool_.allProfiles,
-        extrudeTool_.renderCache);
+    beginProfileTool(ToolType::Extrude, extrudeTool_, planeIdx, std::move(profiles));
 
     // Auto-select all profiles if there's only one
     if (extrudeTool_.allProfiles.size() == 1) {
         extrudeTool_.selectedProfileIndices.insert(0);
     }
-
-    extrudeTool_.previewDirty = true;
-    extrudeTool_.lastPreviewTime = std::chrono::steady_clock::now();
 }
 
 void App::handleExtrudeInput(float vpW, float vpH) {
@@ -219,11 +167,11 @@ void App::handleExtrudeInput(float vpW, float vpH) {
         if (extrudeTool_.height < 0.1f) extrudeTool_.height = 0.1f;
         snprintf(extrudeTool_.heightBuf, sizeof(extrudeTool_.heightBuf), "%.1f", extrudeTool_.height);
 
-        // Throttle: only rebuild preview every 50ms during drag
+        // Throttle: only rebuild the preview every kPreviewThrottleMs during drag
         auto now = std::chrono::steady_clock::now();
         auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
             now - extrudeTool_.lastPreviewTime).count();
-        if (elapsed >= 50) {
+        if (elapsed >= kPreviewThrottleMs) {
             extrudeTool_.previewDirty = true;
             extrudeTool_.lastPreviewTime = now;
         }
@@ -286,47 +234,12 @@ void App::setExtrudeOffsetText(const std::string& text) {
 }
 
 // Helper: build the tool shape from selected profiles for current extrude settings
-// buildExtrudeToolShape and enumerateSolids are now in Extrude.h/cpp
 
 
 void App::updateExtrudePreview() {
     extrudeTool_.previewDirty = false;
 
-    // Restore body visibility from any previous preview
-    if (extrudeTool_.hidingBodiesForPreview) {
-        for (size_t i = 0; i < scene_.bodyCount(); i++)
-            scene_.getBodyMut((int)i).visible = true;
-        extrudeTool_.hidingBodiesForPreview = false;
-    }
-
-    // Clean up old preview resources
-    if (extrudeTool_.previewBody.vao) {
-        glDeleteVertexArrays(1, &extrudeTool_.previewBody.vao);
-        extrudeTool_.previewBody.vao = 0;
-    }
-    if (extrudeTool_.previewBody.vbo) {
-        glDeleteBuffers(1, &extrudeTool_.previewBody.vbo);
-        extrudeTool_.previewBody.vbo = 0;
-    }
-    if (extrudeTool_.previewBody.edgeVAO) {
-        glDeleteVertexArrays(1, &extrudeTool_.previewBody.edgeVAO);
-        extrudeTool_.previewBody.edgeVAO = 0;
-    }
-    if (extrudeTool_.previewBody.edgeVBO) {
-        glDeleteBuffers(1, &extrudeTool_.previewBody.edgeVBO);
-        extrudeTool_.previewBody.edgeVBO = 0;
-    }
-    extrudeTool_.previewBody.vertices.clear();
-    extrudeTool_.previewBody.vertexCount = 0;
-    extrudeTool_.previewBody.edgeVertexCount = 0;
-
-    for (auto& b : extrudeTool_.cutPreviewBodies) {
-        if (b.vao) glDeleteVertexArrays(1, &b.vao);
-        if (b.vbo) glDeleteBuffers(1, &b.vbo);
-        if (b.edgeVAO) glDeleteVertexArrays(1, &b.edgeVAO);
-        if (b.edgeVBO) glDeleteBuffers(1, &b.edgeVBO);
-    }
-    extrudeTool_.cutPreviewBodies.clear();
+    extrudeTool_.previewBody = Body3D{};
 
     if (!extrudeTool_.hasSelectedProfiles() || !hasExtrudeSketch()) {
         extrudeTool_.handleVisible = false;
@@ -358,53 +271,7 @@ void App::updateExtrudePreview() {
     }
 
     // Build preview using the same OCCT pipeline as the actual extrusion
-    const Sketch& sketch = extrudeSketch();
-    TopoDS_Shape previewShape = buildExtrudeToolShape(extrudeTool_, sketch, plane);
-
-    extrudeTool_.previewBody = Body3D{};
-    if (!previewShape.IsNull()) {
-        Scene3D::triangulateShape(previewShape, extrudeTool_.previewBody.vertices);
-    }
-
-    if (extrudeTool_.operation == ExtrudeOperation::Cut) {
-        extrudeTool_.previewBody.colorR = 0.9f;
-        extrudeTool_.previewBody.colorG = 0.3f;
-        extrudeTool_.previewBody.colorB = 0.3f;
-    } else {
-        extrudeTool_.previewBody.colorR = 0.4f;
-        extrudeTool_.previewBody.colorG = 0.6f;
-        extrudeTool_.previewBody.colorB = 0.9f;
-    }
-    Scene3D::uploadMesh(extrudeTool_.previewBody);
-}
-
-void App::renderExtrudePreview(const float* view, const float* proj, const float* eyePos) {
-    auto& body = extrudeTool_.previewBody;
-    if (body.vao == 0 || body.vertexCount == 0) return;
-
-    auto& shader = viewport3D_.meshShader();
-    shader.use();
-    shader.setMat4("uView", view);
-    shader.setMat4("uProj", proj);
-    shader.setVec3("uEyePos", eyePos[0], eyePos[1], eyePos[2]);
-    shader.setVec3("uLightDir", 0.3f, 0.8f, 0.5f);
-    applyClip(shader, nullptr); // tool previews are never sectioned
-
-    float alpha = (extrudeTool_.operation == ExtrudeOperation::Cut) ? 0.4f : 0.5f;
-    shader.setVec3("uColor", body.colorR, body.colorG, body.colorB);
-    shader.setFloat("uAlpha", alpha);
-
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-    glDepthMask(GL_FALSE);
-
-    glBindVertexArray(body.vao);
-    glDrawArrays(GL_TRIANGLES, 0, body.vertexCount);
-    glBindVertexArray(0);
-
-    glDepthMask(GL_TRUE);
-    glDisable(GL_BLEND);
-    shader.setFloat("uAlpha", 1.0f);
+    setToolPreview(extrudeTool_, buildExtrudeToolShape(extrudeTool_, extrudeSketch(), plane));
 }
 
 void App::renderExtrudeHandle(const float* view, const float* proj, float vpW, float vpH) {
@@ -465,30 +332,12 @@ void App::editExtrudeFeature(FeatureID id) {
 
     const auto& ed = std::get<ExtrudeFeatureData>(feat->data);
 
-    // Find the source sketch plane index from the source sketch feature
-    const Feature* srcFeat = featureHistory_.findFeature(ed.sourceSketchFeature);
-    if (!srcFeat || srcFeat->type != FeatureType::Sketch) return;
-    const auto& sd = std::get<SketchFeatureData>(srcFeat->data);
-    int planeIdx = sd.sketchPlaneIndex;
-    if (planeIdx < 0 || planeIdx >= (int)sketchPlanes_.size()) return;
-
-    // If currently sketching, finish the sketch first
-    if (mode_ == InteractionMode::Sketching) {
-        finishSketch();
-    }
-
-    // Detect profiles from the sketch
-    auto profiles = detectClosedProfiles(sketchPlanes_[planeIdx].sketch, sketchPlanes_[planeIdx]);
-    if (profiles.empty()) return;
-
-    // Enter extrude mode
-    tool_.type = ToolType::Extrude;
-    tool_.reset();
-    selection_.clear();
+    int planeIdx = -1;
+    std::vector<ClosedProfile> profiles;
+    if (!loadSourceSketch(ed.sourceSketchFeature, planeIdx, profiles)) return;
 
     extrudeTool_.reset();
-    extrudeTool_.sketchPlaneIndex = planeIdx;
-    extrudeTool_.allProfiles = std::move(profiles);
+    beginProfileTool(ToolType::Extrude, extrudeTool_, planeIdx, std::move(profiles));
     extrudeTool_.editingFeatureID = id;
 
     // Restore saved parameters
@@ -499,75 +348,24 @@ void App::editExtrudeFeature(FeatureID id) {
     snprintf(extrudeTool_.heightBuf, sizeof(extrudeTool_.heightBuf), "%.3f", ed.height);
     snprintf(extrudeTool_.offsetBuf, sizeof(extrudeTool_.offsetBuf), "%.3f", ed.offset);
 
-    // Build render caches
-    buildProfileRenderCaches(
-        sketchPlanes_[planeIdx].sketch,
-        extrudeTool_.allProfiles,
-        extrudeTool_.renderCache);
-
     // Match saved profile signatures to current detected profiles (closest centroid)
-    auto matched = matchProfiles(ed.profileSigs, ed.profileIndicesFallback, extrudeTool_.allProfiles, sketchPlanes_[planeIdx].sketch);
-    extrudeTool_.selectedProfileIndices = matched;
+    extrudeTool_.selectedProfileIndices = matchProfiles(ed.profileSigs, ed.profileIndicesFallback,
+        extrudeTool_.allProfiles, sketchPlanes_[planeIdx].sketch);
 
     // Suppress the feature being edited so replay removes its geometry
     // (the transparent preview will show instead)
     featureHistory_.suppressFeature(id);
     replayAllFeatures();
-
-    extrudeTool_.previewDirty = true;
-    extrudeTool_.lastPreviewTime = std::chrono::steady_clock::now();
 }
 
 void App::commitExtrude() {
     if (!extrudeTool_.hasSelectedProfiles() || !hasExtrudeSketch()) return;
 
-    // Restore body visibility before modifying bodies
-    if (extrudeTool_.hidingBodiesForPreview) {
-        for (size_t i = 0; i < scene_.bodyCount(); i++)
-            scene_.getBodyMut((int)i).visible = true;
-        extrudeTool_.hidingBodiesForPreview = false;
-    }
-
-    // Ensure sketch feature exists for the source sketch plane
-    FeatureID srcSketch = featureHistory_.findSketchFeatureForPlane(extrudeTool_.sketchPlaneIndex);
-    if (srcSketch == NullFeatureID) {
-        srcSketch = featureHistory_.addSketchFeature(extrudeTool_.sketchPlaneIndex, extrudeSketch(), extrudePlane().planeID);
-        // Push undo for the implicitly created sketch feature
-        UndoCommand skCmd;
-        skCmd.type = UndoActionType::AddFeature;
-        skCmd.addedFeature = *featureHistory_.findFeature(srcSketch);
-        globalUndo_.push(std::move(skCmd)); markDirty();
-    } else if (mode_ == InteractionMode::Sketching) {
-        // Currently sketching — the live sketch may have unsaved edits.
-        // Update the snapshot so replay uses the current geometry.
-        const Sketch& liveSketch = extrudeSketch();
-        const Sketch& oldSnap = std::get<SketchFeatureData>(
-            featureHistory_.findFeature(srcSketch)->data).sketchSnapshot;
-        // Only push undo if actually changed
-        if (oldSnap.nextID != liveSketch.nextID ||
-            oldSnap.points.size() != liveSketch.points.size() ||
-            oldSnap.lines.size() != liveSketch.lines.size() ||
-            oldSnap.circles.size() != liveSketch.circles.size() ||
-            oldSnap.arcs.size() != liveSketch.arcs.size()) {
-            UndoCommand skCmd;
-            skCmd.type = UndoActionType::ModifySketch;
-            skCmd.featureID = srcSketch;
-            skCmd.oldSketch = oldSnap;
-            skCmd.newSketch = liveSketch;
-            globalUndo_.push(std::move(skCmd)); markDirty();
-        }
-        featureHistory_.updateSketchSnapshot(srcSketch, liveSketch);
-    }
-
     // Build extrude feature data with profile signatures
     ExtrudeFeatureData ed;
-    ed.sourceSketchFeature = srcSketch;
-    for (int idx : extrudeTool_.selectedProfileIndices) {
-        if (idx >= 0 && idx < (int)extrudeTool_.allProfiles.size()) {
-            ed.profileSigs.push_back(ProfileSignature::fromProfile(extrudeTool_.allProfiles[idx], extrudeSketch()));
-            ed.profileIndicesFallback.push_back(idx);
-        }
-    }
+    ed.sourceSketchFeature = ensureSketchFeature(extrudeTool_.sketchPlaneIndex);
+    recordProfileSelection(extrudeTool_.selectedProfileIndices, extrudeTool_.allProfiles,
+                           extrudeSketch(), ed.profileSigs, ed.profileIndicesFallback);
     ed.height = extrudeTool_.height;
     ed.offset = extrudeTool_.offset;
     ed.operation = extrudeTool_.operation;
@@ -601,33 +399,17 @@ void App::commitExtrude() {
     replayAllFeatures(); // builds actual geometry
 
     extrudeTool_.reset();
-    tool_.type = ToolType::None;
-    tool_.reset();
-
-    // If we were in sketch mode, finish the sketch after extrude
-    // Skip feature recording since commitExtrude already handled it
-    if (mode_ == InteractionMode::Sketching) {
-        finishSketch(false);
-    }
+    finishFeatureTool(false);
 }
 
 void App::cancelExtrude() {
-    // Restore body visibility before reset clears the flag
-    if (extrudeTool_.hidingBodiesForPreview) {
-        for (size_t i = 0; i < scene_.bodyCount(); i++)
-            scene_.getBodyMut((int)i).visible = true;
-    }
-
-    // If editing an existing feature, unsuppress it and replay to restore original geometry
+    // If editing an existing feature, unsuppress it so replay restores the original geometry
     if (extrudeTool_.editingFeatureID != NullFeatureID) {
         featureHistory_.unsuppressFeature(extrudeTool_.editingFeatureID);
     }
 
     extrudeTool_.reset();
-    tool_.type = ToolType::None;
-    tool_.reset();
-
-    replayAllFeatures();
+    finishFeatureTool(true);
 }
 
 } // namespace shitcad

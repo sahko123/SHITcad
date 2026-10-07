@@ -75,17 +75,6 @@ struct SelectionState {
 
     bool hasSelection() const { return !selected.empty(); }
 
-    // Backward-compat: single-selection queries
-    bool isPointSelected() const {
-        return selected.size() == 1 && selected[0].type == HitType::Point;
-    }
-    bool isLineSelected() const {
-        return selected.size() == 1 && selected[0].type == HitType::Line;
-    }
-    bool isCircleSelected() const {
-        return selected.size() == 1 && selected[0].type == HitType::Circle;
-    }
-
     // Backward-compat: returns first selected entity ID (or NullID)
     EntityID entityID() const {
         return selected.empty() ? NullID : selected[0].id;
@@ -94,11 +83,6 @@ struct SelectionState {
     // Backward-compat: returns first selected type (or None)
     HitType type() const {
         return selected.empty() ? HitType::None : selected[0].type;
-    }
-
-    // Check if any point in the selection
-    bool hasSelectedPoint(EntityID id) const {
-        return isSelected(HitType::Point, id);
     }
 };
 

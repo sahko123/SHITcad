@@ -56,25 +56,13 @@
 #include <string>
 #include <vector>
 
+#include "TestUtil.h"
+
 using namespace shitcad;
 namespace fs = std::filesystem;
 
-static int g_failures = 0;
-static int g_checks = 0;
 
-#define CHECK(cond, ...)                                              \
-    do {                                                              \
-        g_checks++;                                                   \
-        if (!(cond)) {                                                \
-            g_failures++;                                             \
-            std::printf("  FAIL %s:%d: %s -- ", __FILE__, __LINE__, #cond); \
-            std::printf(__VA_ARGS__);                                 \
-            std::printf("\n");                                        \
-        }                                                             \
-    } while (0)
 
-static bool near(double a, double b, double tol) { return std::fabs(a - b) <= tol; }
-static bool nearRel(double a, double b, double rel) { return std::fabs(a - b) <= rel * std::fabs(b); }
 
 // ---- fixture helpers ---------------------------------------------------------
 
@@ -316,38 +304,6 @@ static Fixture rolledBack() {
     return f;
 }
 
-struct Tri { float v[9]; };
-
-static void writeBoxStl(const fs::path& path, float x0, float y0, float z0, float x1, float y1, float z1) {
-    const float c[8][3] = {
-        {x0, y0, z0}, {x1, y0, z0}, {x1, y1, z0}, {x0, y1, z0},
-        {x0, y0, z1}, {x1, y0, z1}, {x1, y1, z1}, {x0, y1, z1},
-    };
-    const int q[6][4] = {{0, 3, 2, 1}, {4, 5, 6, 7}, {0, 1, 5, 4}, {2, 3, 7, 6}, {1, 2, 6, 5}, {3, 0, 4, 7}};
-    std::vector<Tri> tris;
-    for (const auto& fq : q) {
-        const int t[2][3] = {{fq[0], fq[1], fq[2]}, {fq[0], fq[2], fq[3]}};
-        for (const auto& tt : t) {
-            Tri tri;
-            for (int k = 0; k < 3; k++)
-                for (int a = 0; a < 3; a++) tri.v[k * 3 + a] = c[tt[k]][a];
-            tris.push_back(tri);
-        }
-    }
-    std::ofstream out(path, std::ios::binary);
-    char header[80] = {};
-    std::snprintf(header, sizeof(header), "ReplayTest");
-    out.write(header, 80);
-    uint32_t n = (uint32_t)tris.size();
-    out.write((const char*)&n, 4);
-    for (const auto& t : tris) {
-        const float zero[3] = {0, 0, 0};
-        out.write((const char*)zero, 12);
-        out.write((const char*)t.v, 36);
-        uint16_t attr = 0;
-        out.write((const char*)&attr, 2);
-    }
-}
 
 // ---- STEP / IGES fixtures -----------------------------------------------------
 

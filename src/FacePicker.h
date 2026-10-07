@@ -44,9 +44,6 @@ bool extractPlaneFromFace(const TopoDS_Face& face, SketchPlane& out,
 // Project all edges of a face onto the sketch plane as projected (locked) entities
 void projectFaceOntoSketch(const TopoDS_Face& face, const SketchPlane& plane, Sketch& sketch);
 
-// Find a face in the scene that is coplanar with the given sketch plane
-TopoDS_Face findCoplanarFace(const Scene3D& scene, const SketchPlane& plane);
-
 // Check if a face is cylindrical
 bool isCylindricalFace(const TopoDS_Face& face);
 

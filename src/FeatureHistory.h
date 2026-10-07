@@ -113,6 +113,7 @@ struct MeshImportFeatureData {
     std::string sourcePath;   // absolute path to the STL
     std::string unit = "mm";  // unit of the file's coordinates (a kUnits name)
     MeshTransform transform;  // placement in the model, applied after unit scaling
+    MeshSkinChoice skins;     // which skins to use and how each faces; empty = all, automatic
 };
 
 // A STEP or IGES file referenced from disk, like MeshImportFeatureData. Its

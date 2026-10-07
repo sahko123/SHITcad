@@ -1,5 +1,6 @@
 #pragma once
 #include <cstring>
+#include "Constants.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cmath>
@@ -101,7 +102,7 @@ inline float parseAngleInput(const char* input) {
         return numVal;
     }
     if (strcmp(unitStart, "rad") == 0 || strcmp(unitStart, "radian") == 0 || strcmp(unitStart, "radians") == 0) {
-        return numVal * 180.0f / 3.14159265358979f;
+        return numVal * kRadToDeg;
     }
     return numVal;
 }

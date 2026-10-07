@@ -623,22 +623,6 @@ void Sketch::restoreGeometry(const SketchGeometrySnapshot& snap) {
     rebuildIndices();
 }
 
-EntityID Sketch::findPointNear(double wx, double wy, double tolerance) const {
-    EntityID bestID = NullID;
-    double bestDist = std::numeric_limits<double>::max();
-
-    for (const auto& p : points) {
-        double dx = p.x - wx;
-        double dy = p.y - wy;
-        double dist = std::sqrt(dx * dx + dy * dy);
-        if (dist < tolerance && dist < bestDist) {
-            bestDist = dist;
-            bestID = p.id;
-        }
-    }
-    return bestID;
-}
-
 Point2D Sketch::getPointPos(EntityID id) const {
     const PointEntity* p = findPoint(id);
     if (p) return {p->x, p->y};
@@ -666,27 +650,9 @@ void Sketch::clear() {
     constraintIndex_.clear();
 }
 
-void Sketch::clearProjected() {
-    lines.erase(std::remove_if(lines.begin(), lines.end(),
-        [](const LineEntity& e) { return e.projected; }), lines.end());
-    circles.erase(std::remove_if(circles.begin(), circles.end(),
-        [](const CircleEntity& e) { return e.projected; }), circles.end());
-    arcs.erase(std::remove_if(arcs.begin(), arcs.end(),
-        [](const ArcEntity& e) { return e.projected; }), arcs.end());
-    ellipses.erase(std::remove_if(ellipses.begin(), ellipses.end(),
-        [](const EllipseEntity& e) { return e.projected; }), ellipses.end());
-    ellipseArcs.erase(std::remove_if(ellipseArcs.begin(), ellipseArcs.end(),
-        [](const EllipseArcEntity& e) { return e.projected; }), ellipseArcs.end());
-    splines.erase(std::remove_if(splines.begin(), splines.end(),
-        [](const SplineEntity& e) { return e.projected; }), splines.end());
-    points.erase(std::remove_if(points.begin(), points.end(),
-        [](const PointEntity& e) { return e.projected; }), points.end());
-    rebuildIndices();
-}
-
 // ─── Curve sampling utilities ──────────────────────────────────────
 
-// Using kTwoPi from Constants.h
+// Using kTwoPiD from Constants.h
 
 std::vector<Point2D> sampleEllipse(Point2D center, double semiMajor, double semiMinor,
                                     double rotation, int numSamples) {
@@ -694,7 +660,7 @@ std::vector<Point2D> sampleEllipse(Point2D center, double semiMajor, double semi
     pts.reserve(numSamples + 1);
     double cosR = std::cos(rotation), sinR = std::sin(rotation);
     for (int i = 0; i <= numSamples; i++) {
-        double a = kTwoPi * i / numSamples;
+        double a = kTwoPiD * i / numSamples;
         double ex = semiMajor * std::cos(a), ey = semiMinor * std::sin(a);
         pts.push_back({center.x + ex * cosR - ey * sinR,
                         center.y + ex * sinR + ey * cosR});
@@ -705,8 +671,7 @@ std::vector<Point2D> sampleEllipse(Point2D center, double semiMajor, double semi
 std::vector<Point2D> sampleEllipseArc(Point2D center, double semiMajor, double semiMinor,
                                        double rotation, double startAngle, double endAngle,
                                        int numSamples) {
-    double sweep = endAngle - startAngle;
-    if (sweep <= 0) sweep += kTwoPi;
+    double sweep = ccwSweep(startAngle, endAngle);
     int segs = std::max(8, numSamples);
     std::vector<Point2D> pts;
     pts.reserve(segs + 1);

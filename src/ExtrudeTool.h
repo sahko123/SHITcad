@@ -28,7 +28,6 @@ enum class ExtrudeDirection : uint8_t {
 
 enum class ExtrudePhase : uint8_t {
     SelectingProfiles,
-    DraggingHeight,
 };
 
 // Pre-computed tessellation + ear-clipping for profile rendering/hit testing
@@ -44,13 +43,28 @@ void buildProfileRenderCaches(const Sketch& sketch,
                               const std::vector<ClosedProfile>& profiles,
                               std::vector<ProfileRenderCache>& out);
 
-struct ExtrudeToolState {
+// State every 3D feature tool (Extrude, Revolve, Loft) carries.
+struct FeatureToolBase {
+    ExtrudeOperation operation = ExtrudeOperation::NewBody;
+    Body3D previewBody;
+    bool previewDirty = true;
+    uint32_t editingFeatureID = 0; // 0 (NullFeatureID) = creating new, otherwise editing existing
+};
+
+// Extrude and Revolve both work from profiles detected in one sketch plane.
+struct ProfileToolBase : FeatureToolBase {
     std::vector<ClosedProfile> allProfiles;
     std::set<int> selectedProfileIndices;
+    std::vector<ProfileRenderCache> renderCache; // cached tessellation per profile
+    std::chrono::steady_clock::time_point lastPreviewTime; // throttle preview rebuilds
+    int sketchPlaneIndex = -1; // which sketch plane the profiles come from
 
+    bool hasSelectedProfiles() const { return !selectedProfileIndices.empty(); }
+};
+
+struct ExtrudeToolState : ProfileToolBase {
     float height = 10.0f;
     float offset = 0.0f;
-    ExtrudeOperation operation = ExtrudeOperation::NewBody;
     ExtrudeDirection direction = ExtrudeDirection::OneSide;
 
     ExtrudePhase phase = ExtrudePhase::SelectingProfiles;
@@ -59,14 +73,6 @@ struct ExtrudeToolState {
     float dragStartMouseY = 0.0f;
     float dragStartHeight = 0.0f;
 
-    Body3D previewBody;
-    std::vector<Body3D> cutPreviewBodies; // preview of cut results (replaces existing bodies during preview)
-    bool previewDirty = true;
-    bool hidingBodiesForPreview = false;
-
-    std::vector<ProfileRenderCache> renderCache; // cached tessellation per profile
-    std::chrono::steady_clock::time_point lastPreviewTime; // throttle preview rebuilds
-
     // 3D drag handle state
     float handleBaseWorld[3] = {0,0,0}; // centroid of selected profiles in world space
     bool handleVisible = false;
@@ -74,12 +80,7 @@ struct ExtrudeToolState {
     char heightBuf[32] = "10.0";
     char offsetBuf[32] = "0.0";
 
-    int sketchPlaneIndex = -1; // which sketch plane we're extruding from
-
-    uint32_t editingFeatureID = 0; // 0 (NullFeatureID) = creating new, otherwise editing existing
-
-    void reset();
-    bool hasSelectedProfiles() const { return !selectedProfileIndices.empty(); }
+    void reset() { *this = {}; }
 };
 
 enum class RevolvePhase : uint8_t {
@@ -88,31 +89,15 @@ enum class RevolvePhase : uint8_t {
     Adjusting,
 };
 
-struct RevolveToolState {
-    std::vector<ClosedProfile> allProfiles;
-    std::set<int> selectedProfileIndices;
-
+struct RevolveToolState : ProfileToolBase {
     EntityID axisLineID = NullID;
     float angleDeg = 360.0f;
-    ExtrudeOperation operation = ExtrudeOperation::NewBody;
 
     RevolvePhase phase = RevolvePhase::SelectingProfiles;
 
-    Body3D previewBody;
-    std::vector<Body3D> cutPreviewBodies;
-    bool previewDirty = true;
-    bool hidingBodiesForPreview = false;
-
-    std::vector<ProfileRenderCache> renderCache;
-    std::chrono::steady_clock::time_point lastPreviewTime;
-
     char angleBuf[32] = "360.0";
 
-    int sketchPlaneIndex = -1;
-    uint32_t editingFeatureID = 0;
-
-    void reset();
-    bool hasSelectedProfiles() const { return !selectedProfileIndices.empty(); }
+    void reset() { *this = {}; }
 };
 
 // Loft tool: select one profile per sketch plane, then loft between them
@@ -123,20 +108,13 @@ struct LoftToolSection {
     std::vector<ProfileRenderCache> renderCache;
 };
 
-struct LoftToolState {
+struct LoftToolState : FeatureToolBase {
     std::vector<LoftToolSection> sections;
-    ExtrudeOperation operation = ExtrudeOperation::NewBody;
     bool solid = true;
 
-    Body3D previewBody;
-    std::vector<Body3D> cutPreviewBodies;
-    bool previewDirty = true;
-    bool hidingBodiesForPreview = false;
-
     int activeSection = -1; // which section is being edited (-1 = adding new)
-    uint32_t editingFeatureID = 0;
 
-    void reset();
+    void reset() { *this = {}; }
     bool canCommit() const { return sections.size() >= 2; }
 };
 

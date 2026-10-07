@@ -154,7 +154,16 @@ must work from both.
       `Escape` cancels placing; `Delete` removes the selected nozzle.
 - [ ] Edit nozzle fields: a slider drag or a typed edit is **one** undo step.
 - [ ] Global shortcuts work in this workspace too (`Ctrl+Z/Y/S/O`).
+- [ ] Skins: import a solid-wall STL (two nested skins). The dialog says "in 2 separate skins" and offers
+      "Keep only the inside"; with it ticked only the cavity is drawn, and the panel lists both skins.
+- [ ] Untick / tick a skin, Flip, Keep the inside only, Reset: each is one undo step and the view follows.
+- [ ] Show normals: arrows point away from the fluid (out of a cavity); Flip turns them; far-side arrows are
+      hidden and a section cuts them. A nozzle placed on the cavity sprays inward.
+- [ ] Unticking the last kept skin is refused with a message.
 - [ ] Engine settings: the cip-sim folder and python path persist across restarts.
+- [ ] CFD case: with an inlet or drain surface, Generate CFD case (Mesh ticked) shows progress, then the
+      case path, surfaces with roles and the cell count; Open case folder opens it. Without an opening
+      it refuses with "no inlet or drain". The cases folder persists across restarts.
 - [ ] Run: the log streams, Cancel stops it, and a finished run loads results on the geometry.
 - [ ] Results: field selection, legend, colours (grey = no data, amber = sprayed but
       unsampled); stale marking after moving a mesh or editing a nozzle.

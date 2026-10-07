@@ -177,16 +177,16 @@ static void renderAngleDim(Overlay2D& ov, const SketchPlane& sp, const Sketch& s
     double crossV = dx1*dy2 - dy1*dx2;
     double dotV = dx1*dx2 + dy1*dy2;
     double ccwRad = std::atan2(crossV, dotV);
-    if (ccwRad < 0) ccwRad += 2.0 * 3.14159265358979;
-    double ccwDeg = ccwRad * 180.0 / 3.14159265358979;
+    if (ccwRad < 0) ccwRad += kTwoPiD;
+    double ccwDeg = ccwRad * kRadToDegD;
     double cwDeg = 360.0 - ccwDeg;
 
     // If c.value is closer to the CCW angle, sweep CCW; otherwise sweep CW
     double spanRad;
     if (std::fabs(c.value - ccwDeg) <= std::fabs(c.value - cwDeg))
-        spanRad = c.value * 3.14159265358979 / 180.0;   // CCW (positive)
+        spanRad = c.value * kDegToRadD;   // CCW (positive)
     else
-        spanRad = -c.value * 3.14159265358979 / 180.0;  // CW (negative)
+        spanRad = -c.value * kDegToRadD;  // CW (negative)
 
     // Arc radius in local coords — use dimOffset to control, default ~20% of shortest line
     double arcRadiusLocal = std::min(len1, len2) * 0.3;
@@ -302,6 +302,34 @@ static void renderAngleDim(Overlay2D& ov, const SketchPlane& sp, const Sketch& s
 
 // ---- Extracted App methods ----
 
+// Put the dimension tool into editing `cc`, with its current value in the input box.
+void App::beginEditDimension(const Constraint& cc) {
+    dimTool_.reset();
+    dimTool_.phase = DimToolState::Editing;
+    dimTool_.constraintID = cc.id;
+    dimTool_.editingExisting = true;
+    dimTool_.driven = cc.driven;
+    // Infer selType from constraint type
+    if (cc.type == ConstraintType::Distance)
+        dimTool_.selType = HitType::Line;
+    else if (cc.type == ConstraintType::Diameter || cc.type == ConstraintType::Radius)
+        dimTool_.selType = HitType::Circle;
+    else if (cc.type == ConstraintType::PointDistance || cc.type == ConstraintType::PointLineDistance)
+        dimTool_.selType = HitType::Point;
+    else if (cc.type == ConstraintType::Angle)
+        dimTool_.selType = HitType::Line;
+    dimTool_.entityA = cc.entityA;
+    dimTool_.entityB = cc.entityB;
+    dimTool_.measuredMm = f(cc.value);
+    if (cc.type == ConstraintType::Angle)
+        formatAngleText(dimTool_.inputBuf, sizeof(dimTool_.inputBuf), f(cc.value));
+    else if (!cc.inputUnit.empty())
+        snprintf(dimTool_.inputBuf, sizeof(dimTool_.inputBuf), "%.4g%s", cc.inputValue, cc.inputUnit.c_str());
+    else
+        snprintf(dimTool_.inputBuf, sizeof(dimTool_.inputBuf), "%.4gmm", cc.value);
+    dimTool_.focusNeeded = true;
+}
+
 void App::handleDimToolClick(Sketch& sketch) {
     int w, h;
     framebufferSize(w, h);
@@ -323,29 +351,7 @@ void App::handleDimToolClick(Sketch& sketch) {
             // Clicked on existing dimension — switch to editing it
             Constraint* cc = sketch.findConstraint(r.constraintID);
             if (cc) {
-                dimTool_.reset();
-                dimTool_.phase = DimToolState::Editing;
-                dimTool_.constraintID = r.constraintID;
-                dimTool_.editingExisting = true;
-                dimTool_.driven = cc->driven;
-                if (cc->type == ConstraintType::Distance)
-                    dimTool_.selType = HitType::Line;
-                else if (cc->type == ConstraintType::Diameter || cc->type == ConstraintType::Radius)
-                    dimTool_.selType = HitType::Circle;
-                else if (cc->type == ConstraintType::PointDistance || cc->type == ConstraintType::PointLineDistance)
-                    dimTool_.selType = HitType::Point;
-                else if (cc->type == ConstraintType::Angle)
-                    dimTool_.selType = HitType::Line;
-                dimTool_.entityA = cc->entityA;
-                dimTool_.entityB = cc->entityB;
-                dimTool_.measuredMm = f(cc->value);
-                if (cc->type == ConstraintType::Angle)
-                    formatAngleText(dimTool_.inputBuf, sizeof(dimTool_.inputBuf), f(cc->value));
-                else if (!cc->inputUnit.empty())
-                    snprintf(dimTool_.inputBuf, sizeof(dimTool_.inputBuf), "%.4g%s", cc->inputValue, cc->inputUnit.c_str());
-                else
-                    snprintf(dimTool_.inputBuf, sizeof(dimTool_.inputBuf), "%.4gmm", cc->value);
-                dimTool_.focusNeeded = true;
+                beginEditDimension(*cc);
                 selection_.select(HitType::Dimension, r.constraintID);
             }
             return;
@@ -672,8 +678,8 @@ void App::applyDimension() {
                             double dx2=f2->x-vx, dy2=f2->y-vy;
                             double cross=dx1*dy2-dy1*dx2, dot=dx1*dx2+dy1*dy2;
                             double ccwRad=std::atan2(cross,dot);
-                            if (ccwRad<0) ccwRad+=kTwoPi;
-                            double ccwDeg=ccwRad*180.0/kPi;
+                            if (ccwRad<0) ccwRad+=kTwoPiD;
+                            double ccwDeg=ccwRad*kRadToDegD;
                             double cwDeg=360.0-ccwDeg;
                             // Pick the sector closest to the user's typed value
                             cc->angleCW = (std::fabs(cwDeg-deg) < std::fabs(ccwDeg-deg));
@@ -779,9 +785,7 @@ void App::renderDimensions(const float view[16], const float proj[16], float vpW
 
             // --- Radius constraint (legacy) ---
             if (c.type == ConstraintType::Radius) {
-                const CircleEntity* circle = nullptr;
-                for (const auto& ci : sketch.circles)
-                    if (ci.id == c.entityA) { circle = &ci; break; }
+                const CircleEntity* circle = sketch.findCircle(c.entityA);
                 if (!circle) continue;
                 Point2D center = sketch.getPointPos(circle->centerPt);
                 Point2D edge = { center.x + circle->radius, center.y };
@@ -793,9 +797,7 @@ void App::renderDimensions(const float view[16], const float proj[16], float vpW
 
             // --- Diameter constraint ---
             if (c.type == ConstraintType::Diameter) {
-                const CircleEntity* circle = nullptr;
-                for (const auto& ci : sketch.circles)
-                    if (ci.id == c.entityA) { circle = &ci; break; }
+                const CircleEntity* circle = sketch.findCircle(c.entityA);
                 if (!circle) continue;
                 Point2D center = sketch.getPointPos(circle->centerPt);
                 Point2D left = { center.x - circle->radius, center.y };

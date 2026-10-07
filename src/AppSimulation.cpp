@@ -98,10 +98,11 @@ void App::handleSimulationInput(float vpW, float vpH) {
         if (!meshHover_.hit || meshHover_.bodyIndex >= (int)scene_.bodyCount()) return;
         const Body3D& body = scene_.getBody(meshHover_.bodyIndex);
 
-        // Spray into the solid the STL encloses: an exported fluid cavity has
-        // outward normals, so the fluid side is -normal whichever side the
-        // user happens to be looking from. Flip in the panel if the file's
-        // winding is the other way.
+        // Spray to the fluid side, -normal, whichever side the user happens to
+        // be looking from. Mesh normals point away from the fluid: a fluid
+        // cavity export winds that way already, and the inside skin of a
+        // solid-wall export is turned round on load (MeshSkinChoice). A file
+        // that is wound the other way is fixed with Flip on its skin.
         const double inward[3] = {-meshHover_.normal[0], -meshHover_.normal[1], -meshHover_.normal[2]};
         const double pos[3] = {
             meshHover_.hitWorld[0] + inward[0] * simUi_.standoffMm,
@@ -162,8 +163,7 @@ void addCone(std::vector<LineVert>& out, const double p[3], const double axisIn[
     for (double& v : u) v /= m;
     const double vv[3] = {a[1] * u[2] - a[2] * u[1], a[2] * u[0] - a[0] * u[2], a[0] * u[1] - a[1] * u[0]};
 
-    const double pi = 3.14159265358979323846;
-    const double half = std::min(std::max(halfDeg, 0.5), 180.0) * pi / 180.0;
+    const double half = std::min(std::max(halfDeg, 0.5), 180.0) * kDegToRadD;
     auto point = [&](double polar, double az, double out3[3]) {
         const double ca = std::cos(polar), sa = std::sin(polar);
         for (int k = 0; k < 3; k++)
@@ -172,22 +172,76 @@ void addCone(std::vector<LineVert>& out, const double p[3], const double axisIn[
 
     const int seg = 48;
     for (int ring = 1; ring <= 3; ring++) {
-        const double polar = std::min(half * ring / 3.0, pi - 1e-3);
+        const double polar = std::min(half * ring / 3.0, kPiD - 1e-3);
         for (int s = 0; s < seg; s++) {
             double q0[3], q1[3];
-            point(polar, 2 * pi * s / seg, q0);
-            point(polar, 2 * pi * (s + 1) / seg, q1);
+            point(polar, kTwoPiD * s / seg, q0);
+            point(polar, kTwoPiD * (s + 1) / seg, q1);
             addLine(out, q0, q1, c);
         }
     }
     for (int g = 0; g < 12; g++) {
         double q[3];
-        point(std::min(half, pi - 1e-3), 2 * pi * g / 12, q);
+        point(std::min(half, kPiD - 1e-3), kTwoPiD * g / 12, q);
         addLine(out, p, q, c);
     }
     const double tip[3] = {p[0] + a[0] * len * 0.35, p[1] + a[1] * len * 0.35, p[2] + a[2] * len * 0.35};
     const float axisCol[3] = {1.0f, 1.0f, 1.0f};
     addLine(out, p, tip, axisCol);
+}
+
+// About `count` arrows spread by area over a triangle list, each along its
+// triangle's winding normal with a two-line head. Area-weighted and seeded, so
+// a cylinder of long slivers still gets arrows all the way up, and the same
+// mesh gets the same arrows every frame.
+void addNormalArrows(std::vector<LineVert>& out, const std::vector<MeshVertex>& v, double len,
+                     const float c[3], int count = 300) {
+    const size_t nt = v.size() / 3;
+    if (nt == 0 || len <= 0) return;
+    std::vector<double> cum(nt);
+    double total = 0;
+    auto corner = [&](size_t i, double p[3]) { p[0] = v[i].px; p[1] = v[i].py; p[2] = v[i].pz; };
+    for (size_t t = 0; t < nt; t++) {
+        double a[3], b[3], d[3];
+        corner(t * 3, a), corner(t * 3 + 1, b), corner(t * 3 + 2, d);
+        const double e1[3] = {b[0] - a[0], b[1] - a[1], b[2] - a[2]}, e2[3] = {d[0] - a[0], d[1] - a[1], d[2] - a[2]};
+        const double n[3] = {e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0]};
+        total += 0.5 * std::sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
+        cum[t] = total;
+    }
+    if (total <= 0) return;
+    uint32_t seed = 12345u;
+    auto rnd = [&] { seed = seed * 1664525u + 1013904223u; return (seed >> 8) * (1.0 / 16777216.0); };
+    for (int k = 0; k < count; k++) {
+        const size_t t = std::min(nt - 1, (size_t)(std::lower_bound(cum.begin(), cum.end(), (k + rnd()) / count * total) - cum.begin()));
+        double a[3], b[3], d[3];
+        corner(t * 3, a), corner(t * 3 + 1, b), corner(t * 3 + 2, d);
+        double r1 = rnd(), r2 = rnd();
+        if (r1 + r2 > 1) { r1 = 1 - r1; r2 = 1 - r2; }
+        double e1[3], e2[3], n[3], base[3];
+        for (int i = 0; i < 3; i++) {
+            e1[i] = b[i] - a[i];
+            e2[i] = d[i] - a[i];
+            base[i] = a[i] + r1 * e1[i] + r2 * e2[i];
+        }
+        n[0] = e1[1] * e2[2] - e1[2] * e2[1];
+        n[1] = e1[2] * e2[0] - e1[0] * e2[2];
+        n[2] = e1[0] * e2[1] - e1[1] * e2[0];
+        const double nl = std::sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
+        const double el = std::sqrt(e1[0] * e1[0] + e1[1] * e1[1] + e1[2] * e1[2]);
+        if (nl <= 0 || el <= 0) continue;
+        double tip[3], h1[3], h2[3];
+        for (int i = 0; i < 3; i++) {
+            n[i] /= nl;
+            const double side = e1[i] / el;   // in the triangle's plane, so square to the arrow
+            tip[i] = base[i] + n[i] * len;
+            h1[i] = tip[i] - n[i] * len * 0.3 + side * len * 0.15;
+            h2[i] = tip[i] - n[i] * len * 0.3 - side * len * 0.15;
+        }
+        addLine(out, base, tip, c);
+        addLine(out, tip, h1, c);
+        addLine(out, tip, h2, c);
+    }
 }
 
 } // namespace
@@ -213,7 +267,20 @@ void App::renderSimulationOverlay(const float* view, const float* proj) {
                              meshHover_.hitWorld[2] + in[2] * simUi_.standoffMm};
         addCone(verts, p, in, 65.0, len, previewCol);
     }
-    if (verts.empty()) return;
+
+    // Normal arrows on the kept skins of the imports that ask for them. Drawn
+    // from the body's own triangles, so they show the facing that picking and
+    // nozzle placement actually use.
+    std::vector<LineVert> arrows;
+    if (!simUi_.normalsShown.empty()) {
+        const float arrowCol[3] = {0.95f, 0.85f, 0.15f};
+        for (int i = 0; i < (int)scene_.bodyCount(); i++) {
+            const Body3D& b = scene_.getBody(i);
+            if (b.visible && b.isMeshOnly() && simUi_.normalsShown.count(b.sourceFeature))
+                addNormalArrows(arrows, b.vertices, len * 0.16, arrowCol);
+        }
+    }
+    if (verts.empty() && arrows.empty()) return;
 
     if (!simLineVAO_) {
         glGenVertexArrays(1, &simLineVAO_);
@@ -226,24 +293,36 @@ void App::renderSimulationOverlay(const float* view, const float* proj) {
         glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(LineVert), (void*)(3 * sizeof(float)));
         glBindVertexArray(0);
     }
-    glBindBuffer(GL_ARRAY_BUFFER, simLineVBO_);
-    glBufferData(GL_ARRAY_BUFFER, verts.size() * sizeof(LineVert), verts.data(), GL_DYNAMIC_DRAW);
-
-    // Nozzles sit inside a closed vessel, so the cones are drawn over the
-    // geometry rather than depth-tested - otherwise the wall hides them.
     GLboolean depthWas = glIsEnabled(GL_DEPTH_TEST);
-    glDisable(GL_DEPTH_TEST);
     glLineWidth(1.5f);
     auto& shader = viewport3D_.gridShader();
     shader.use();
     shader.setMat4("uView", view);
     shader.setMat4("uProj", proj);
-    applyClip(shader, nullptr); // spray cones stay whole, so a section still shows them
     glBindVertexArray(simLineVAO_);
-    glDrawArrays(GL_LINES, 0, (GLsizei)verts.size());
+    glBindBuffer(GL_ARRAY_BUFFER, simLineVBO_);
+
+    // Arrows sit on the walls: depth-tested, so the far side's are hidden, and
+    // cut with the section like the walls they belong to.
+    if (!arrows.empty()) {
+        glBufferData(GL_ARRAY_BUFFER, arrows.size() * sizeof(LineVert), arrows.data(), GL_DYNAMIC_DRAW);
+        glEnable(GL_DEPTH_TEST);
+        applyClip(shader, &section_);
+        glDrawArrays(GL_LINES, 0, (GLsizei)arrows.size());
+    }
+
+    // Nozzles sit inside a closed vessel, so the cones are drawn over the
+    // geometry rather than depth-tested - otherwise the wall hides them.
+    if (!verts.empty()) {
+        glBufferData(GL_ARRAY_BUFFER, verts.size() * sizeof(LineVert), verts.data(), GL_DYNAMIC_DRAW);
+        glDisable(GL_DEPTH_TEST);
+        applyClip(shader, nullptr); // spray cones stay whole, so a section still shows them
+        glDrawArrays(GL_LINES, 0, (GLsizei)verts.size());
+    }
     glBindVertexArray(0);
     glLineWidth(1.0f);
     if (depthWas) glEnable(GL_DEPTH_TEST);
+    else glDisable(GL_DEPTH_TEST);
 }
 
 // ---- export -------------------------------------------------------------------
@@ -287,10 +366,39 @@ App::SimSetupModel App::simSetupModel() const {
         s.active = !f.suppressed && !featureHistory_.isRolledBack(i) && !f.hasError;
         s.failed = f.hasError;
         s.errorMsg = f.errorMsg;
+        s.showNormals = simUi_.normalsShown.count(f.id) > 0;
+        const auto& md = std::get<MeshImportFeatureData>(f.data);
+        s.hasSkinChoice = !md.skins.empty();
+        MeshFileInfo info;
+        std::string err;
+        const UnitInfo* unit = findLengthUnit(md.unit);
+        if (unit && probeMeshFile(md.sourcePath, info, err)) {
+            std::vector<MeshSkinState> st;
+            if (!skinStates(md.sourcePath, md.skins, st, err)) s.skinError = err;
+            const bool anyTurned = std::any_of(info.skins.begin(), info.skins.end(), skinAutoFlipped);
+            if (info.skins.size() > 1 || anyTurned || s.hasSkinChoice) {
+                for (size_t k = 0; k < info.skins.size(); k++) {
+                    const MeshSkinInfo& si = info.skins[k];
+                    SimSetupModel::Surface::Skin row;
+                    row.triangles = si.triangleCount;
+                    for (int a = 0; a < 3; a++) row.sizeMm[a] = (si.rawMax[a] - si.rawMin[a]) * unit->toMm;
+                    row.closed = si.closed;
+                    row.cavity = si.isCavity();
+                    row.wallOutside = isWallOutside(info, k);
+                    if (k < st.size()) {
+                        row.kept = st[k].kept;
+                        row.flipped = st[k].flipped;
+                        row.userFlipped = st[k].userFlipped;
+                    }
+                    s.skins.push_back(row);
+                }
+            }
+        }
         m.surfaces.push_back(std::move(s));
     }
     m.placing = simUi_.placing;
     m.standoffMm = simUi_.standoffMm;
+    m.skinRevision = simUi_.skinRevision;
     for (const auto& n : simulation_.nozzles) {
         double p[3], a[3];
         const bool ok = nozzleWorld(n, featureHistory_, p, a);
@@ -316,6 +424,95 @@ void App::setSurfaceRole(uint32_t meshFeature, int role) {
     if (role < 0 || role >= kSurfaceRoleCount) return;
     simulation_.setRole(meshFeature, (SurfaceRole)role);
     commitSimulationEdit();
+}
+
+// ---- skins ------------------------------------------------------------------
+
+void App::setMeshSkinChoice(uint32_t meshFeature, const MeshSkinChoice& skins) {
+    const Feature* f = featureHistory_.findFeature(meshFeature);
+    if (!f || f->type != FeatureType::MeshImport) return;
+    if (std::get<MeshImportFeatureData>(f->data).skins == skins) return;
+    // A placement edit in progress becomes its own undo step first.
+    if (meshPlace_.featureID == meshFeature) finishMeshPlace(true);
+    f = featureHistory_.findFeature(meshFeature);
+    UndoCommand cmd;
+    cmd.type = UndoActionType::ModifyMeshImport;
+    cmd.featureID = meshFeature;
+    cmd.oldMeshImport = std::get<MeshImportFeatureData>(f->data);
+    cmd.newMeshImport = cmd.oldMeshImport;
+    cmd.newMeshImport.skins = skins;
+    featureHistory_.updateMeshImportData(meshFeature, cmd.newMeshImport);
+    globalUndo_.push(std::move(cmd));
+    markDirty();
+    replayAllFeatures();
+}
+
+namespace {
+
+// The current skins of an import, and a choice built back from edited states:
+// every kept skin named by its point (or none, if all are kept) and every
+// user-flipped one. Rebuilding rather than appending keeps the lists from
+// collecting stale points with every click.
+bool currentSkins(const FeatureHistory& history, uint32_t feature, MeshFileInfo& info,
+                  std::vector<MeshSkinState>& st) {
+    const Feature* f = history.findFeature(feature);
+    if (!f || f->type != FeatureType::MeshImport) return false;
+    const auto& md = std::get<MeshImportFeatureData>(f->data);
+    std::string err;
+    return probeMeshFile(md.sourcePath, info, err) && skinStates(md.sourcePath, md.skins, st, err);
+}
+
+MeshSkinChoice choiceFrom(const MeshFileInfo& info, const std::vector<MeshSkinState>& st) {
+    MeshSkinChoice c;
+    const bool all = std::all_of(st.begin(), st.end(), [](const MeshSkinState& s) { return s.kept; });
+    for (size_t k = 0; k < st.size(); k++) {
+        const std::array<double, 3> p{info.skins[k].point[0], info.skins[k].point[1], info.skins[k].point[2]};
+        if (!all && st[k].kept) c.keep.push_back(p);
+        if (st[k].userFlipped) c.flip.push_back(p);
+    }
+    return c;
+}
+
+} // namespace
+
+void App::setSkinKept(uint32_t meshFeature, int skin, bool keep) {
+    MeshFileInfo info;
+    std::vector<MeshSkinState> st;
+    if (!currentSkins(featureHistory_, meshFeature, info, st) || skin < 0 || skin >= (int)st.size()) return;
+    st[skin].kept = keep;
+    if (std::none_of(st.begin(), st.end(), [](const MeshSkinState& s) { return s.kept; })) {
+        simUi_.message = "At least one skin has to stay. Suppress the import to leave it out altogether.";
+        simUi_.messageIsError = true;
+        simUi_.skinRevision++;   // the unticked box has to snap back
+        return;
+    }
+    setMeshSkinChoice(meshFeature, choiceFrom(info, st));
+}
+
+void App::flipSkin(uint32_t meshFeature, int skin) {
+    MeshFileInfo info;
+    std::vector<MeshSkinState> st;
+    if (!currentSkins(featureHistory_, meshFeature, info, st) || skin < 0 || skin >= (int)st.size()) return;
+    st[skin].userFlipped = !st[skin].userFlipped;
+    setMeshSkinChoice(meshFeature, choiceFrom(info, st));
+}
+
+void App::keepInsideOnly(uint32_t meshFeature) {
+    MeshFileInfo info;
+    std::vector<MeshSkinState> st;
+    if (!currentSkins(featureHistory_, meshFeature, info, st)) return;
+    bool any = false;
+    for (size_t k = 0; k < st.size(); k++) any = any || isWallOutside(info, k);
+    if (!any) return;
+    for (size_t k = 0; k < st.size(); k++) st[k].kept = !isWallOutside(info, k);
+    setMeshSkinChoice(meshFeature, choiceFrom(info, st));
+}
+
+void App::resetSkins(uint32_t meshFeature) { setMeshSkinChoice(meshFeature, MeshSkinChoice{}); }
+
+void App::setNormalsShown(uint32_t meshFeature, bool show) {
+    if (show) simUi_.normalsShown.insert(meshFeature);
+    else simUi_.normalsShown.erase(meshFeature);
 }
 
 void App::setNozzleName(uint32_t id, const std::string& name) {

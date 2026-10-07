@@ -13,6 +13,7 @@
 #include "Scene3D.h"
 #include "Serialization.h"
 #include "SketchPlane.h"
+#include "Simulation.h"
 
 #include <nlohmann/json.hpp>
 
@@ -27,71 +28,18 @@
 #include <string>
 #include <vector>
 
+#include "TestUtil.h"
+
 using namespace shitcad;
 namespace fs = std::filesystem;
 
-static int g_failures = 0;
-static int g_checks = 0;
 
-#define CHECK(cond, ...)                                              \
-    do {                                                              \
-        g_checks++;                                                   \
-        if (!(cond)) {                                                \
-            g_failures++;                                             \
-            std::printf("  FAIL %s:%d: %s -- ", __FILE__, __LINE__, #cond); \
-            std::printf(__VA_ARGS__);                                 \
-            std::printf("\n");                                        \
-        }                                                             \
-    } while (0)
 
-static bool near(double a, double b, double tol) { return std::fabs(a - b) <= tol; }
 
 // ---- fixtures ---------------------------------------------------------------
 
-struct Tri { float v[9]; };
 
 // Closed box with outward-facing (counter-clockwise from outside) triangles.
-static std::vector<Tri> boxTriangles(float x0, float y0, float z0, float x1, float y1, float z1) {
-    const float c[8][3] = {
-        {x0, y0, z0}, {x1, y0, z0}, {x1, y1, z0}, {x0, y1, z0},
-        {x0, y0, z1}, {x1, y0, z1}, {x1, y1, z1}, {x0, y1, z1},
-    };
-    const int q[6][4] = {
-        {0, 3, 2, 1}, // bottom  -z
-        {4, 5, 6, 7}, // top     +z
-        {0, 1, 5, 4}, // front   -y
-        {2, 3, 7, 6}, // back    +y
-        {1, 2, 6, 5}, // right   +x
-        {3, 0, 4, 7}, // left    -x
-    };
-    std::vector<Tri> out;
-    for (const auto& f : q) {
-        for (const auto& t : {std::array<int, 3>{f[0], f[1], f[2]}, std::array<int, 3>{f[0], f[2], f[3]}}) {
-            Tri tri;
-            for (int k = 0; k < 3; k++)
-                for (int a = 0; a < 3; a++) tri.v[k * 3 + a] = c[t[k]][a];
-            out.push_back(tri);
-        }
-    }
-    return out;
-}
-
-static void writeBinaryStl(const fs::path& path, const std::vector<Tri>& tris) {
-    std::ofstream f(path, std::ios::binary);
-    char header[80] = {};
-    std::snprintf(header, sizeof(header), "MeshImportTest");
-    f.write(header, 80);
-    uint32_t n = (uint32_t)tris.size();
-    f.write((const char*)&n, 4);
-    for (const auto& t : tris) {
-        const float zero[3] = {0, 0, 0}; // readers recompute normals
-        f.write((const char*)zero, 12);
-        f.write((const char*)t.v, 36);
-        uint16_t attr = 0;
-        f.write((const char*)&attr, 2);
-    }
-}
-
 static std::vector<SketchPlane> referencePlanes() {
     std::vector<SketchPlane> planes(3);
     const float normals[3][3] = {{0, 0, 1}, {0, 1, 0}, {1, 0, 0}};
@@ -495,6 +443,185 @@ static void testReplay(const fs::path& dir, const fs::path& box) {
     CHECK(sm.bodyCount() == 1, "bodies=%zu", sm.bodyCount());
 }
 
+// A vessel modelled as a solid, exported whole: the outside of the wall wound
+// outward, then the inside (the cavity) wound inward - what Onshape gives.
+static void writeSolidWall(const fs::path& path) {
+    auto tris = boxTriangles(-0.3f, -0.3f, 0.0f, 0.3f, 0.3f, 1.3f);
+    for (Tri t : boxTriangles(-0.25f, -0.25f, 0.05f, 0.25f, 0.25f, 1.25f)) {
+        for (int a = 0; a < 3; a++) std::swap(t.v[3 + a], t.v[6 + a]);
+        tris.push_back(t);
+    }
+    writeBinaryStl(path, tris);
+}
+
+// Winding normal z of the lowest triangle inside the inner box - the cavity
+// floor at z = 50 mm. From the winding, as the picker works it out.
+static float floorNormalZ(const std::vector<MeshVertex>& v) {
+    float best = 1e30f, nz = 0;
+    for (size_t t = 0; t + 2 < v.size(); t += 3) {
+        const float cz = (v[t].pz + v[t + 1].pz + v[t + 2].pz) / 3.0f;
+        const bool inner = std::fabs(v[t].px) < 260 && std::fabs(v[t].py) < 260;
+        if (inner && cz > 25 && cz < best) {
+            best = cz;
+            const float ax = v[t + 1].px - v[t].px, ay = v[t + 1].py - v[t].py;
+            const float bx = v[t + 2].px - v[t].px, by = v[t + 2].py - v[t].py;
+            nz = ax * by - ay * bx;
+        }
+    }
+    return nz;
+}
+
+static void testSkins(const fs::path& dir) {
+    std::printf("skins\n");
+    const fs::path wall = dir / "solid_wall.stl";
+    writeSolidWall(wall);
+    MeshFileInfo info;
+    std::string err;
+    CHECK(probeMeshFile(wall.string(), info, err), "%s", err.c_str());
+    CHECK(info.skins.size() == 2, "skins=%zu", info.skins.size());
+    if (info.skins.size() != 2) return;
+    const MeshSkinInfo outer = info.skins[0];
+    const MeshSkinInfo inner = info.skins[1];
+    CHECK(outer.closed && inner.closed, "both skins are closed boxes");
+    CHECK(outer.triangleCount == 12 && inner.triangleCount == 12, "%zu / %zu", outer.triangleCount, inner.triangleCount);
+    CHECK(nearRel(outer.signedVolume, 0.6 * 0.6 * 1.3, 1e-5), "outer volume %g", outer.signedVolume);
+    CHECK(nearRel(inner.signedVolume, -0.5 * 0.5 * 1.2, 1e-5), "inner volume %g", inner.signedVolume);
+    CHECK(!outer.isCavity() && inner.isCavity(), "the inward-wound skin is the cavity");
+    CHECK(isWallOutside(info, 0) && !isWallOutside(info, 1), "outer skin is the outside of the wall");
+
+    // Points select skins; an off-geometry point is refused, not guessed.
+    std::vector<int> found;
+    const std::array<double, 3> innerPt{inner.point[0], inner.point[1], inner.point[2]};
+    const std::vector<int> justInner{1};
+    bool ok = resolveSkins(wall.string(), {innerPt}, found, err) && found == justInner;
+    CHECK(ok, "inner point -> %d", found.empty() ? -1 : found[0]);
+    const std::array<double, 3> nearFloor{0.0, 0.0, 0.051}, middle{0.0, 0.0, 0.65};
+    ok = resolveSkins(wall.string(), {nearFloor}, found, err) && found == justInner;
+    CHECK(ok, "a point 1 mm above the cavity floor is still the cavity");
+    // Drifted off the cavity floor toward the outer skin (the wall moved in a
+    // re-export): refused, never switched to the outside of the wall. The
+    // floor gap is 50 mm; 30 mm down is nearer the outer bottom.
+    for (double z : {0.04, 0.02, 0.01}) {
+        const std::array<double, 3> drifted{0.0, 0.0, z};
+        ok = resolveSkins(wall.string(), {drifted}, found, err);
+        CHECK(!ok, "point at z=%g resolved to skin %d instead of being refused", z, found.empty() ? -1 : found[0]);
+    }
+    ok = resolveSkins(wall.string(), {middle}, found, err);
+    CHECK(!ok, "a point 0.4 m from any wall resolved");
+    CHECK(err.find("has changed since its skins were picked") != std::string::npos, "%s", err.c_str());
+
+    // No choice: both skins, and the cavity turned to face away from its fluid
+    // (its floor normal points down, into the wall).
+    std::vector<MeshVertex> v;
+    CHECK(loadMeshFile(wall.string(), "m", MeshSkinChoice{}, v, info, err), "%s", err.c_str());
+    CHECK(v.size() == 72, "vertices=%zu", v.size());
+    CHECK(floorNormalZ(v) < 0, "cavity floor normal z=%g, want down", floorNormalZ(v));
+    CHECK(info.closed, "all skins kept: closed");
+
+    // Keep the cavity only.
+    MeshSkinChoice keepInner;
+    keepInner.keep = {innerPt};
+    CHECK(loadMeshFile(wall.string(), "m", keepInner, v, info, err), "%s", err.c_str());
+    CHECK(v.size() == 36, "vertices=%zu", v.size());
+    float hi = 0;
+    for (const auto& q : v) hi = std::max(hi, std::fabs(q.px));
+    CHECK(near(hi, 250.0, 1e-3), "kept geometry reaches x=%g, outer skin is at 300", hi);
+    CHECK(info.closed, "the kept cavity is closed");
+
+    // A user flip undoes the automatic one.
+    MeshSkinChoice flipped = keepInner;
+    flipped.flip = {innerPt};
+    CHECK(loadMeshFile(wall.string(), "m", flipped, v, info, err), "%s", err.c_str());
+    CHECK(floorNormalZ(v) > 0, "flipped cavity floor normal z=%g, want up", floorNormalZ(v));
+    std::vector<MeshSkinState> st;
+    CHECK(skinStates(wall.string(), flipped, st, err) && st.size() == 2, "%s", err.c_str());
+    if (st.size() == 2) {
+        CHECK(!st[0].kept && st[1].kept, "kept flags");
+        CHECK(st[1].userFlipped && !st[1].flipped, "user flip cancels the automatic one");
+    }
+
+    // Through the feature: replay, picking, the spec and the project file.
+    auto planes = referencePlanes();
+    FeatureHistory h;
+    MeshImportFeatureData md;
+    md.sourcePath = wall.string();
+    md.unit = "m";
+    md.skins = keepInner;
+    FeatureID fid = h.addMeshImportFeature(md, "tank");
+    Scene3D scene;
+    replayFeatures(h, planes, scene);
+    CHECK(scene.bodyCount() == 1 && scene.getBody(0).vertexCount == 36, "replayed body vertices=%d",
+          scene.bodyCount() ? scene.getBody(0).vertexCount : -1);
+    // From above: the outer lid is gone, so the ray lands on the cavity roof,
+    // whose normal now points up - away from the fluid.
+    const float o[3] = {10, 10, 5000}, d[3] = {0, 0, -1};
+    MeshPickResult r = pickMesh(scene, o, d);
+    CHECK(r.hit && near(r.hitWorld[2], 1250.0, 1e-2), "picked z=%g", r.hitWorld[2]);
+    CHECK(r.normal[2] > 0.99f, "cavity roof normal z=%g", r.normal[2]);
+
+    SimulationSetup sim;
+    SimNozzle n;
+    n.hostFeature = fid;
+    n.position[2] = 600;
+    sim.addNozzle(n);
+    std::string spec;
+    std::vector<std::string> warnings;
+    CHECK(buildTier1Spec(sim, h, spec, warnings, err), "%s", err.c_str());
+    if (!spec.empty()) {
+        auto doc = nlohmann::json::parse(spec);
+        const auto& s0 = doc["surfaces"][0];
+        const bool one = s0.contains("skins") && s0["skins"].size() == 1;
+        CHECK(one, "spec skins: %s", s0.dump().c_str());
+        using P3 = std::array<double, 3>;
+        if (one) CHECK(s0["skins"][0].get<P3>() == innerPt, "spec names the cavity by a point on it");
+    }
+
+    const fs::path proj = dir / "skins.shitcad";
+    CHECK(saveProject(proj.string(), h, planes), "%s", lastLoadError().c_str());
+    {
+        std::ifstream in(proj);
+        auto pj = nlohmann::json::parse(in);
+        CHECK(pj["version"] == 4, "a skin choice must save as version 4, got %d", pj["version"].get<int>());
+    }
+    FeatureHistory loaded;
+    std::vector<SketchPlane> lp;
+    CHECK(loadProject(proj.string(), loaded, lp), "%s", lastLoadError().c_str());
+    const Feature* lf = loaded.findFeature(fid);
+    CHECK(lf && std::get<MeshImportFeatureData>(lf->data).skins == keepInner, "skin choice did not round-trip");
+
+    // Re-exported as a different shape: the choice no longer fits, and the
+    // import says so instead of quietly showing everything.
+    // (Not 10..11 exactly: those floats are all printable bytes, and OCCT then
+    // takes the binary file for ASCII.)
+    writeBoxStl(wall, 10.3f, 10.3f, 10.3f, 11.7f, 11.7f, 11.7f);
+    Scene3D scene2;
+    replayFeatures(h, planes, scene2);
+    const Feature* f2 = h.findFeature(fid);
+    CHECK(f2 && f2->hasError && f2->errorMsg.find("Pick them again") != std::string::npos, "stale choice: %s",
+          f2 ? f2->errorMsg.c_str() : "?");
+}
+
+// A solid-wall vessel exported with an internal part as its own solid (a
+// baffle): "keep the inside" must drop only the outside of the wall.
+static void testWallOutsideKeepsInternals(const fs::path& dir) {
+    std::printf("wall outside vs internals\n");
+    const fs::path p = dir / "wall_and_baffle.stl";
+    auto tris = boxTriangles(-0.3f, -0.3f, 0.0f, 0.3f, 0.3f, 1.3f);
+    for (Tri t : boxTriangles(-0.25f, -0.25f, 0.05f, 0.25f, 0.25f, 1.25f)) {
+        for (int a = 0; a < 3; a++) std::swap(t.v[3 + a], t.v[6 + a]);
+        tris.push_back(t);
+    }
+    for (const Tri& t : boxTriangles(-0.02f, -0.1f, 0.3f, 0.02f, 0.1f, 1.0f)) tris.push_back(t); // baffle, outward
+    writeBinaryStl(p, tris);
+    MeshFileInfo info;
+    std::string err;
+    CHECK(probeMeshFile(p.string(), info, err) && info.skins.size() == 3, "skins=%zu %s", info.skins.size(), err.c_str());
+    if (info.skins.size() != 3) return;
+    CHECK(isWallOutside(info, 0), "the outer skin is the outside of the wall");
+    CHECK(!isWallOutside(info, 1) && info.skins[1].isCavity(), "the cavity stays");
+    CHECK(!isWallOutside(info, 2) && !info.skins[2].isCavity(), "the baffle is a solid inside, not a wall outside");
+}
+
 int main() {
     const fs::path dir = fs::temp_directory_path() / "shitcad_mesh_import_test";
     fs::create_directories(dir);
@@ -508,6 +635,8 @@ int main() {
     testSaveLoad(dir, box);
 
     testReplay(dir, box);
+    testSkins(dir);
+    testWallOutsideKeepsInternals(dir);
 
     std::printf("\n%d checks, %d failed\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;

@@ -1,16 +1,10 @@
 #include "Tools.h"
+#include "Constants.h"
 #include <cmath>
 
 namespace shitcad {
 
 // ─── Fillet helpers ────────────────────────────────────────────────────────
-
-static double normalizeAngle(double a) {
-    const double kTwoPi = 6.28318530717958647692;
-    a = std::fmod(a, kTwoPi);
-    if (a < 0.0) a += kTwoPi;
-    return a;
-}
 
 // Returns the unit direction pointing FROM vertexID along the entity (into the entity).
 static Point2D directionFromVertex(const Sketch& sketch, EntityID entityID, bool isArc, EntityID vertexID) {
@@ -200,13 +194,12 @@ bool applyFillet(Sketch& sketch, FilletToolState& filletTool, EntityID vertexID,
     ArcEntity* filletArc = sketch.findArc(filletArcID);
     if (filletArc) {
         double vAngle = std::atan2(V.y - CY, V.x - CX);
-        double nVA = normalizeAngle(vAngle);
-        double nSA = normalizeAngle(filletArc->startAngle);
-        double nEA = normalizeAngle(filletArc->endAngle);
-        double sweep = nEA - nSA;
-        if (sweep <= 0.0) sweep += 6.28318530717958647692;
+        double nVA = wrap2Pi(vAngle);
+        double nSA = wrap2Pi(filletArc->startAngle);
+        double nEA = wrap2Pi(filletArc->endAngle);
+        double sweep = ccwSweep(nSA, nEA);
         double toV = nVA - nSA;
-        if (toV < 0.0) toV += 6.28318530717958647692;
+        if (toV < 0.0) toV += kTwoPiD;
         if (toV >= sweep) {
             // V is outside the CCW arc — swap endpoints to flip sweep direction
             std::swap(filletArc->startPt, filletArc->endPt);
@@ -253,7 +246,7 @@ bool handleLineTool(Sketch& sketch, ToolState& tool, Point2D worldPos, EntityID 
     // Prevent zero-length lines (same point clicked twice, or solver moved first point)
     if (endPtID == tool.firstPointID) return false;
     Point2D endPos = sketch.getPointPos(endPtID);
-    if (distance(sketch.getPointPos(tool.firstPointID), endPos) < 0.001f) {
+    if (distance(sketch.getPointPos(tool.firstPointID), endPos) < kMinLineLength) {
         if (snapPointID == NullID) sketch.removePoint(endPtID);
         return false;
     }
@@ -289,7 +282,7 @@ bool handleCircleTool(Sketch& sketch, ToolState& tool, Point2D worldPos, EntityI
     // Compute radius from center to click position (use snap position if snapped)
     Point2D radiusPos = (snapPointID != NullID) ? sketch.getPointPos(snapPointID) : worldPos;
     double radius = distance(tool.firstPoint, radiusPos);
-    if (radius > 0.001f) {
+    if (radius > kMinLineLength) {
         sketch.addCircle(tool.firstPointID, radius);
     } else {
         // Near-zero radius — reject; clean up a freshly created center point
@@ -319,7 +312,7 @@ bool handleRectangleTool(Sketch& sketch, ToolState& tool, Point2D worldPos, Enti
     double x2 = worldPos.x, y2 = worldPos.y;
 
     // Reject degenerate rectangles (zero-width or zero-height)
-    if (std::fabs(x2 - x1) < 0.001 || std::fabs(y2 - y1) < 0.001) {
+    if (std::fabs(x2 - x1) < kMinLineLength || std::fabs(y2 - y1) < kMinLineLength) {
         if (!sketch.isPointReferenced(tool.firstPointID))
             sketch.removePoint(tool.firstPointID);
         tool.hasFirstPoint = false;
@@ -425,27 +418,19 @@ bool handleArc3PointTool(Sketch& sketch, ArcToolState& arcTool, Point2D worldPos
         double ea = arc->endAngle;
 
         // Normalize angles to [0, 2pi)
-        auto normAngle = [](double a) {
-            constexpr double kTwoPiD = 6.28318530717958647692;
-            a = std::fmod(a, kTwoPiD);
-            if (a < 0) a += kTwoPiD;
-            return a;
-        };
 
-        double nsa = normAngle(sa);
-        double nea = normAngle(ea);
-        double nta = normAngle(throughAngle);
+        double nsa = wrap2Pi(sa);
+        double nea = wrap2Pi(ea);
+        double nta = wrap2Pi(throughAngle);
 
         // CCW sweep from start to end
-        constexpr double kTwoPiD = 6.28318530717958647692;
-        double ccwSweep = nea - nsa;
-        if (ccwSweep <= 0) ccwSweep += kTwoPiD;
+        double ccw = ccwSweep(nsa, nea);
 
         // Check if through-angle is within CCW sweep
         double toThrough = nta - nsa;
         if (toThrough < 0) toThrough += kTwoPiD;
 
-        bool throughInCCW = (toThrough < ccwSweep);
+        bool throughInCCW = (toThrough < ccw);
         if (!throughInCCW) {
             // Swap start and end to reverse sweep direction
             EntityID tmp = arc->startPt;
@@ -488,7 +473,7 @@ bool handleArcCenterTool(Sketch& sketch, ArcToolState& arcTool, Point2D worldPos
 
     // Click 3: end point — project onto circle at locked radius
     double radius = distance(arcTool.point1, arcTool.point2);
-    if (radius < 0.001) {
+    if (radius < kMinLineLength) {
         // Degenerate: clean up freshly created points before resetting
         if (!sketch.isPointReferenced(arcTool.point2ID))
             sketch.removePoint(arcTool.point2ID);
@@ -547,7 +532,7 @@ bool handleCenterRectTool(Sketch& sketch, ToolState& tool, Point2D worldPos, Ent
     double dx = worldPos.x - cx, dy = worldPos.y - cy;
 
     // Reject degenerate (zero-width or zero-height)
-    if (std::fabs(dx) < 0.001 || std::fabs(dy) < 0.001) {
+    if (std::fabs(dx) < kMinLineLength || std::fabs(dy) < kMinLineLength) {
         tool.hasFirstPoint = false;
         tool.firstPointID = NullID;
         return false;

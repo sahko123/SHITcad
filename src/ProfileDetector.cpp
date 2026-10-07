@@ -63,7 +63,6 @@ struct SubEdge {
     float arcFromAngle = 0;
     float arcToAngle = 0;
     bool isArc() const { return origCircleID != NullID || origArcID != NullID; }
-    bool isCurve() const { return isArc() || origEllipseID != NullID || origEllipseArcID != NullID || origSplineID != NullID; }
 };
 
 struct SubHalfEdge {
@@ -171,7 +170,7 @@ static void buildSubdivision(const Sketch& sketch,
     for (int ei = 0; ei < numEllipses; ei++) {
         Point2D center = sketch.getPointPos(sketch.ellipses[ei].centerPt);
         ellipseSamples[ei] = sampleEllipse(center, sketch.ellipses[ei].semiMajor,
-                                            sketch.ellipses[ei].semiMinor, sketch.ellipses[ei].rotation, 64);
+                                            sketch.ellipses[ei].semiMinor, sketch.ellipses[ei].rotation, kEllipseSampleCount);
     }
     std::vector<std::vector<Point2D>> ellipseArcSamples(numEllipseArcs);
     for (int ei = 0; ei < numEllipseArcs; ei++) {
@@ -183,7 +182,7 @@ static void buildSubdivision(const Sketch& sketch,
     std::vector<std::vector<Point2D>> splineSamples(numSplines);
     for (int si = 0; si < numSplines; si++) {
         if (sketch.splines[si].controlPtIDs.size() < 2) continue;
-        splineSamples[si] = sampleSpline(sketch.splines[si], sketch, 64);
+        splineSamples[si] = sampleSpline(sketch.splines[si], sketch, kSplineSampleCount);
     }
 
     for (const auto& ix : lineLineIx) {
@@ -244,10 +243,10 @@ static void buildSubdivision(const Sketch& sketch,
     // ---- Arc-line intersections ----
     auto angleInArcRange = [](float angle, float startA, float endA) -> bool {
         float sweep = endA - startA;
-        if (sweep <= 0) sweep += 2.0f * kPi;
+        if (sweep <= 0) sweep += kTwoPi;
         float rel = angle - startA;
-        rel = std::fmod(rel, 2.0f * kPi);
-        if (rel < 0) rel += 2.0f * kPi;
+        rel = std::fmod(rel, kTwoPi);
+        if (rel < 0) rel += kTwoPi;
         return rel <= sweep + 1e-5f;
     };
 
@@ -568,7 +567,7 @@ static void buildSubdivision(const Sketch& sketch,
             float toAngle = deduped[next].first;
 
             // Ensure we go CCW from fromAngle to toAngle
-            if (toAngle <= fromAngle) toAngle += 2.0f * kPi;
+            if (toAngle <= fromAngle) toAngle += kTwoPi;
 
             SubEdge e;
             e.fromVtx = fromVtx;
@@ -851,12 +850,12 @@ std::vector<ClosedProfile> detectClosedProfilesCustom(const Sketch& sketch) {
                     seg.arcEndAngle = edge.arcToAngle;
                     // Ensure CCW span is positive (raw atan2 values may cross ±π boundary)
                     if (seg.arcEndAngle <= seg.arcStartAngle)
-                        seg.arcEndAngle += 2.0f * kPi;
+                        seg.arcEndAngle += kTwoPi;
                 } else {
                     seg.arcStartAngle = edge.arcToAngle;
                     seg.arcEndAngle = edge.arcFromAngle;
                     if (seg.arcEndAngle >= seg.arcStartAngle)
-                        seg.arcEndAngle -= 2.0f * kPi;
+                        seg.arcEndAngle -= kTwoPi;
                 }
             }
             profile.segments.push_back(seg);
@@ -927,7 +926,7 @@ std::vector<ClosedProfile> detectClosedProfilesCustom(const Sketch& sketch) {
         for (int j = i - 1; j >= 0; j--) {
             if (sharesVertex(rawBoundaries[order[i]], rawBoundaries[order[j]]))
                 continue;
-            if (pointInsidePolygonWinding(tessCache[order[j]], sample)) {
+            if (windingNumber(tessCache[order[j]], sample) != 0) {
                 parent[i] = j;
                 break;
             }

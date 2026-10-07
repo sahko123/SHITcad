@@ -251,12 +251,6 @@ void Scene3D::removeBody(int index) {
     bodies_.erase(bodies_.begin() + index);
 }
 
-void Scene3D::removeLastBody() {
-    if (bodies_.empty()) return;
-    releaseGpu(bodies_.back());
-    bodies_.pop_back();
-}
-
 int Scene3D::findBody(uint32_t sourceFeature, int sourceIndex) const {
     if (sourceFeature == 0) return -1;
     for (int i = 0; i < (int)bodies_.size(); i++)

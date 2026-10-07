@@ -1,6 +1,7 @@
 #include "MeshDialogs.h"
 #include "UnitUtils.h"
 
+#include <QCheckBox>
 #include <QComboBox>
 #include <QDoubleSpinBox>
 #include <QFormLayout>
@@ -34,8 +35,8 @@ QPushButton* pushButton(QWidget* parent, const QString& text, std::function<void
 
 // ---- import ------------------------------------------------------------------
 
-MeshImportDialog::MeshImportDialog(App& app, QWidget* parent) : QDialog(parent), app_(app) {
-    setWindowTitle("Import Mesh");
+ImportDialogBase::ImportDialogBase(App& app, Action confirm, Action cancel, QWidget* parent)
+    : QDialog(parent), app_(app), cancel_(cancel) {
     setModal(false);
 
     auto* root = new QVBoxLayout(this);
@@ -49,19 +50,12 @@ MeshImportDialog::MeshImportDialog(App& app, QWidget* parent) : QDialog(parent),
     root->addWidget(error_);
 
     form_ = new QWidget(this);
-    auto* form = new QFormLayout(form_);
-    triangles_ = new QLabel(form_);
-    form->addRow(triangles_);
-    name_ = new QLineEdit(form_);
-    form->addRow("Name", name_);
-    unit_ = unitCombo(form_);
-    form->addRow("Unit of the numbers in this file", unit_);
+    formLayout_ = new QFormLayout(form_);
     size_ = new QLabel(form_);
-    form->addRow(size_);
     warning_ = new QLabel(form_);
     warning_->setWordWrap(true);
     warning_->setStyleSheet("color: #b08000;");
-    form->addRow(warning_);
+    name_ = new QLineEdit(form_);
     root->addWidget(form_);
     blocked_ = new QLabel(this);
     blocked_->setStyleSheet("color: #b08000;");
@@ -70,11 +64,68 @@ MeshImportDialog::MeshImportDialog(App& app, QWidget* parent) : QDialog(parent),
     App* a = &app_;
     auto* buttons = new QHBoxLayout;
     buttons->addStretch(1);
-    import_ = pushButton(this, "Import", [a] { a->post([a] { a->confirmMeshImport(); }); });
+    import_ = pushButton(this, "Import", [a, confirm] { a->post([a, confirm] { confirm(*a); }); });
     buttons->addWidget(import_);
-    buttons->addWidget(pushButton(this, "Cancel", [a] { a->post([a] { a->cancelMeshImport(); }); }));
+    buttons->addWidget(pushButton(this, "Cancel", [a, cancel] { a->post([a, cancel] { cancel(*a); }); }));
     root->addLayout(buttons);
+}
 
+bool ImportDialogBase::refreshHead(bool open, const std::string& path, const std::string& error,
+                                   const std::string& blocked) {
+    if (open != isVisible()) setVisible(open);
+    if (!open) {
+        shownPath_.clear();
+        return false;
+    }
+
+    path_->setText(QString::fromStdString(path));
+    const bool failed = !error.empty();
+    error_->setVisible(failed);
+    error_->setText(QString::fromStdString(error));
+    form_->setVisible(!failed);
+    blocked_->setVisible(!failed && !blocked.empty());
+    blocked_->setText(QString::fromStdString(blocked));
+    import_->setEnabled(!failed && blocked.empty());
+    if (failed) {
+        adjustSize();
+        return false;
+    }
+    return true;
+}
+
+bool ImportDialogBase::isNewFile(const std::string& path) {
+    if (path == shownPath_) return false;
+    shownPath_ = path;
+    return true;
+}
+
+void ImportDialogBase::reject() {
+    App* a = &app_;
+    Action cancel = cancel_;
+    app_.post([a, cancel] { cancel(*a); });
+    QDialog::reject();
+}
+
+MeshImportDialog::MeshImportDialog(App& app, QWidget* parent)
+    : ImportDialogBase(app,
+                       [](App& a) { a.confirmMeshImport(); },
+                       [](App& a) { a.cancelMeshImport(); }, parent) {
+    setWindowTitle("Import Mesh");
+
+    triangles_ = new QLabel(form_);
+    formLayout_->addRow(triangles_);
+    formLayout_->addRow("Name", name_);
+    unit_ = unitCombo(form_);
+    formLayout_->addRow("Unit of the numbers in this file", unit_);
+    formLayout_->addRow(size_);
+    formLayout_->addRow(warning_);
+    keepInside_ = new QCheckBox("Keep only the inside of the wall (the cavity)", form_);
+    keepInside_->setToolTip("This file is a solid: the outside and the inside of the vessel wall in one STL. "
+                            "Only the inside is wall that gets sprayed. Change it later under Simulation > Surfaces.");
+    formLayout_->addRow(keepInside_);
+
+    App* a = &app_;
+    connect(keepInside_, &QCheckBox::toggled, this, [a](bool on) { a->post([a, on] { a->setMeshImportKeepInside(on); }); });
     connect(name_, &QLineEdit::textEdited, this, [a](const QString& t) {
         const std::string s = t.toUtf8().toStdString();
         a->post([a, s] { a->setMeshImportName(s); });
@@ -87,46 +138,31 @@ MeshImportDialog::MeshImportDialog(App& app, QWidget* parent) : QDialog(parent),
 
 void MeshImportDialog::refresh() {
     const App::MeshImportModel m = app_.meshImportModel();
-    if (m.open != isVisible()) setVisible(m.open);
-    if (!m.open) {
-        shownPath_.clear();
-        return;
-    }
+    if (!refreshHead(m.open, m.path, m.error, m.blocked)) return;
 
-    path_->setText(QString::fromStdString(m.path));
-    const bool failed = !m.error.empty();
-    error_->setVisible(failed);
-    error_->setText(QString::fromStdString(m.error));
-    form_->setVisible(!failed);
-    blocked_->setVisible(!failed && !m.blocked.empty());
-    blocked_->setText(QString::fromStdString(m.blocked));
-    import_->setEnabled(!failed && m.blocked.empty());
-    if (failed) return;
-
-    if (m.path != shownPath_) { // a new file: take App's defaults
-        shownPath_ = m.path;
+    if (isNewFile(m.path)) { // a new file: take App's defaults
         const QSignalBlocker b1(name_), b2(unit_);
         name_->setText(QString::fromStdString(m.name));
         unit_->setCurrentIndex(m.unitIndex);
     }
-    triangles_->setText(QString("%1 triangles").arg(m.triangles));
     if (m.maxExtMm >= 1000.0f)
         size_->setText(QString("Size: %1 x %2 x %3 m").arg(m.extMm[0] / 1000.0, 0, 'g', 4)
                            .arg(m.extMm[1] / 1000.0, 0, 'g', 4).arg(m.extMm[2] / 1000.0, 0, 'g', 4));
     else
         size_->setText(QString("Size: %1 x %2 x %3 mm").arg(m.extMm[0], 0, 'g', 4)
                            .arg(m.extMm[1], 0, 'g', 4).arg(m.extMm[2], 0, 'g', 4));
+    keepInside_->setVisible(m.solidWall);
+    if (keepInside_->isChecked() != m.keepInside) {
+        const QSignalBlocker b(keepInside_);
+        keepInside_->setChecked(m.keepInside);
+    }
+    triangles_->setText(m.skins > 1 ? QString("%1 triangles in %2 separate skins").arg(m.triangles).arg(m.skins)
+                                    : QString("%1 triangles").arg(m.triangles));
     warning_->setVisible(m.sizeSuspicious);
     if (m.sizeSuspicious)
         warning_->setText(QString("That is %1 mm across. If the real part is not that size, "
                                   "the unit above is wrong.").arg(m.maxExtMm, 0, 'g', 4));
     adjustSize();
-}
-
-void MeshImportDialog::reject() {
-    App* a = &app_;
-    app_.post([a] { a->cancelMeshImport(); });
-    QDialog::reject();
 }
 
 // ---- STEP / IGES import ------------------------------------------------------
@@ -142,49 +178,23 @@ QString sizeText(const double ext[3]) {
 
 } // namespace
 
-CadImportDialog::CadImportDialog(App& app, QWidget* parent) : QDialog(parent), app_(app) {
+CadImportDialog::CadImportDialog(App& app, QWidget* parent)
+    : ImportDialogBase(app,
+                       [](App& a) { a.confirmCadImport(); },
+                       [](App& a) { a.cancelCadImport(); }, parent) {
     setWindowTitle("Import");
-    setModal(false);
 
-    auto* root = new QVBoxLayout(this);
-    path_ = new QLabel(this);
-    path_->setWordWrap(true);
-    root->addWidget(path_);
-
-    error_ = new QLabel(this);
-    error_->setWordWrap(true);
-    error_->setStyleSheet("color: #d05050;");
-    root->addWidget(error_);
-
-    form_ = new QWidget(this);
-    auto* form = new QFormLayout(form_);
     contents_ = new QLabel(form_);
-    form->addRow(contents_);
-    size_ = new QLabel(form_);
-    form->addRow(size_);
-    warning_ = new QLabel(form_);
-    warning_->setWordWrap(true);
-    warning_->setStyleSheet("color: #b08000;");
-    form->addRow(warning_);
-    name_ = new QLineEdit(form_);
-    form->addRow("Name", name_);
+    formLayout_->addRow(contents_);
+    formLayout_->addRow(size_);
+    formLayout_->addRow(warning_);
+    formLayout_->addRow("Name", name_);
     up_ = new QComboBox(form_);
     // This viewport is Y-up. Onshape, Fusion and most CAD export Z-up.
     up_->addItems({"Z (most CAD: Onshape, Fusion, Inventor)", "Y (SolidWorks, as-is)"});
-    form->addRow("Up axis in the file", up_);
-    root->addWidget(form_);
-    blocked_ = new QLabel(this);
-    blocked_->setStyleSheet("color: #b08000;");
-    root->addWidget(blocked_);
+    formLayout_->addRow("Up axis in the file", up_);
 
     App* a = &app_;
-    auto* buttons = new QHBoxLayout;
-    buttons->addStretch(1);
-    import_ = pushButton(this, "Import", [a] { a->post([a] { a->confirmCadImport(); }); });
-    buttons->addWidget(import_);
-    buttons->addWidget(pushButton(this, "Cancel", [a] { a->post([a] { a->cancelCadImport(); }); }));
-    root->addLayout(buttons);
-
     connect(name_, &QLineEdit::textEdited, this, [a](const QString& t) {
         const std::string s = t.toUtf8().toStdString();
         a->post([a, s] { a->setCadImportName(s); });
@@ -197,27 +207,9 @@ CadImportDialog::CadImportDialog(App& app, QWidget* parent) : QDialog(parent), a
 
 void CadImportDialog::refresh() {
     const App::CadImportModel m = app_.cadImportModel();
-    if (m.open != isVisible()) setVisible(m.open);
-    if (!m.open) {
-        shownPath_.clear();
-        return;
-    }
+    if (!refreshHead(m.open, m.path, m.error, m.blocked)) return;
 
-    path_->setText(QString::fromStdString(m.path));
-    const bool failed = !m.error.empty();
-    error_->setVisible(failed);
-    error_->setText(QString::fromStdString(m.error));
-    form_->setVisible(!failed);
-    blocked_->setVisible(!failed && !m.blocked.empty());
-    blocked_->setText(QString::fromStdString(m.blocked));
-    import_->setEnabled(!failed && m.blocked.empty());
-    if (failed) {
-        adjustSize();
-        return;
-    }
-
-    if (m.path != shownPath_) { // a new file: take App's defaults
-        shownPath_ = m.path;
+    if (isNewFile(m.path)) { // a new file: take App's defaults
         const QSignalBlocker b1(name_), b2(up_);
         name_->setText(QString::fromStdString(m.name));
         up_->setCurrentIndex(m.zUp ? 0 : 1);
@@ -236,12 +228,6 @@ void CadImportDialog::refresh() {
     if (m.skippedWires > 0)
         warning_->setText("The file also has curves or points; they make no body and are left out.");
     adjustSize();
-}
-
-void CadImportDialog::reject() {
-    App* a = &app_;
-    app_.post([a] { a->cancelCadImport(); });
-    QDialog::reject();
 }
 
 // ---- placement ---------------------------------------------------------------

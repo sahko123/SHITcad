@@ -263,20 +263,20 @@ void App::handleSketchInput(float vpW, float vpH) {
                     double crossV = dx1*dy2 - dy1*dx2;
                     double dotV = dx1*dx2 + dy1*dy2;
                     double ccwRad = std::atan2(crossV, dotV);
-                    if (ccwRad < 0) ccwRad += kTwoPi;
+                    if (ccwRad < 0) ccwRad += kTwoPiD;
                     double dir1A = std::atan2(dy1, dx1);
                     double dxm = cursorLocal_.x - vtx.x, dym = cursorLocal_.y - vtx.y;
                     double mouseA = std::atan2(dym, dxm);
                     double mouseSpan = mouseA - dir1A;
-                    if (mouseSpan < 0) mouseSpan += kTwoPi;
+                    if (mouseSpan < 0) mouseSpan += kTwoPiD;
                     // Mouse in CCW sector → use CCW angle; else CW
                     double sideDeg = (mouseSpan < ccwRad)
-                        ? ccwRad * 180.0 / 3.14159265358979
-                        : (kTwoPi - ccwRad) * 180.0 / 3.14159265358979;
+                        ? ccwRad * kRadToDegD
+                        : (kTwoPiD - ccwRad) * kRadToDegD;
                     if (sideDeg < 0.001) sideDeg = 0.001;
                     if (sideDeg > 359.999) sideDeg = 359.999;
                     // Only flip if we're crossing from one sector to the other
-                    double ccwDeg = ccwRad * 180.0 / 3.14159265358979;
+                    double ccwDeg = ccwRad * kRadToDegD;
                     double cwDeg = 360.0 - ccwDeg;
                     bool wasInCcw = (std::fabs(cc->value - ccwDeg) <= std::fabs(cc->value - cwDeg));
                     bool nowInCcw = (mouseSpan < ccwRad);
@@ -370,22 +370,22 @@ void App::handleSketchInput(float vpW, float vpH) {
                             double dotV = dx1*dx2 + dy1*dy2;
                             // CCW angle from dir1 to dir2 (0 to 2pi)
                             double ccwRad = std::atan2(crossV, dotV);
-                            if (ccwRad < 0) ccwRad += kTwoPi;
+                            if (ccwRad < 0) ccwRad += kTwoPiD;
 
                             // Where is mouse relative to dir1?
                             double dxm = cursorLocal_.x - vtx.x, dym = cursorLocal_.y - vtx.y;
                             double mouseA = std::atan2(dym, dxm);
                             double mouseSpan = mouseA - dir1A;
-                            if (mouseSpan < 0) mouseSpan += kTwoPi;
+                            if (mouseSpan < 0) mouseSpan += kTwoPiD;
 
                             // Mouse in CCW sector → use CCW angle; else use CW (reflex)
                             double newDeg;
                             bool newCW;
                             if (mouseSpan < ccwRad) {
-                                newDeg = ccwRad * 180.0 / 3.14159265358979;
+                                newDeg = ccwRad * kRadToDegD;
                                 newCW = false;
                             } else {
-                                newDeg = (kTwoPi - ccwRad) * 180.0 / 3.14159265358979;
+                                newDeg = (kTwoPiD - ccwRad) * kRadToDegD;
                                 newCW = true;
                             }
 
@@ -587,7 +587,7 @@ void App::handleSketchInput(float vpW, float vpH) {
                                     double cross = dx1*dy2 - dy1*dx2;
                                     // Unsigned angle between lines (0-180°), always pick the smaller one
                                     double rad = std::atan2(std::fabs(cross), dot); // 0 to pi
-                                    angleDeg = f(rad * 180.0 / 3.14159265358979);
+                                    angleDeg = f(rad * kRadToDegD);
 
                                     if (angleDeg < 0.001f) angleDeg = 0.001f;
                                     if (angleDeg > 179.999f) angleDeg = 179.999f;
@@ -814,7 +814,7 @@ void App::handleSketchInput(float vpW, float vpH) {
         float len = std::sqrt(dx * dx + dy * dy);
         if (len > 0.5f / apparentScale) {
             constexpr float kThreshDeg = 5.0f;
-            const float sinThresh = std::sin(kThreshDeg * 3.14159265f / 180.0f);
+            const float sinThresh = std::sin(kThreshDeg * kDegToRad);
             bool nearH = std::fabs(dy / len) < sinThresh;
             bool nearV = !nearH && std::fabs(dx / len) < sinThresh;
 
@@ -898,18 +898,12 @@ void App::handleSketchInput(float vpW, float vpH) {
 
                 // 4. Intersections of the H/V rail with arcs
                 {
-                    static constexpr double kPiD = 3.14159265358979323846;
-                    auto normA = [](double a) {
-                        a = std::fmod(a, 2.0*3.14159265358979323846);
-                        if (a < 0.0) a += 2.0*3.14159265358979323846;
-                        return a;
-                    };
                     for (const auto& arc : sketch.arcs) {
                         Point2D c  = sketch.getPointPos(arc.centerPt);
                         Point2D sp = sketch.getPointPos(arc.startPt);
                         double r = distance(c, sp);
-                        double nSA = normA(arc.startAngle);
-                        double nEA = normA(arc.endAngle);
+                        double nSA = wrap2Pi(arc.startAngle);
+                        double nEA = wrap2Pi(arc.endAngle);
                         double sweep = nEA - nSA;
                         if (sweep <= 0.0) sweep += 2.0*kPiD;
 
@@ -933,7 +927,7 @@ void App::handleSketchInput(float vpW, float vpH) {
                             angles[nPts] = std::atan2(-dyC, tool_.firstPoint.x - c.x); nPts++;
                         }
                         for (int i = 0; i < nPts; i++) {
-                            double toA = normA(angles[i]) - nSA;
+                            double toA = wrap2Pi(angles[i]) - nSA;
                             if (toA < 0.0) toA += 2.0*kPi;
                             if (toA >= sweep) continue; // outside arc
                             double d = distance(hvPos, pts[i]);
@@ -1270,7 +1264,7 @@ void App::handleSketchInput(float vpW, float vpH) {
                     bool allIn = pointInPolygon(center, poly);
                     if (allIn) {
                         for (int si = 0; si < 16 && allIn; si++) {
-                            double a = 2.0 * 3.14159265358979 * si / 16.0;
+                            double a = kTwoPiD * si / 16.0;
                             double ex = el.semiMajor * std::cos(a), ey = el.semiMinor * std::sin(a);
                             Point2D p = {center.x + ex*cosR - ey*sinR, center.y + ex*sinR + ey*cosR};
                             if (!pointInPolygon(p, poly)) allIn = false;
@@ -1555,10 +1549,7 @@ void App::handleToolAction(Sketch& sketch, Point2D localPos) {
 
             // Temporarily pin the start point so auto-constraints only move the new
             // free endpoint, leaving previously placed geometry undisturbed.
-            PointEntity* startPt = nullptr;
-            for (auto& pt : sketch.points) {
-                if (pt.id == startPtID) { startPt = &pt; break; }
-            }
+            PointEntity* startPt = sketch.findPoint(startPtID);
             bool wasPinned = startPt && startPt->projected;
             if (startPt) startPt->projected = true;
             lastSketchDof_ = solver_.solve(sketch).dof;
@@ -1643,31 +1634,7 @@ void App::handleSelection(Sketch& sketch, bool ctrlHeld) {
         Constraint* cc = sketch.findConstraint(dimHitID);
         if (cc && !ctrlHeld && in_.mouseDoubleClicked(MouseButton::Left)) {
             tool_.type = ToolType::Dimension;
-            dimTool_.reset();
-            dimTool_.phase = DimToolState::Editing;
-            dimTool_.constraintID = dimHitID;
-            dimTool_.editingExisting = true;
-            dimTool_.driven = cc->driven;
-            // Infer selType from constraint type
-            if (cc->type == ConstraintType::Distance)
-                dimTool_.selType = HitType::Line;
-            else if (cc->type == ConstraintType::Diameter || cc->type == ConstraintType::Radius)
-                dimTool_.selType = HitType::Circle;
-            else if (cc->type == ConstraintType::PointDistance || cc->type == ConstraintType::PointLineDistance)
-                dimTool_.selType = HitType::Point;
-            else if (cc->type == ConstraintType::Angle)
-                dimTool_.selType = HitType::Line;
-            dimTool_.entityA = cc->entityA;
-            dimTool_.entityB = cc->entityB;
-            dimTool_.measuredMm = f(cc->value);
-            // Fill input buffer with current value
-            if (cc->type == ConstraintType::Angle)
-                formatAngleText(dimTool_.inputBuf, sizeof(dimTool_.inputBuf), f(cc->value));
-            else if (!cc->inputUnit.empty())
-                snprintf(dimTool_.inputBuf, sizeof(dimTool_.inputBuf), "%.4g%s", cc->inputValue, cc->inputUnit.c_str());
-            else
-                snprintf(dimTool_.inputBuf, sizeof(dimTool_.inputBuf), "%.4gmm", cc->value);
-            dimTool_.focusNeeded = true;
+            beginEditDimension(*cc);
         }
         return;
     }

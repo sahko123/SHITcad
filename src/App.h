@@ -76,6 +76,8 @@ struct ToolbarModel {
     bool operator!=(const ToolbarModel& o) const { return !(*this == o); }
 };
 
+struct AppTestAccess; // tests/ToolFlowTest.cpp
+
 class App {
 public:
     // Called by the host once a GL context is current.
@@ -126,10 +128,16 @@ public:
         float maxExtMm = 0.0f;
         bool sizeSuspicious = false;     // outside what cip-sim will trace
         std::string blocked;             // why Import is unavailable right now, else empty
+        int skins = 0;
+        // Inside and outside of a solid's wall in one file (a skin is the
+        // outside of a wall, isWallOutside): offer to drop that outside.
+        bool solidWall = false;
+        bool keepInside = true;
     };
     MeshImportModel meshImportModel() const;
     void setMeshImportName(const std::string& name);
     void setMeshImportUnit(int unitIndex);
+    void setMeshImportKeepInside(bool keep);
     void confirmMeshImport();            // adds the feature, then opens placement
     void cancelMeshImport();
 
@@ -228,7 +236,6 @@ public:
         std::vector<Row> bodies;
     };
     ObjectTreeModel objectTreeModel() const;
-    bool objectTreeOpen() const { return objectTreeOpen_; }
     void setObjectTreeOpen(bool open) { objectTreeOpen_ = open; }
     void setPlaneVisible(int planeIndex, bool visible);
     void setSketchVisible(int planeIndex, bool visible);
@@ -369,10 +376,27 @@ public:
             bool active;               // not suppressed, rolled back or failed
             bool failed;               // its STL could not be loaded
             std::string errorMsg;
+            // Skins of the file (see MeshSkinInfo). Listed only when there is
+            // more than one, or one that is turned round.
+            struct Skin {
+                size_t triangles = 0;
+                float sizeMm[3] = {0, 0, 0};
+                bool closed = false;
+                bool cavity = false;       // closed and wound inward: the inside of a solid
+                bool wallOutside = false;  // the outside of a solid's wall (isWallOutside)
+                bool kept = true;
+                bool flipped = false;      // facing opposite to the file's winding
+                bool userFlipped = false;  // ... by the user rather than automatically
+            };
+            std::vector<Skin> skins;
+            std::string skinError;     // the choice no longer fits the file
+            bool hasSkinChoice = false;
+            bool showNormals = false;
         };
         std::vector<Surface> surfaces;
         bool placing = false;          // the next surface click places a nozzle
         float standoffMm = 0.0f;
+        int skinRevision = 0;          // changes when a skin edit was refused
         struct Nozzle { uint32_t id; std::string label; };
         std::vector<Nozzle> nozzles;
         uint32_t selected = 0;         // 0: none; the fields below describe it
@@ -387,6 +411,13 @@ public:
     };
     SimSetupModel simSetupModel() const;
     void setSurfaceRole(uint32_t meshFeature, int role);   // commits
+    // Skins of a mesh import. Each commits one undo step and replays. Hiding
+    // the last kept skin is refused.
+    void setSkinKept(uint32_t meshFeature, int skin, bool keep);
+    void flipSkin(uint32_t meshFeature, int skin);
+    void keepInsideOnly(uint32_t meshFeature);    // drop the outside of solid walls (isWallOutside)
+    void resetSkins(uint32_t meshFeature);        // all skins, automatic facing
+    void setNormalsShown(uint32_t meshFeature, bool show); // view only: arrows on the kept skins
     void setNozzlePlacing(bool placing) { simUi_.placing = placing; }
     void setNozzleStandoff(float mm) { simUi_.standoffMm = std::max(0.0f, mm); }
     void selectNozzle(uint32_t id) { simUi_.selectedNozzle = id; }
@@ -403,6 +434,29 @@ public:
     void setSimulationBounces(int bounces);                      // live
     void commitSimulationEdit();
     void exportSimulationSpecDialog();
+
+    // ---- CFD case: the spec handed to cip-sim's case generator, which writes
+    // an OpenFOAM case inside WSL (and meshes it, if asked). Independent of
+    // the Tier 1 run: either can go while the other does.
+    struct CfdCaseModel {
+        std::string casesDir;          // WSL folder the cases go in, e.g. ~/cip-work
+        bool mesh = true;              // mesh it straight away
+        std::string problem;           // why it cannot start, empty if it can
+        bool running = false, done = false, cancelled = false;
+        double seconds = 0;
+        std::string status;            // latest progress line
+        std::string error;
+        std::vector<std::string> warnings;
+        std::string caseDir;           // the case, as Windows sees it (\\wsl.localhost\...)
+        std::string casePosix;         // ... and inside WSL
+        std::string summary;           // surfaces and, if meshed, the mesh
+    };
+    CfdCaseModel cfdCaseModel();       // not const: loads the engine settings on first use
+    void setCfdCasesDir(const std::string& dir);   // saved per machine
+    void setCfdMesh(bool mesh) { cfd_.mesh = mesh; }
+    void startCfdCase();
+    void cancelCfdCase();
+    void openCfdCaseFolder();
 
     struct SimRunModel {
         std::string cipSimPath, python;
@@ -486,23 +540,19 @@ public:
     void finishSketch(bool recordFeature = true);
 
     void enterExtrudeMode();
-    bool isExtrudeActive() const { return tool_.type == ToolType::Extrude; }
 
     void enterRevolveMode();
-    bool isRevolveActive() const { return tool_.type == ToolType::Revolve; }
 
     void enterLoftMode();
-    bool isLoftActive() const { return tool_.type == ToolType::Loft; }
 
     void enterBooleanMode(BooleanOperation op);
     bool isBooleanActive() const { return tool_.type == ToolType::BooleanUnion || tool_.type == ToolType::BooleanSubtract; }
 
-    static constexpr int kXYPlane = 0;
-    static constexpr int kXZPlane = 1;
-    static constexpr int kYZPlane = 2;
     static constexpr int kRefPlaneCount = 3;
 
 private:
+    friend struct AppTestAccess;
+
     AppHost* host_ = nullptr;
     int fbW_ = 0, fbH_ = 0;               // framebuffer size for this frame
     std::vector<std::function<void()>> posted_;
@@ -606,6 +656,7 @@ private:
         std::string path;
         char nameBuf[128] = {};
         int unitIndex = 1; // index into kUnits; 1 = mm
+        bool keepInside = true;
         MeshFileInfo info;
         std::string error;
         void reset() { *this = {}; }
@@ -660,8 +711,11 @@ private:
         std::vector<std::string> warnings;
         float sceneExtentMm = 1000.0f; // cached for cone display length
         size_t sceneExtentKey = 0;
+        std::set<uint32_t> normalsShown; // mesh imports drawing their normal arrows
+        int skinRevision = 0;            // bumped when a skin edit is refused, so the panel resets its boxes
     };
     SimUiState simUi_;
+    void setMeshSkinChoice(uint32_t meshFeature, const MeshSkinChoice& skins); // one undo step
     GLuint simLineVAO_ = 0;
     GLuint simLineVBO_ = 0;
 
@@ -670,6 +724,7 @@ private:
     struct SimEngineSettings {
         std::string cipSimPath;        // cip-sim repository root
         std::string python = "python";
+        std::string cfdCasesDir = "~/cip-work"; // inside WSL: OpenFOAM is slow on /mnt/c
         bool loaded = false;
     };
     SimEngineSettings simEngine_;
@@ -686,6 +741,19 @@ private:
     double simRunStart_ = 0.0;
     double simRunEnd_ = 0.0;
     RunSummary simSummary_;
+
+    // CFD case generation in progress or just finished (see CfdCaseModel).
+    struct CfdCaseState {
+        SimPhase phase = SimPhase::Idle;
+        bool mesh = true;
+        std::string status, error, caseDir, casePosix, summary;
+        std::vector<std::string> warnings;
+        double start = 0.0, end = 0.0;
+    };
+    CfdCaseState cfd_;
+    ProcessRunner cfdRunner_;
+    void pollCfdCase();
+    std::string simRunBase() const;    // where run folders go: beside the project, else %TEMP%
 
     ProcessRunner paraviewLauncher_;
     std::string paraviewMessage_;
@@ -770,24 +838,30 @@ private:
     void handleDeletion(Sketch& sketch);
     void syncDimensionLive();          // typed dimension value into its constraint, every frame
     void handleDimToolClick(Sketch& sketch);
+    void beginEditDimension(const Constraint& cc);   // dimension tool: edit this constraint
     bool deleteSelectedFeature();      // the Delete key on the timeline selection
     void replayAllFeatures();
     void globalUndo();
     void globalRedo();
     void handleExtrudeInput(float vpW, float vpH);
     void updateExtrudePreview();
-    void renderExtrudePreview(const float* view, const float* proj, const float* eyePos);
     void renderExtrudeHandle(const float* view, const float* proj, float vpW, float vpH);
     void renderDimensions(const float view[16], const float proj[16], float vpW, float vpH);
     void editExtrudeFeature(FeatureID id);
     void handleRevolveInput(float vpW, float vpH);
     void updateRevolvePreview();
-    void renderRevolvePreview(const float* view, const float* proj, const float* eyePos);
     void editRevolveFeature(FeatureID id);
     void handleLoftInput(float vpW, float vpH);
     void updateLoftPreview();
-    void renderLoftPreview(const float* view, const float* proj, const float* eyePos);
     void editLoftFeature(FeatureID id);
+    // Plumbing shared by the Extrude, Revolve and Loft tools (AppFeatureTool.cpp)
+    bool findProfilePlane(int& planeIdx, std::vector<ClosedProfile>& profiles);
+    bool loadSourceSketch(FeatureID srcSketch, int& planeIdx, std::vector<ClosedProfile>& profiles);
+    void beginProfileTool(ToolType type, ProfileToolBase& t, int planeIdx, std::vector<ClosedProfile> profiles);
+    FeatureID ensureSketchFeature(int planeIdx);
+    void setToolPreview(FeatureToolBase& t, const TopoDS_Shape& shape);
+    void renderToolPreview(const FeatureToolBase& t, const float* view, const float* proj, const float* eyePos);
+    void finishFeatureTool(bool cancelled);
     void handleBooleanInput(float vpW, float vpH);
     void updateBooleanPreview();
     void renderBooleanPreview(const float* view, const float* proj, const float* eyePos);

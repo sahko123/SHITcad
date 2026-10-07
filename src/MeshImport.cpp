@@ -1,4 +1,5 @@
 #include "MeshImport.h"
+#include "Constants.h"
 #include "UnitUtils.h"
 #include "Utf8Path.h"
 
@@ -8,6 +9,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <filesystem>
 #include <array>
 #include <map>
@@ -39,7 +41,7 @@ void axisRotation(int axis, double degrees, double out[9]) {
         c = cs[k][0];
         s = cs[k][1];
     } else {
-        const double rad = degrees * 3.14159265358979323846 / 180.0;
+        const double rad = degrees * kDegToRadD;
         c = std::cos(rad);
         s = std::sin(rad);
     }
@@ -145,7 +147,122 @@ struct CachedMesh {
     std::string error;           // the read failed; cached so it is not retried until the file changes
     std::vector<MeshVertex> raw; // unscaled, with per-face normals
     MeshFileInfo info;
+    std::vector<uint32_t> skinOf; // skin index per triangle
+    // resolveSkins results by point list. The spec is rebuilt every frame (the
+    // stale-results check), and each resolve is a pass over every triangle.
+    mutable std::map<std::vector<std::array<double, 3>>, std::pair<std::vector<int>, std::string>> resolved;
 };
+
+// Split into skins: triangles that share a vertex are one skin. Welds by exact
+// coordinates, as cip-sim does, so both sides see the same skins.
+void findSkins(CachedMesh& m) {
+    const size_t nt = m.info.triangleCount;
+    std::map<std::array<float, 3>, uint32_t> ids;
+    std::vector<uint32_t> vert(nt * 3);
+    for (size_t i = 0; i < nt * 3; i++) {
+        const MeshVertex& v = m.raw[i];
+        // + 0.0f folds -0 into +0: equal coordinates, different bits.
+        const std::array<float, 3> key{v.px + 0.0f, v.py + 0.0f, v.pz + 0.0f};
+        vert[i] = ids.emplace(key, (uint32_t)ids.size()).first->second;
+    }
+
+    std::vector<uint32_t> parent(ids.size());
+    for (uint32_t i = 0; i < parent.size(); i++) parent[i] = i;
+    auto find = [&](uint32_t a) {
+        while (parent[a] != a) a = parent[a] = parent[parent[a]];
+        return a;
+    };
+    for (size_t t = 0; t < nt; t++)
+        for (int k = 1; k < 3; k++) {
+            const uint32_t a = find(vert[t * 3]), b = find(vert[t * 3 + k]);
+            if (a != b) parent[std::max(a, b)] = std::min(a, b);
+        }
+
+    // Number skins in order of their first triangle.
+    std::map<uint32_t, uint32_t> skinOfRoot;
+    m.skinOf.resize(nt);
+    for (size_t t = 0; t < nt; t++) {
+        auto it = skinOfRoot.emplace(find(vert[t * 3]), (uint32_t)skinOfRoot.size()).first;
+        m.skinOf[t] = it->second;
+        if (it->second == m.info.skins.size()) {
+            MeshSkinInfo s;
+            s.firstTriangle = t;
+            for (int k = 0; k < 3; k++) {
+                s.rawMin[k] = 1e30f;
+                s.rawMax[k] = -1e30f;
+            }
+            const MeshVertex* p = &m.raw[t * 3];
+            s.point[0] = ((double)p[0].px + p[1].px + p[2].px) / 3.0;
+            s.point[1] = ((double)p[0].py + p[1].py + p[2].py) / 3.0;
+            s.point[2] = ((double)p[0].pz + p[1].pz + p[2].pz) / 3.0;
+            s.closed = true;
+            m.info.skins.push_back(s);
+        }
+    }
+
+    std::map<std::pair<uint32_t, uint32_t>, int> edges;
+    for (size_t t = 0; t < nt; t++) {
+        MeshSkinInfo& s = m.info.skins[m.skinOf[t]];
+        s.triangleCount++;
+        const MeshVertex* p = &m.raw[t * 3];
+        for (int c = 0; c < 3; c++) {
+            const float q[3] = {p[c].px, p[c].py, p[c].pz};
+            for (int k = 0; k < 3; k++) {
+                s.rawMin[k] = std::min(s.rawMin[k], q[k]);
+                s.rawMax[k] = std::max(s.rawMax[k], q[k]);
+            }
+        }
+        // Divergence theorem: the sum of signed tetrahedra to the origin.
+        const double a[3] = {p[0].px, p[0].py, p[0].pz}, b[3] = {p[1].px, p[1].py, p[1].pz},
+                     c[3] = {p[2].px, p[2].py, p[2].pz};
+        s.signedVolume += (a[0] * (b[1] * c[2] - b[2] * c[1]) - a[1] * (b[0] * c[2] - b[2] * c[0]) +
+                           a[2] * (b[0] * c[1] - b[1] * c[0])) / 6.0;
+        for (int e = 0; e < 3; e++) {
+            const uint32_t u = vert[t * 3 + e], v = vert[t * 3 + (e + 1) % 3];
+            if (u == v) s.closed = false;   // degenerate
+            else edges[{std::min(u, v), std::max(u, v)}]++;
+        }
+    }
+    // An edge's skin is its vertex's skin, which the root map gives directly.
+    for (const auto& [e, count] : edges)
+        if (count != 2) m.info.skins[skinOfRoot[find(e.first)]].closed = false;
+}
+
+// Closest point on triangle abc to p (Ericson, Real-Time Collision Detection 5.1.5).
+double distanceToTriangle(const double p[3], const double a[3], const double b[3], const double c[3]) {
+    auto sub = [](const double* x, const double* y, double* o) { for (int i = 0; i < 3; i++) o[i] = x[i] - y[i]; };
+    auto dot = [](const double* x, const double* y) { return x[0] * y[0] + x[1] * y[1] + x[2] * y[2]; };
+    double ab[3], ac[3], ap[3], q[3];
+    sub(b, a, ab);
+    sub(c, a, ac);
+    sub(p, a, ap);
+    auto at = [&](double v, double w) { for (int i = 0; i < 3; i++) q[i] = a[i] + ab[i] * v + ac[i] * w; };
+    const double d1 = dot(ab, ap), d2 = dot(ac, ap);
+    if (d1 <= 0 && d2 <= 0) at(0, 0);
+    else {
+        double bp[3];
+        sub(p, b, bp);
+        const double d3 = dot(ab, bp), d4 = dot(ac, bp);
+        double cp[3];
+        sub(p, c, cp);
+        const double d5 = dot(ab, cp), d6 = dot(ac, cp);
+        const double vc = d1 * d4 - d3 * d2, vb = d5 * d2 - d1 * d6, va = d3 * d6 - d5 * d4;
+        if (d3 >= 0 && d4 <= d3) at(1, 0);
+        else if (vc <= 0 && d1 >= 0 && d3 <= 0) at(d1 / (d1 - d3), 0);
+        else if (d6 >= 0 && d5 <= d6) at(0, 1);
+        else if (vb <= 0 && d2 >= 0 && d6 <= 0) at(0, d2 / (d2 - d6));
+        else if (va <= 0 && (d4 - d3) >= 0 && (d5 - d6) >= 0) {
+            const double w = (d4 - d3) / ((d4 - d3) + (d5 - d6));
+            at(1 - w, w);
+        } else {
+            const double denom = 1.0 / (va + vb + vc);
+            at(vb * denom, vc * denom);
+        }
+    }
+    double d[3];
+    sub(p, q, d);
+    return std::sqrt(dot(d, d));
+}
 
 // One entry per path. Bounded by the number of distinct files a project
 // references, which is small, so no eviction.
@@ -233,7 +350,14 @@ std::shared_ptr<const CachedMesh> readCached(const std::string& path, std::strin
         mesh->info.rawMin[k] = lo[k];
         mesh->info.rawMax[k] = hi[k];
     }
-    mesh->info.closed = trianglesAreClosed(&mesh->raw[0].px, mesh->info.triangleCount);
+    // trianglesAreClosed takes packed positions. `raw` interleaves normals, and
+    // passing it directly (as this once did) read normals as corners, so an
+    // imported STL's watertightness - and with it section capping - was noise.
+    std::vector<float> xyz;
+    xyz.reserve(mesh->raw.size() * 3);
+    for (const MeshVertex& v : mesh->raw) xyz.insert(xyz.end(), {v.px, v.py, v.pz});
+    mesh->info.closed = trianglesAreClosed(xyz.data(), mesh->info.triangleCount);
+    findSkins(*mesh);
 
     cache()[path] = mesh;
     return mesh;
@@ -289,6 +413,142 @@ bool loadMeshFile(const std::string& path, const std::string& unit,
         const MeshVertex& r = mesh->raw[i];
         outMm[i] = {r.px * s, r.py * s, r.pz * s, r.nx, r.ny, r.nz};
     }
+    return true;
+}
+
+namespace {
+
+bool resolveIn(const CachedMesh& mesh, const std::string& path,
+               const std::vector<std::array<double, 3>>& points, std::vector<int>& out, std::string& error) {
+    auto hit = mesh.resolved.find(points);
+    if (hit == mesh.resolved.end()) {
+        std::vector<int> found;
+        std::string err;
+        double diag = 0;
+        for (int k = 0; k < 3; k++) {
+            const double d = (double)mesh.info.rawMax[k] - mesh.info.rawMin[k];
+            diag += d * d;
+        }
+        const double tol = kSkinPointTolerance * std::sqrt(diag);
+        for (const auto& p : points) {
+            // Nearest distance to each skin, so the runner-up is known too.
+            std::vector<double> dist(mesh.info.skins.size(), 1e300);
+            for (size_t t = 0; t < mesh.info.triangleCount; t++) {
+                const MeshVertex* v = &mesh.raw[t * 3];
+                const double a[3] = {v[0].px, v[0].py, v[0].pz}, b[3] = {v[1].px, v[1].py, v[1].pz},
+                             c[3] = {v[2].px, v[2].py, v[2].pz};
+                double& n = dist[mesh.skinOf[t]];
+                n = std::min(n, distanceToTriangle(p.data(), a, b, c));
+            }
+            const size_t k = (size_t)(std::min_element(dist.begin(), dist.end()) - dist.begin());
+            double second = 1e300;
+            for (size_t j = 0; j < dist.size(); j++)
+                if (j != k) second = std::min(second, dist[j]);
+            char buf[200] = {};
+            if (dist[k] > tol)
+                snprintf(buf, sizeof(buf), "a chosen skin is %.4g (file units) off the geometry", dist[k]);
+            else if (dist.size() > 1 && dist[k] > kSkinPointAmbiguity * second)
+                snprintf(buf, sizeof(buf), "a chosen skin point is %.4g from one skin and %.4g from another, "
+                         "too close to both to say which was meant", dist[k], second);
+            if (buf[0]) {
+                err = std::string(buf) + " - " + path + " has changed since its skins were picked. Pick them again.";
+                found.clear();
+                break;
+            }
+            found.push_back((int)k);
+        }
+        hit = mesh.resolved.emplace(points, std::make_pair(std::move(found), std::move(err))).first;
+    }
+    if (!hit->second.second.empty()) {
+        error = hit->second.second;
+        return false;
+    }
+    out = hit->second.first;
+    return true;
+}
+
+bool statesIn(const CachedMesh& mesh, const std::string& path, const MeshSkinChoice& choice,
+              std::vector<MeshSkinState>& out, std::string& error) {
+    const auto& skins = mesh.info.skins;
+    out.assign(skins.size(), MeshSkinState{});
+    if (!choice.keep.empty()) {
+        std::vector<int> keep;
+        if (!resolveIn(mesh, path, choice.keep, keep, error)) return false;
+        for (auto& st : out) st.kept = false;
+        for (int k : keep) out[k].kept = true;
+    }
+    if (!choice.flip.empty()) {
+        std::vector<int> flip;
+        if (!resolveIn(mesh, path, choice.flip, flip, error)) return false;
+        for (int k : flip) out[k].userFlipped = !out[k].userFlipped; // two points on one skin cancel
+    }
+    for (size_t k = 0; k < skins.size(); k++) out[k].flipped = skinAutoFlipped(skins[k]) != out[k].userFlipped;
+    return true;
+}
+
+} // namespace
+
+bool isWallOutside(const MeshFileInfo& info, size_t skin) {
+    if (skin >= info.skins.size()) return false;
+    const MeshSkinInfo& s = info.skins[skin];
+    if (!s.closed || s.signedVolume <= 0.0) return false;
+    for (size_t j = 0; j < info.skins.size(); j++) {
+        const MeshSkinInfo& c = info.skins[j];
+        if (j == skin || !c.isCavity()) continue;
+        bool inside = true;
+        for (int k = 0; k < 3; k++) inside = inside && c.rawMin[k] >= s.rawMin[k] && c.rawMax[k] <= s.rawMax[k];
+        if (inside) return true;
+    }
+    return false;
+}
+
+bool resolveSkins(const std::string& path, const std::vector<std::array<double, 3>>& points,
+                  std::vector<int>& out, std::string& error) {
+    auto mesh = readCached(path, error);
+    return mesh && resolveIn(*mesh, path, points, out, error);
+}
+
+bool skinStates(const std::string& path, const MeshSkinChoice& choice,
+                std::vector<MeshSkinState>& out, std::string& error) {
+    auto mesh = readCached(path, error);
+    return mesh && statesIn(*mesh, path, choice, out, error);
+}
+
+bool loadMeshFile(const std::string& path, const std::string& unit, const MeshSkinChoice& skins,
+                  std::vector<MeshVertex>& outMm, MeshFileInfo& info, std::string& error) {
+    const UnitInfo* u = findLengthUnit(unit);
+    if (!u) {
+        error = "Unknown unit '" + unit + "'";
+        return false;
+    }
+    auto mesh = readCached(path, error);
+    if (!mesh) return false;
+    std::vector<MeshSkinState> st;
+    if (!statesIn(*mesh, path, skins, st, error)) return false;
+
+    info = mesh->info;
+    const float s = u->toMm;
+    outMm.clear();
+    outMm.reserve(mesh->raw.size());
+    bool allClosed = true, any = false;
+    for (size_t t = 0; t < info.triangleCount; t++) {
+        const MeshSkinState& k = st[mesh->skinOf[t]];
+        if (!k.kept) continue;
+        any = true;
+        allClosed = allClosed && info.skins[mesh->skinOf[t]].closed;
+        const MeshVertex* r = &mesh->raw[t * 3];
+        const float sign = k.flipped ? -1.0f : 1.0f;
+        // Rewound, not only renormalised: the picker and the section cap work
+        // the facing out from the winding.
+        const int order[3] = {0, k.flipped ? 2 : 1, k.flipped ? 1 : 2};
+        for (int c : order)
+            outMm.push_back({r[c].px * s, r[c].py * s, r[c].pz * s, r[c].nx * sign, r[c].ny * sign, r[c].nz * sign});
+    }
+    // Every skin kept: keep the whole-file verdict, which welds with a
+    // tolerance and so forgives an ASCII export's rounding.
+    bool all = true;
+    for (const auto& k : st) all = all && k.kept;
+    if (!all) info.closed = any && allClosed;
     return true;
 }
 

@@ -1,4 +1,5 @@
 #include "Viewport3D.h"
+#include "Constants.h"
 #include "Preferences.h"
 #include "Section.h"
 #include <cstring>
@@ -9,8 +10,6 @@ namespace shitcad {
 
 // ---- Math helpers ----
 
-static constexpr float kPi = 3.14159265358979323846f;
-static float toRad(float deg) { return deg * kPi / 180.0f; }
 
 static void mat4Identity(float* m) {
     memset(m, 0, 16 * sizeof(float));
@@ -19,7 +18,7 @@ static void mat4Identity(float* m) {
 
 void makePerspective(float* out, float fovDeg, float aspect, float nearP, float farP) {
     memset(out, 0, 16 * sizeof(float));
-    float f = 1.0f / std::tan(toRad(fovDeg) * 0.5f);
+    float f = 1.0f / std::tan(fovDeg * kDegToRad * 0.5f);
     out[0] = f / aspect;
     out[5] = f;
     out[10] = (farP + nearP) / (nearP - farP);
@@ -44,7 +43,7 @@ void OrbitCamera::setOrthographic(bool on) {
     if (orthographic == on) return;
     // Visible half-height at the target: `distance` in ortho,
     // distance * tan(fov / 2) in perspective.
-    const float k = std::tan(toRad(45.0f) * 0.5f);
+    const float k = std::tan(45.0f * kDegToRad * 0.5f);
     distance = on ? distance * k : distance / k;
     orthographic = on;
 }
@@ -62,12 +61,12 @@ void OrbitCamera::pan(float dx, float dy, float viewportW, float viewportH) {
         // In ortho, visible height = distance (used as ortho half-height)
         scale = 2.0f * distance / viewportH;
     } else {
-        float fovRad = toRad(45.0f);
+        float fovRad = 45.0f * kDegToRad;
         scale = 2.0f * distance * std::tan(fovRad * 0.5f) / viewportH;
     }
 
-    float yawR = toRad(yaw);
-    float pitchR = toRad(pitch);
+    float yawR = yaw * kDegToRad;
+    float pitchR = pitch * kDegToRad;
 
     // Camera right vector
     float rightX = std::cos(yawR);
@@ -91,8 +90,8 @@ void OrbitCamera::zoom(float delta) {
 }
 
 void OrbitCamera::getEyePosition(float* out) const {
-    float yawR = toRad(yaw);
-    float pitchR = toRad(pitch);
+    float yawR = yaw * kDegToRad;
+    float pitchR = pitch * kDegToRad;
     out[0] = targetX + distance * std::cos(pitchR) * std::sin(yawR);
     out[1] = targetY + distance * std::sin(pitchR);
     out[2] = targetZ + distance * std::cos(pitchR) * std::cos(yawR);
@@ -110,7 +109,7 @@ void OrbitCamera::getViewMatrix(float* out) const {
     fx /= flen; fy /= flen; fz /= flen;
 
     // Right vector derived from yaw (always horizontal, no flip)
-    float yawR = toRad(yaw);
+    float yawR = yaw * kDegToRad;
     float sx = std::cos(yawR);
     float sy = 0.0f;
     float sz = -std::sin(yawR);
@@ -131,10 +130,10 @@ void OrbitCamera::getViewMatrix(float* out) const {
 }
 
 int OrbitCamera::viewAxis() const {
-    const float yawR = toRad(yaw), pitchR = toRad(pitch);
+    const float yawR = yaw * kDegToRad, pitchR = pitch * kDegToRad;
     const float dir[3] = {std::cos(pitchR) * std::sin(yawR), std::sin(pitchR),
                           std::cos(pitchR) * std::cos(yawR)};
-    const float kAligned = std::cos(toRad(1.0f));
+    const float kAligned = std::cos(1.0f * kDegToRad);
     for (int a = 0; a < 3; a++)
         if (std::fabs(dir[a]) >= kAligned) return a;
     return -1;
@@ -317,7 +316,7 @@ void Viewport3D::drawBackground(const float* view, float aspect) {
     // Spread over a 90-degree field rather than the camera's 45, so the
     // horizon stays on screen for most orbit angles (level views still put it
     // through the centre). Nothing drawn sits at infinity to disagree.
-    const float t = std::tan(toRad(90.0f) * 0.5f);
+    const float t = std::tan(90.0f * kDegToRad * 0.5f);
     backgroundShader_.use();
     backgroundShader_.setVec3("uRight", view[0], view[4], view[8]);
     backgroundShader_.setVec3("uUp", view[1], view[5], view[9]);
@@ -373,7 +372,7 @@ void Viewport3D::drawGrid(const float* view, const float* proj, float viewportW,
     // World size of a pixel at the orbit target.
     const float mmPerPx = camera_.orthographic
         ? 2.0f * camera_.distance / viewportH
-        : 2.0f * camera_.distance * std::tan(toRad(45.0f) * 0.5f) / viewportH;
+        : 2.0f * camera_.distance * std::tan(45.0f * kDegToRad * 0.5f) / viewportH;
 
     const float axisColor[3][3] = {{0.7f, 0.2f, 0.2f}, {0.2f, 0.7f, 0.2f}, {0.2f, 0.2f, 0.7f}};
     const auto& theme = activeTheme();

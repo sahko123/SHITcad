@@ -59,22 +59,7 @@ public:
             }
         }
         fprintf(stderr, "\n");
-        spikeCount_++;
     }
-
-    void setBudgetMs(float ms) { budgetMs_ = ms; }
-    float budgetMs() const { return budgetMs_; }
-    int spikeCount() const { return spikeCount_; }
-    void resetSpikeCount() { spikeCount_ = 0; }
-
-    // Access last frame's section data (for overlay display)
-    int lastSectionCount() const { return sectionCount_; }
-    const char* lastSectionName(int i) const { return sections_[i].name; }
-    float lastSectionMs(int i) const { return sections_[i].durationMs; }
-    int lastSectionDepth(int i) const { return sections_[i].depth; }
-    float lastFrameMs() const { return elapsedMs(frameStart_, lastFrameEnd_); }
-
-    void recordFrameEnd() { lastFrameEnd_ = now(); }
 
 private:
     using Clock = std::chrono::steady_clock;
@@ -97,9 +82,7 @@ private:
     int stack_[kMaxDepth] = {};
     int stackDepth_ = 0;
     TimePoint frameStart_;
-    TimePoint lastFrameEnd_;
     float budgetMs_ = kDefaultBudgetMs;
-    int spikeCount_ = 0;
 };
 
 } // namespace shitcad

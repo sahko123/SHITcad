@@ -20,6 +20,7 @@
 #include <QToolButton>
 #include <QVBoxLayout>
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 
@@ -192,6 +193,7 @@ SimulationPanel::SimulationPanel(App& app, QWidget* parent) : QDockWidget("Simul
     col->addWidget(section("Run", buildRun(), true, content));
     results_ = section("Results", buildResults(), true, content);
     col->addWidget(results_);
+    col->addWidget(section("CFD case (OpenFOAM)", buildCfd(), false, content));
     auto* exportSpec = new QPushButton("Export spec...", content);
     exportSpec->setFocusPolicy(Qt::NoFocus);
     connect(exportSpec, &QPushButton::clicked, this, [a] { a->post([a] { a->exportSimulationSpecDialog(); }); });
@@ -489,16 +491,107 @@ void SimulationPanel::refresh() {
     refreshSetup(setup);
     refreshRun(app_.simRunModel());
     refreshResults(app_.simResultsModel());
+    refreshCfd(app_.cfdCaseModel());
     if (viewBody_->isVisible()) section_->refresh(app_.sectionModel());
+}
+
+// The skins of one import: keep / flip each, normal arrows, and the shortcut
+// for a solid-wall export (keep only its inside). Rebuilt with the row.
+void SimulationPanel::addSkinRows(QVBoxLayout* rc, QWidget* row, const App::SimSetupModel::Surface& s) {
+    App* a = &app_;
+    const uint32_t feature = s.feature;
+    auto* tools = new QHBoxLayout;
+    tools->setContentsMargins(12, 0, 0, 0);
+    auto* normals = new QCheckBox("Show normals", row);
+    normals->setFocusPolicy(Qt::NoFocus);
+    normals->setChecked(s.showNormals);
+    normals->setToolTip("Arrows on the kept skins, pointing away from the fluid. A nozzle placed on a "
+                        "surface sprays against them.");
+    connect(normals, &QCheckBox::toggled, this, [a, feature](bool on) { a->post([a, feature, on] { a->setNormalsShown(feature, on); }); });
+    tools->addWidget(normals);
+    tools->addStretch(1);
+    if (!s.skinError.empty() || s.hasSkinChoice) {
+        auto* reset = new QPushButton("Reset skins", row);
+        reset->setFocusPolicy(Qt::NoFocus);
+        reset->setToolTip("Keep every skin, each facing the automatic way.");
+        connect(reset, &QPushButton::clicked, this, [a, feature] { a->post([a, feature] { a->resetSkins(feature); }); });
+        tools->addWidget(reset);
+    }
+    rc->addLayout(tools);
+    if (!s.skinError.empty()) {
+        rc->addWidget(note(QString("  skins: %1").arg(QString::fromStdString(s.skinError)), row, "#d05050"));
+        return;
+    }
+    if (s.skins.empty()) return;
+
+    // Offered while the outside of a solid wall is still shown, or the choice
+    // differs from "everything but the outside".
+    bool outsideShown = false, asOffered = true;
+    for (const auto& k : s.skins) {
+        outsideShown = outsideShown || (k.wallOutside && k.kept);
+        asOffered = asOffered && k.kept == !k.wallOutside;
+    }
+    if (outsideShown || (!asOffered && std::any_of(s.skins.begin(), s.skins.end(),
+                                                    [](const auto& k) { return k.wallOutside; }))) {
+        auto* shortcut = new QPushButton("Keep the inside only", row);
+        shortcut->setFocusPolicy(Qt::NoFocus);
+        shortcut->setToolTip("This file is a solid: the outside of the wall and the inside (the cavity) in one STL. "
+                             "Hides the outside of the wall; the cavity and any internals stay.");
+        connect(shortcut, &QPushButton::clicked, this, [a, feature] { a->post([a, feature] { a->keepInsideOnly(feature); }); });
+        auto* line = new QHBoxLayout;
+        line->setContentsMargins(12, 0, 0, 0);
+        line->addWidget(shortcut);
+        line->addStretch(1);
+        rc->addLayout(line);
+    }
+
+    for (int i = 0; i < (int)s.skins.size(); i++) {
+        const auto& k = s.skins[i];
+        auto* line = new QHBoxLayout;
+        line->setContentsMargins(12, 0, 0, 0);
+        const QString what = k.cavity ? "inside of a solid" : k.wallOutside ? "outside of a solid"
+                           : k.closed ? "closed" : "open";
+        auto* keep = new QCheckBox(QString("Skin %1: %2 x %3 x %4 mm, %5")
+                                       .arg(i + 1)
+                                       .arg(k.sizeMm[0], 0, 'f', 0)
+                                       .arg(k.sizeMm[1], 0, 'f', 0)
+                                       .arg(k.sizeMm[2], 0, 'f', 0)
+                                       .arg(what), row);
+        keep->setFocusPolicy(Qt::NoFocus);
+        keep->setChecked(k.kept);
+        keep->setToolTip(QString("%1 triangles. Unticked skins are not drawn, picked or simulated.").arg(k.triangles));
+        connect(keep, &QCheckBox::toggled, this, [a, feature, i](bool on) { a->post([a, feature, i, on] { a->setSkinKept(feature, i, on); }); });
+        line->addWidget(keep, 1);
+        auto* flip = new QPushButton(k.userFlipped ? "Flip*" : "Flip", row);
+        flip->setFocusPolicy(Qt::NoFocus);
+        flip->setEnabled(k.kept);
+        flip->setToolTip(k.userFlipped ? "Turned round by hand. Click to go back to the automatic facing."
+                                       : k.flipped ? "Turned round automatically (an inward-wound cavity). Click to override."
+                                                   : "Facing as the file winds it. Click to turn it round.");
+        connect(flip, &QPushButton::clicked, this, [a, feature, i] { a->post([a, feature, i] { a->flipSkin(feature, i); }); });
+        line->addWidget(flip);
+        rc->addLayout(line);
+    }
 }
 
 void SimulationPanel::refreshSetup(const App::SimSetupModel& m) {
     App* a = &app_;
 
-    // Surfaces: rows rebuilt when the set of imports changes
+    // Surfaces: rows rebuilt when the set of imports or their skins change
     std::string key;
-    for (const auto& s : m.surfaces)
-        key += std::to_string(s.feature) + ":" + s.name + (s.active ? "+" : "-") + (s.failed ? "!" + s.errorMsg : "") + "\n";
+    for (const auto& s : m.surfaces) {
+        key += std::to_string(s.feature) + ":" + s.name + (s.active ? "+" : "-") + (s.failed ? "!" + s.errorMsg : "");
+        key += "r" + std::to_string(m.skinRevision) + (s.showNormals ? "N" : "n") + std::string(s.hasSkinChoice ? "C" : "c") + s.skinError;
+        // Sizes and counts too: a unit change relabels the rows, and a
+        // re-export with the same kept/flipped pattern renumbers the skins the
+        // rows' buttons act on.
+        for (const auto& k : s.skins)
+            key += std::string(k.kept ? "K" : "k") + (k.flipped ? "F" : "f") + (k.userFlipped ? "U" : "u") +
+                   std::to_string(k.triangles) + "/" + std::to_string((long long)std::lround(k.sizeMm[0] * 100)) + "," +
+                   std::to_string((long long)std::lround(k.sizeMm[1] * 100)) + "," +
+                   std::to_string((long long)std::lround(k.sizeMm[2] * 100)) + ";";
+        key += "\n";
+    }
     if (key != shownSurfaces_) {
         shownSurfaces_ = key;
         roleCombos_.clear();
@@ -522,6 +615,7 @@ void SimulationPanel::refreshSetup(const App::SimSetupModel& m) {
             rc->addLayout(h);
             if (s.failed) rc->addWidget(note(QString("  left out: %1").arg(QString::fromStdString(s.errorMsg)), row, "#d05050"));
             else if (!s.active) rc->addWidget(note("  left out: suppressed or rolled back", row));
+            addSkinRows(rc, row, s);
             surfaceRows_->addWidget(row);
             roleCombos_.push_back(role);
         }
@@ -603,6 +697,84 @@ void SimulationPanel::refreshSetup(const App::SimSetupModel& m) {
     }
     message_->setVisible(!msg.isEmpty());
     setLabel(message_, msg);
+}
+
+// The set-up as an OpenFOAM case: cip-sim writes it (and meshes it) inside WSL.
+// Solving stays outside SHITcad - it runs for hours.
+QWidget* SimulationPanel::buildCfd() {
+    auto* body = new QWidget;
+    auto* col = new QVBoxLayout(body);
+    col->setContentsMargins(0, 0, 0, 0);
+    App* a = &app_;
+    col->addWidget(note("Writes the surfaces (by role) and nozzles as an OpenFOAM spray + film case. "
+                        "Needs an inlet or drain surface: liquid has to be able to leave.", body));
+    col->addWidget(new QLabel("Cases go in (inside WSL)", body));
+    cfdDir_ = new QLineEdit(body);
+    cfdDir_->setToolTip("A folder inside WSL; ~ is the WSL home. OpenFOAM is far slower on /mnt/c.");
+    connect(cfdDir_, &QLineEdit::editingFinished, this, [this, a] {
+        const std::string d = cfdDir_->text().toUtf8().toStdString();
+        a->post([a, d] { a->setCfdCasesDir(d); });
+    });
+    col->addWidget(cfdDir_);
+    cfdMesh_ = new QCheckBox("Mesh it as well (about a minute for a small vessel)", body);
+    cfdMesh_->setFocusPolicy(Qt::NoFocus);
+    connect(cfdMesh_, &QCheckBox::toggled, this, [a](bool on) { a->post([a, on] { a->setCfdMesh(on); }); });
+    col->addWidget(cfdMesh_);
+    cfdButton_ = new QPushButton("Generate CFD case", body);
+    cfdCancel_ = new QPushButton("Cancel", body);
+    for (auto* b : {cfdButton_, cfdCancel_}) b->setFocusPolicy(Qt::NoFocus);
+    connect(cfdButton_, &QPushButton::clicked, this, [a] { a->post([a] { a->startCfdCase(); }); });
+    connect(cfdCancel_, &QPushButton::clicked, this, [a] { a->post([a] { a->cancelCfdCase(); }); });
+    col->addWidget(cfdButton_);
+    col->addWidget(cfdCancel_);
+    cfdStatus_ = new QLabel(body);
+    cfdStatus_->setWordWrap(true);
+    col->addWidget(cfdStatus_);
+    cfdSummary_ = new QLabel(body);
+    cfdSummary_->setWordWrap(true);
+    cfdSummary_->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    col->addWidget(cfdSummary_);
+    cfdWarnings_ = note("", body, "#b08000");
+    col->addWidget(cfdWarnings_);
+    cfdError_ = note("", body, "#d05050");
+    col->addWidget(cfdError_);
+    cfdOpen_ = new QPushButton("Open case folder", body);
+    cfdOpen_->setFocusPolicy(Qt::NoFocus);
+    connect(cfdOpen_, &QPushButton::clicked, this, [a] { a->post([a] { a->openCfdCaseFolder(); }); });
+    col->addWidget(cfdOpen_);
+    return body;
+}
+
+void SimulationPanel::refreshCfd(const App::CfdCaseModel& m) {
+    setText(cfdDir_, m.casesDir);
+    if (cfdMesh_->isChecked() != m.mesh) {
+        const QSignalBlocker block(cfdMesh_);
+        cfdMesh_->setChecked(m.mesh);
+    }
+    cfdButton_->setVisible(!m.running);
+    cfdButton_->setEnabled(m.problem.empty());
+    cfdButton_->setToolTip(QString::fromStdString(m.problem));
+    cfdCancel_->setVisible(m.running);
+    QString status;
+    if (m.running) status = QString::asprintf("Working... %.0f s\n", m.seconds) + QString::fromStdString(m.status);
+    else if (m.done) status = QString::asprintf("Case written in %.0f s", m.seconds);
+    else if (m.cancelled) status = QString::fromStdString(m.status);
+    cfdStatus_->setVisible(!status.isEmpty());
+    setLabel(cfdStatus_, status);
+    cfdStatus_->setStyleSheet(m.done ? "color: #2e8b30;" : "");
+    QString summary;
+    if (!m.casePosix.empty()) summary = QString::fromStdString(m.casePosix) + "\n";
+    summary += QString::fromStdString(m.summary);
+    if (m.done) summary += "\nSolve it with reactingParcelFoam in the case folder (WSL).";
+    cfdSummary_->setVisible(!m.summary.empty());
+    setLabel(cfdSummary_, summary);
+    QStringList warn;
+    for (const auto& w : m.warnings) warn << QString::fromStdString(w);
+    cfdWarnings_->setVisible(!warn.isEmpty());
+    setLabel(cfdWarnings_, warn.join('\n'));
+    cfdError_->setVisible(!m.error.empty());
+    setLabel(cfdError_, QString::fromStdString(m.error));
+    cfdOpen_->setVisible(!m.caseDir.empty());
 }
 
 void SimulationPanel::refreshRun(const App::SimRunModel& m) {

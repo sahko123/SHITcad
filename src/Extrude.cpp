@@ -30,7 +30,6 @@
 #include <BRep_Builder.hxx>
 #include <TopoDS_Compound.hxx>
 #include <TopExp_Explorer.hxx>
-#include <TopoDS.hxx>
 #include <cmath>
 
 #include "Constants.h"
@@ -236,20 +235,6 @@ static TopoDS_Face buildFaceWithHoles(const Sketch& sketch, const ClosedProfile&
     return fixer.Face();
 }
 
-TopoDS_Shape extrudeProfile(const Sketch& sketch, const ClosedProfile& profile,
-                            float height, const SketchPlane& plane) {
-    if (std::fabs(height) < 1e-6f) return TopoDS_Shape();
-
-    TopoDS_Face face = buildFaceWithHoles(sketch, profile, plane);
-    if (face.IsNull()) return TopoDS_Shape();
-
-    gp_Vec extrudeVec(plane.normal[0] * height, plane.normal[1] * height, plane.normal[2] * height);
-    BRepPrimAPI_MakePrism prism(face, extrudeVec);
-    if (!prism.IsDone()) return TopoDS_Shape();
-
-    return prism.Shape();
-}
-
 TopoDS_Shape extrudeProfileEx(const Sketch& sketch, const ClosedProfile& profile,
                                float height, float offset, const SketchPlane& plane) {
     if (std::fabs(height) < 1e-6f) return TopoDS_Shape();
@@ -410,126 +395,6 @@ std::vector<TopoDS_Shape> enumerateSolids(const TopoDS_Shape& shape) {
         solids.push_back(exp.Current());
     }
     return solids;
-}
-
-// ─── Error-reporting variants ──────────────────────────────────────
-
-ShapeResult buildExtrudeToolShapeEx(const ExtrudeToolState& state,
-                                    const Sketch& sketch,
-                                    const SketchPlane& plane) {
-    ShapeResult result;
-    if (state.selectedProfileIndices.empty()) {
-        result.error = "No profiles selected";
-        return result;
-    }
-
-    float h = state.height;
-    float off = state.offset;
-    bool flipDir = (state.operation == ExtrudeOperation::Cut);
-    std::vector<TopoDS_Shape> shapes;
-
-    for (int idx : state.selectedProfileIndices) {
-        if (idx < 0 || idx >= (int)state.allProfiles.size()) {
-            result.error = "Profile index out of range";
-            return result;
-        }
-        const auto& profile = state.allProfiles[idx];
-        TopoDS_Shape s;
-
-        switch (state.direction) {
-            case ExtrudeDirection::OneSide:
-                s = extrudeProfileEx(sketch, profile, flipDir ? -h : h, off, plane); break;
-            case ExtrudeDirection::OtherSide:
-                s = extrudeProfileEx(sketch, profile, flipDir ? h : -h, off, plane); break;
-            case ExtrudeDirection::Symmetric:
-                s = extrudeProfileEx(sketch, profile, h, off - h * 0.5f, plane); break;
-            case ExtrudeDirection::BothSides: {
-                TopoDS_Shape s1 = extrudeProfileEx(sketch, profile, h, off, plane);
-                TopoDS_Shape s2 = extrudeProfileEx(sketch, profile, -h, off, plane);
-                if (!s1.IsNull()) shapes.push_back(s1);
-                if (!s2.IsNull()) shapes.push_back(s2);
-                if (s1.IsNull() && s2.IsNull()) {
-                    result.error = "Failed to build profile wire or face (self-intersecting or degenerate profile?)";
-                    return result;
-                }
-                continue;
-            }
-        }
-        if (s.IsNull()) {
-            result.error = "Failed to build profile wire or face (self-intersecting or degenerate profile?)";
-            return result;
-        }
-        shapes.push_back(s);
-    }
-
-    if (shapes.empty()) {
-        result.error = "No valid shapes produced";
-        return result;
-    }
-    if (shapes.size() == 1) { result.shape = shapes[0]; return result; }
-
-    BRep_Builder builder;
-    TopoDS_Compound compound;
-    builder.MakeCompound(compound);
-    for (auto& s : shapes) builder.Add(compound, s);
-    result.shape = compound;
-    return result;
-}
-
-ShapeResult buildRevolveToolShapeEx(const RevolveToolState& state,
-                                    const Sketch& sketch,
-                                    const SketchPlane& plane) {
-    ShapeResult result;
-    if (state.axisLineID == NullID) { result.error = "No axis line selected"; return result; }
-    const LineEntity* axisLine = sketch.findLine(state.axisLineID);
-    if (!axisLine) { result.error = "Axis line not found"; return result; }
-
-    Point2D axisA = sketch.getPointPos(axisLine->startPt);
-    Point2D axisB = sketch.getPointPos(axisLine->endPt);
-    if (distance(axisA, axisB) < 1e-6f) { result.error = "Axis line has zero length"; return result; }
-
-    std::vector<TopoDS_Shape> shapes;
-    for (int idx : state.selectedProfileIndices) {
-        if (idx < 0 || idx >= (int)state.allProfiles.size()) continue;
-        TopoDS_Shape s = revolveProfile(sketch, state.allProfiles[idx], axisA, axisB, state.angleDeg, plane);
-        if (s.IsNull()) {
-            result.error = "Failed to revolve profile (may overlap with axis or be self-intersecting)";
-            return result;
-        }
-        shapes.push_back(s);
-    }
-
-    if (shapes.empty()) { result.error = "No valid shapes produced"; return result; }
-    if (shapes.size() == 1) { result.shape = shapes[0]; return result; }
-
-    BRep_Builder builder;
-    TopoDS_Compound compound;
-    builder.MakeCompound(compound);
-    for (auto& s : shapes) builder.Add(compound, s);
-    result.shape = compound;
-    return result;
-}
-
-ShapeResult loftProfilesEx(const std::vector<LoftWireInput>& sections, bool solid) {
-    ShapeResult result;
-    if (sections.size() < 2) { result.error = "Need at least 2 sections for loft"; return result; }
-
-    BRepOffsetAPI_ThruSections lofter(solid ? Standard_True : Standard_False);
-    lofter.SetSmoothing(Standard_True);
-
-    for (size_t i = 0; i < sections.size(); i++) {
-        TopoDS_Wire wire = buildProfileWire(*sections[i].sketch, *sections[i].profile, *sections[i].plane);
-        if (wire.IsNull()) {
-            result.error = "Failed to build wire for section " + std::to_string(i + 1);
-            return result;
-        }
-        lofter.AddWire(wire);
-    }
-
-    lofter.Build();
-    if (!lofter.IsDone()) { result.error = "Loft operation failed (incompatible profiles or topologies)"; return result; }
-    result.shape = lofter.Shape();
-    return result;
 }
 
 } // namespace shitcad

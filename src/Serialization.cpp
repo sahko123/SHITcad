@@ -533,6 +533,9 @@ static json meshImportFeatureDataToJson(const MeshImportFeatureData& md) {
             {"translationMm", std::vector<double>(md.transform.t, md.transform.t + 3)},
         };
     }
+    // Points in the file's own coordinates (see MeshSkinChoice).
+    if (!md.skins.keep.empty()) j["keepSkins"] = md.skins.keep;
+    if (!md.skins.flip.empty()) j["flipSkins"] = md.skins.flip;
     return j;
 }
 
@@ -552,6 +555,8 @@ static MeshImportFeatureData meshImportFeatureDataFromJson(const json& j) {
         for (int i = 0; i < 9; i++) md.transform.r[i] = rot[i];
         for (int i = 0; i < 3; i++) md.transform.t[i] = tr[i];
     }
+    if (j.contains("keepSkins")) md.skins.keep = j.at("keepSkins").get<std::vector<std::array<double, 3>>>();
+    if (j.contains("flipSkins")) md.skins.flip = j.at("flipSkins").get<std::vector<std::array<double, 3>>>();
     return md;
 }
 
@@ -722,15 +727,22 @@ bool saveProject(const std::string& filepath,
     //
     // Version 3 = may contain CadImport (STEP/IGES) features. A v2 build would
     // read one as an unknown type, so it has to refuse the file instead.
+    //
+    // Version 4 = a MeshImport chooses or flips skins. An older build would
+    // ignore the choice and show the hidden skins - the outside of a vessel
+    // wall scored as wall nobody sprays - then drop it on the next save.
     bool needsV2 = simulation && !simulation->empty();
-    bool needsV3 = false;
+    bool needsV3 = false, needsV4 = false;
     for (const auto& f : history.features()) {
-        if (f.type == FeatureType::MeshImport) needsV2 = true;
+        if (f.type == FeatureType::MeshImport) {
+            needsV2 = true;
+            if (!std::get<MeshImportFeatureData>(f.data).skins.empty()) needsV4 = true;
+        }
         if (f.type == FeatureType::CadImport) needsV3 = true;
     }
 
     json doc;
-    doc["version"] = needsV3 ? 3 : needsV2 ? 2 : 1;
+    doc["version"] = needsV4 ? 4 : needsV3 ? 3 : needsV2 ? 2 : 1;
     doc["app"] = "SHITcad";
     doc["featureHistory"] = featureHistoryToJson(history);
     if (simulation && !simulation->empty()) {
@@ -777,7 +789,7 @@ bool loadProject(const std::string& filepath,
 
     try {
         int version = doc.at("version").get<int>();
-        if (version > 3) {
+        if (version > 4) {
             s_lastError = "File was created with a newer version of SHITcad (version " +
                           std::to_string(version) + ")";
             return false;
@@ -1005,8 +1017,8 @@ bool exportDXF(const std::string& filepath, const Sketch& sketch) {
         Point2D c = sketch.getPointPos(arc.centerPt);
         Point2D sp = sketch.getPointPos(arc.startPt);
         double radius = std::sqrt((sp.x - c.x) * (sp.x - c.x) + (sp.y - c.y) * (sp.y - c.y));
-        double startDeg = arc.startAngle * 180.0 / 3.14159265358979;
-        double endDeg = arc.endAngle * 180.0 / 3.14159265358979;
+        double startDeg = arc.startAngle * kRadToDegD;
+        double endDeg = arc.endAngle * kRadToDegD;
         out << "0\nARC\n8\n0\n"
             << "10\n" << c.x << "\n20\n" << c.y << "\n30\n0.0\n"
             << "40\n" << radius << "\n"
@@ -1030,7 +1042,7 @@ bool exportDXF(const std::string& filepath, const Sketch& sketch) {
     // Splines: export as polyline approximation
     for (const auto& sp : sketch.splines) {
         if (sp.controlPtIDs.size() < 2) continue;
-        auto pts = sampleSpline(sp, sketch, 64);
+        auto pts = sampleSpline(sp, sketch, kSplineSampleCount);
         if (pts.size() < 2) continue;
         out << "0\nPOLYLINE\n8\n0\n66\n1\n70\n0\n";
         for (const auto& p : pts) {
