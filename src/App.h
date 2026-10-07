@@ -129,8 +129,8 @@ public:
         bool sizeSuspicious = false;     // outside what cip-sim will trace
         std::string blocked;             // why Import is unavailable right now, else empty
         int skins = 0;
-        // Inside and outside of a solid's wall in one file (some skins are
-        // cavities, some not): offer to keep only the inside.
+        // Inside and outside of a solid's wall in one file (a skin is the
+        // outside of a wall, isWallOutside): offer to drop that outside.
         bool solidWall = false;
         bool keepInside = true;
     };
@@ -383,6 +383,7 @@ public:
                 float sizeMm[3] = {0, 0, 0};
                 bool closed = false;
                 bool cavity = false;       // closed and wound inward: the inside of a solid
+                bool wallOutside = false;  // the outside of a solid's wall (isWallOutside)
                 bool kept = true;
                 bool flipped = false;      // facing opposite to the file's winding
                 bool userFlipped = false;  // ... by the user rather than automatically
@@ -395,6 +396,7 @@ public:
         std::vector<Surface> surfaces;
         bool placing = false;          // the next surface click places a nozzle
         float standoffMm = 0.0f;
+        int skinRevision = 0;          // changes when a skin edit was refused
         struct Nozzle { uint32_t id; std::string label; };
         std::vector<Nozzle> nozzles;
         uint32_t selected = 0;         // 0: none; the fields below describe it
@@ -413,7 +415,7 @@ public:
     // the last kept skin is refused.
     void setSkinKept(uint32_t meshFeature, int skin, bool keep);
     void flipSkin(uint32_t meshFeature, int skin);
-    void keepCavitySkins(uint32_t meshFeature);   // keep only the inward-wound skins
+    void keepInsideOnly(uint32_t meshFeature);    // drop the outside of solid walls (isWallOutside)
     void resetSkins(uint32_t meshFeature);        // all skins, automatic facing
     void setNormalsShown(uint32_t meshFeature, bool show); // view only: arrows on the kept skins
     void setNozzlePlacing(bool placing) { simUi_.placing = placing; }
@@ -687,6 +689,7 @@ private:
         float sceneExtentMm = 1000.0f; // cached for cone display length
         size_t sceneExtentKey = 0;
         std::set<uint32_t> normalsShown; // mesh imports drawing their normal arrows
+        int skinRevision = 0;            // bumped when a skin edit is refused, so the panel resets its boxes
     };
     SimUiState simUi_;
     void setMeshSkinChoice(uint32_t meshFeature, const MeshSkinChoice& skins); // one undo step

@@ -487,6 +487,7 @@ static void testSkins(const fs::path& dir) {
     CHECK(nearRel(outer.signedVolume, 0.6 * 0.6 * 1.3, 1e-5), "outer volume %g", outer.signedVolume);
     CHECK(nearRel(inner.signedVolume, -0.5 * 0.5 * 1.2, 1e-5), "inner volume %g", inner.signedVolume);
     CHECK(!outer.isCavity() && inner.isCavity(), "the inward-wound skin is the cavity");
+    CHECK(isWallOutside(info, 0) && !isWallOutside(info, 1), "outer skin is the outside of the wall");
 
     // Points select skins; an off-geometry point is refused, not guessed.
     std::vector<int> found;
@@ -494,9 +495,17 @@ static void testSkins(const fs::path& dir) {
     const std::vector<int> justInner{1};
     bool ok = resolveSkins(wall.string(), {innerPt}, found, err) && found == justInner;
     CHECK(ok, "inner point -> %d", found.empty() ? -1 : found[0]);
-    const std::array<double, 3> nearFloor{0.0, 0.0, 0.06}, middle{0.0, 0.0, 0.65};
+    const std::array<double, 3> nearFloor{0.0, 0.0, 0.051}, middle{0.0, 0.0, 0.65};
     ok = resolveSkins(wall.string(), {nearFloor}, found, err) && found == justInner;
-    CHECK(ok, "a point 10 mm above the cavity floor is still the cavity");
+    CHECK(ok, "a point 1 mm above the cavity floor is still the cavity");
+    // Drifted off the cavity floor toward the outer skin (the wall moved in a
+    // re-export): refused, never switched to the outside of the wall. The
+    // floor gap is 50 mm; 30 mm down is nearer the outer bottom.
+    for (double z : {0.04, 0.02, 0.01}) {
+        const std::array<double, 3> drifted{0.0, 0.0, z};
+        ok = resolveSkins(wall.string(), {drifted}, found, err);
+        CHECK(!ok, "point at z=%g resolved to skin %d instead of being refused", z, found.empty() ? -1 : found[0]);
+    }
     ok = resolveSkins(wall.string(), {middle}, found, err);
     CHECK(!ok, "a point 0.4 m from any wall resolved");
     CHECK(err.find("has changed since its skins were picked") != std::string::npos, "%s", err.c_str());
@@ -592,6 +601,27 @@ static void testSkins(const fs::path& dir) {
           f2 ? f2->errorMsg.c_str() : "?");
 }
 
+// A solid-wall vessel exported with an internal part as its own solid (a
+// baffle): "keep the inside" must drop only the outside of the wall.
+static void testWallOutsideKeepsInternals(const fs::path& dir) {
+    std::printf("wall outside vs internals\n");
+    const fs::path p = dir / "wall_and_baffle.stl";
+    auto tris = boxTriangles(-0.3f, -0.3f, 0.0f, 0.3f, 0.3f, 1.3f);
+    for (Tri t : boxTriangles(-0.25f, -0.25f, 0.05f, 0.25f, 0.25f, 1.25f)) {
+        for (int a = 0; a < 3; a++) std::swap(t.v[3 + a], t.v[6 + a]);
+        tris.push_back(t);
+    }
+    for (const Tri& t : boxTriangles(-0.02f, -0.1f, 0.3f, 0.02f, 0.1f, 1.0f)) tris.push_back(t); // baffle, outward
+    writeBinaryStl(p, tris);
+    MeshFileInfo info;
+    std::string err;
+    CHECK(probeMeshFile(p.string(), info, err) && info.skins.size() == 3, "skins=%zu %s", info.skins.size(), err.c_str());
+    if (info.skins.size() != 3) return;
+    CHECK(isWallOutside(info, 0), "the outer skin is the outside of the wall");
+    CHECK(!isWallOutside(info, 1) && info.skins[1].isCavity(), "the cavity stays");
+    CHECK(!isWallOutside(info, 2) && !info.skins[2].isCavity(), "the baffle is a solid inside, not a wall outside");
+}
+
 int main() {
     const fs::path dir = fs::temp_directory_path() / "shitcad_mesh_import_test";
     fs::create_directories(dir);
@@ -606,6 +636,7 @@ int main() {
 
     testReplay(dir, box);
     testSkins(dir);
+    testWallOutsideKeepsInternals(dir);
 
     std::printf("\n%d checks, %d failed\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;

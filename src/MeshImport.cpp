@@ -431,23 +431,31 @@ bool resolveIn(const CachedMesh& mesh, const std::string& path,
         }
         const double tol = kSkinPointTolerance * std::sqrt(diag);
         for (const auto& p : points) {
-            double best = 1e300;
-            size_t bestTri = 0;
+            // Nearest distance to each skin, so the runner-up is known too.
+            std::vector<double> dist(mesh.info.skins.size(), 1e300);
             for (size_t t = 0; t < mesh.info.triangleCount; t++) {
                 const MeshVertex* v = &mesh.raw[t * 3];
                 const double a[3] = {v[0].px, v[0].py, v[0].pz}, b[3] = {v[1].px, v[1].py, v[1].pz},
                              c[3] = {v[2].px, v[2].py, v[2].pz};
-                const double d = distanceToTriangle(p.data(), a, b, c);
-                if (d < best) { best = d; bestTri = t; }
+                double& n = dist[mesh.skinOf[t]];
+                n = std::min(n, distanceToTriangle(p.data(), a, b, c));
             }
-            if (best > tol) {
-                char buf[160];
-                snprintf(buf, sizeof(buf), "a chosen skin is %.4g (file units) off the geometry", best);
+            const size_t k = (size_t)(std::min_element(dist.begin(), dist.end()) - dist.begin());
+            double second = 1e300;
+            for (size_t j = 0; j < dist.size(); j++)
+                if (j != k) second = std::min(second, dist[j]);
+            char buf[200] = {};
+            if (dist[k] > tol)
+                snprintf(buf, sizeof(buf), "a chosen skin is %.4g (file units) off the geometry", dist[k]);
+            else if (dist.size() > 1 && dist[k] > kSkinPointAmbiguity * second)
+                snprintf(buf, sizeof(buf), "a chosen skin point is %.4g from one skin and %.4g from another, "
+                         "too close to both to say which was meant", dist[k], second);
+            if (buf[0]) {
                 err = std::string(buf) + " - " + path + " has changed since its skins were picked. Pick them again.";
                 found.clear();
                 break;
             }
-            found.push_back((int)mesh.skinOf[bestTri]);
+            found.push_back((int)k);
         }
         hit = mesh.resolved.emplace(points, std::make_pair(std::move(found), std::move(err))).first;
     }
@@ -479,6 +487,20 @@ bool statesIn(const CachedMesh& mesh, const std::string& path, const MeshSkinCho
 }
 
 } // namespace
+
+bool isWallOutside(const MeshFileInfo& info, size_t skin) {
+    if (skin >= info.skins.size()) return false;
+    const MeshSkinInfo& s = info.skins[skin];
+    if (!s.closed || s.signedVolume <= 0.0) return false;
+    for (size_t j = 0; j < info.skins.size(); j++) {
+        const MeshSkinInfo& c = info.skins[j];
+        if (j == skin || !c.isCavity()) continue;
+        bool inside = true;
+        for (int k = 0; k < 3; k++) inside = inside && c.rawMin[k] >= s.rawMin[k] && c.rawMax[k] <= s.rawMax[k];
+        if (inside) return true;
+    }
+    return false;
+}
 
 bool resolveSkins(const std::string& path, const std::vector<std::array<double, 3>>& points,
                   std::vector<int>& out, std::string& error) {

@@ -291,9 +291,8 @@ App::MeshImportModel App::meshImportModel() const {
     m.sizeSuspicious = m.maxExtMm < 20.0f || m.maxExtMm > 100000.0f;
     if (!canImport()) m.blocked = "Finish the sketch or the active tool first.";
     m.skins = (int)d.info.skins.size();
-    const int cavities = (int)std::count_if(d.info.skins.begin(), d.info.skins.end(),
-                                            [](const MeshSkinInfo& s) { return s.isCavity(); });
-    m.solidWall = cavities > 0 && cavities < m.skins;
+    m.solidWall = false;
+    for (size_t k = 0; k < d.info.skins.size(); k++) m.solidWall = m.solidWall || isWallOutside(d.info, k);
     m.keepInside = d.keepInside;
     return m;
 }
@@ -315,9 +314,12 @@ void App::confirmMeshImport() {
     md.sourcePath = d.path;
     md.unit = kUnits[d.unitIndex].name;
     if (d.keepInside && meshImportModel().solidWall) {
-        // A solid-wall export: only its inside is sprayed wall (MeshSkinChoice).
-        for (const auto& s : d.info.skins)
-            if (s.isCavity()) md.skins.keep.push_back({s.point[0], s.point[1], s.point[2]});
+        // A solid-wall export: drop the outside of the wall, keep everything
+        // else - the cavity and any internals exported as their own solids.
+        for (size_t k = 0; k < d.info.skins.size(); k++) {
+            const auto& s = d.info.skins[k];
+            if (!isWallOutside(d.info, k)) md.skins.keep.push_back({s.point[0], s.point[1], s.point[2]});
+        }
     }
     std::string name = d.nameBuf[0] ? d.nameBuf : "Mesh";
 

@@ -62,16 +62,26 @@ struct MeshSkinChoice {
     bool operator==(const MeshSkinChoice& o) const { return keep == o.keep && flip == o.flip; }
 };
 
+// The outside of a solid's wall: a closed, outward-wound skin whose box holds a
+// cavity's. "Keep the inside only" drops exactly these. Internals exported as
+// their own solids (a baffle, a dip tube) sit inside the cavity and enclose
+// none, so they stay; dropping every non-cavity skin would lose them.
+bool isWallOutside(const MeshFileInfo& info, size_t skin);
+
 // Orientation a skin gets without a user flip: cavities are turned round.
 inline bool skinAutoFlipped(const MeshSkinInfo& s) { return s.isCavity(); }
 
-// A skin point further than this fraction of the file's diagonal from every
-// triangle was picked on a different file. Same tolerance as cip-sim.
-inline constexpr double kSkinPointTolerance = 0.01;
+// A stored point lies on its skin, so it only moves when the file is
+// re-exported - by about the faceting error of a curved wall. It is stale when
+// further than this fraction of the file's diagonal from every triangle, or
+// when its skin is not clearly the nearest (at most kSkinPointAmbiguity times
+// the distance to the next). Both are needed: at 1% a point drifted 8 mm off
+// the inside of a 12 mm wall resolved to the outside. Same rule as cip-sim.
+inline constexpr double kSkinPointTolerance = 0.001;
+inline constexpr double kSkinPointAmbiguity = 0.5;
 
 // The skin nearest each point (indices into MeshFileInfo::skins). Fails, naming
-// the file, if a point is off the geometry - the file was re-exported into
-// something else since the skins were picked.
+// the file, if a point is stale by the rule above.
 bool resolveSkins(const std::string& path, const std::vector<std::array<double, 3>>& points,
                   std::vector<int>& out, std::string& error);
 

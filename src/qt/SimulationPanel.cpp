@@ -20,6 +20,7 @@
 #include <QToolButton>
 #include <QVBoxLayout>
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 
@@ -521,18 +522,20 @@ void SimulationPanel::addSkinRows(QVBoxLayout* rc, QWidget* row, const App::SimS
     }
     if (s.skins.empty()) return;
 
-    int cavities = 0;
-    bool onlyCavities = true;
+    // Offered while the outside of a solid wall is still shown, or the choice
+    // differs from "everything but the outside".
+    bool outsideShown = false, asOffered = true;
     for (const auto& k : s.skins) {
-        cavities += k.cavity;
-        onlyCavities = onlyCavities && k.kept == k.cavity;
+        outsideShown = outsideShown || (k.wallOutside && k.kept);
+        asOffered = asOffered && k.kept == !k.wallOutside;
     }
-    if (cavities > 0 && cavities < (int)s.skins.size() && !onlyCavities) {
+    if (outsideShown || (!asOffered && std::any_of(s.skins.begin(), s.skins.end(),
+                                                    [](const auto& k) { return k.wallOutside; }))) {
         auto* shortcut = new QPushButton("Keep the inside only", row);
         shortcut->setFocusPolicy(Qt::NoFocus);
         shortcut->setToolTip("This file is a solid: the outside of the wall and the inside (the cavity) in one STL. "
-                             "Only the inside is wall that gets sprayed.");
-        connect(shortcut, &QPushButton::clicked, this, [a, feature] { a->post([a, feature] { a->keepCavitySkins(feature); }); });
+                             "Hides the outside of the wall; the cavity and any internals stay.");
+        connect(shortcut, &QPushButton::clicked, this, [a, feature] { a->post([a, feature] { a->keepInsideOnly(feature); }); });
         auto* line = new QHBoxLayout;
         line->setContentsMargins(12, 0, 0, 0);
         line->addWidget(shortcut);
@@ -544,7 +547,8 @@ void SimulationPanel::addSkinRows(QVBoxLayout* rc, QWidget* row, const App::SimS
         const auto& k = s.skins[i];
         auto* line = new QHBoxLayout;
         line->setContentsMargins(12, 0, 0, 0);
-        const QString what = k.cavity ? "inside of a solid" : k.closed ? "closed" : "open";
+        const QString what = k.cavity ? "inside of a solid" : k.wallOutside ? "outside of a solid"
+                           : k.closed ? "closed" : "open";
         auto* keep = new QCheckBox(QString("Skin %1: %2 x %3 x %4 mm, %5")
                                        .arg(i + 1)
                                        .arg(k.sizeMm[0], 0, 'f', 0)
@@ -575,8 +579,15 @@ void SimulationPanel::refreshSetup(const App::SimSetupModel& m) {
     std::string key;
     for (const auto& s : m.surfaces) {
         key += std::to_string(s.feature) + ":" + s.name + (s.active ? "+" : "-") + (s.failed ? "!" + s.errorMsg : "");
-        key += (s.showNormals ? "N" : "n") + std::string(s.hasSkinChoice ? "C" : "c") + s.skinError;
-        for (const auto& k : s.skins) key += std::string(k.kept ? "K" : "k") + (k.flipped ? "F" : "f") + (k.userFlipped ? "U" : "u");
+        key += "r" + std::to_string(m.skinRevision) + (s.showNormals ? "N" : "n") + std::string(s.hasSkinChoice ? "C" : "c") + s.skinError;
+        // Sizes and counts too: a unit change relabels the rows, and a
+        // re-export with the same kept/flipped pattern renumbers the skins the
+        // rows' buttons act on.
+        for (const auto& k : s.skins)
+            key += std::string(k.kept ? "K" : "k") + (k.flipped ? "F" : "f") + (k.userFlipped ? "U" : "u") +
+                   std::to_string(k.triangles) + "/" + std::to_string((long long)std::lround(k.sizeMm[0] * 100)) + "," +
+                   std::to_string((long long)std::lround(k.sizeMm[1] * 100)) + "," +
+                   std::to_string((long long)std::lround(k.sizeMm[2] * 100)) + ";";
         key += "\n";
     }
     if (key != shownSurfaces_) {

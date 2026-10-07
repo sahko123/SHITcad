@@ -384,6 +384,7 @@ App::SimSetupModel App::simSetupModel() const {
                     for (int a = 0; a < 3; a++) row.sizeMm[a] = (si.rawMax[a] - si.rawMin[a]) * unit->toMm;
                     row.closed = si.closed;
                     row.cavity = si.isCavity();
+                    row.wallOutside = isWallOutside(info, k);
                     if (k < st.size()) {
                         row.kept = st[k].kept;
                         row.flipped = st[k].flipped;
@@ -397,6 +398,7 @@ App::SimSetupModel App::simSetupModel() const {
     }
     m.placing = simUi_.placing;
     m.standoffMm = simUi_.standoffMm;
+    m.skinRevision = simUi_.skinRevision;
     for (const auto& n : simulation_.nozzles) {
         double p[3], a[3];
         const bool ok = nozzleWorld(n, featureHistory_, p, a);
@@ -481,6 +483,7 @@ void App::setSkinKept(uint32_t meshFeature, int skin, bool keep) {
     if (std::none_of(st.begin(), st.end(), [](const MeshSkinState& s) { return s.kept; })) {
         simUi_.message = "At least one skin has to stay. Suppress the import to leave it out altogether.";
         simUi_.messageIsError = true;
+        simUi_.skinRevision++;   // the unticked box has to snap back
         return;
     }
     setMeshSkinChoice(meshFeature, choiceFrom(info, st));
@@ -494,13 +497,14 @@ void App::flipSkin(uint32_t meshFeature, int skin) {
     setMeshSkinChoice(meshFeature, choiceFrom(info, st));
 }
 
-void App::keepCavitySkins(uint32_t meshFeature) {
+void App::keepInsideOnly(uint32_t meshFeature) {
     MeshFileInfo info;
     std::vector<MeshSkinState> st;
     if (!currentSkins(featureHistory_, meshFeature, info, st)) return;
-    if (std::none_of(info.skins.begin(), info.skins.end(), [](const MeshSkinInfo& s) { return s.isCavity(); }))
-        return;
-    for (size_t k = 0; k < st.size(); k++) st[k].kept = info.skins[k].isCavity();
+    bool any = false;
+    for (size_t k = 0; k < st.size(); k++) any = any || isWallOutside(info, k);
+    if (!any) return;
+    for (size_t k = 0; k < st.size(); k++) st[k].kept = !isWallOutside(info, k);
     setMeshSkinChoice(meshFeature, choiceFrom(info, st));
 }
 

@@ -210,6 +210,8 @@ bool buildTier1Spec(const SimulationSetup& sim, const FeatureHistory& history,
         s["file"] = posixPath(md.sourcePath);
         s["units"] = md.unit;
         s["scored"] = surfaceRoleScored(role);
+        // What the surface is, for CFD case generation (cip-sim spec `role`).
+        s["role"] = surfaceRoleName(role);
         if (!md.transform.isIdentity()) {
             // Spec semantics match MeshTransform exactly: rotation applied to the
             // unit-scaled file coordinates, translation in the spec's units (mm).
