@@ -20,12 +20,14 @@
 #include <bitset>
 #include <chrono>
 #include <cmath>
+#include <filesystem>
 #include <functional>
 #include <map>
 #include <memory>
 #include <optional>
 #include <set>
 #include <string>
+#include <thread>
 #include <unordered_map>
 #include <variant>
 #include <vector>
@@ -292,11 +294,87 @@ static void testLoft() {
     CHECK(a.scene_.bodyCount() == 1, "undo of an unchanged edit keeps the body");
 }
 
+// "Generate CFD case" end to end: the synthetic vessel's three STLs with their
+// roles, one nozzle, then cip-sim's case generator as the button runs it.
+// Written to a Windows folder and not meshed, so it needs Python but not WSL.
+static void testCfdCase(const std::string& cipSim, const std::string& python) {
+    std::printf("generate CFD case\n");
+    namespace fs = std::filesystem;
+    const fs::path geom = fs::path(cipSim) / "geometry" / "synthetic";
+    if (!fs::exists(geom / "vessel_wall.stl")) {
+        std::printf("  skipped: no synthetic geometry in %s\n", geom.string().c_str());
+        return;
+    }
+    Fixture fx; App& a = fx.app;
+    std::map<std::string, FeatureID> ids;
+    for (const char* n : {"vessel_wall", "nozzle_inlet", "drain_outlet"}) {
+        MeshImportFeatureData md;
+        md.sourcePath = (geom / (std::string(n) + ".stl")).string();
+        md.unit = "m";
+        ids[n] = a.featureHistory_.addMeshImportFeature(md, n);
+    }
+    a.replayAllFeatures();
+    a.simulation_.setRole(ids["nozzle_inlet"], SurfaceRole::Inlet);
+    a.simulation_.setRole(ids["drain_outlet"], SurfaceRole::Drain);
+    SimNozzle nz;
+    nz.hostFeature = ids["vessel_wall"];
+    nz.position[2] = 980;            // mm, on the axis under the inlet
+    nz.axis[1] = 0;
+    nz.axis[2] = -1;
+    a.simulation_.addNozzle(nz);
+
+    const fs::path cases = fs::temp_directory_path() / "shitcad_cfd_test";
+    fs::remove_all(cases);
+    a.simEngine_.cipSimPath = cipSim;
+    a.simEngine_.python = python;
+    a.simEngine_.cfdCasesDir = cases.generic_string();
+    a.simEngine_.loaded = true;
+    a.setCfdMesh(false);
+
+    auto runToEnd = [&a] {
+        a.startCfdCase();
+        const auto t0 = std::chrono::steady_clock::now();
+        while (a.cfd_.phase == App::SimPhase::Running &&
+               std::chrono::steady_clock::now() - t0 < std::chrono::seconds(180)) {
+            a.pollCfdCase();
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        }
+    };
+
+    runToEnd();
+    App::CfdCaseModel m = a.cfdCaseModel();
+    CHECK(m.done, "not done: %s", m.error.c_str());
+    CHECK(m.summary.find("3 surfaces") != std::string::npos, "summary: %s", m.summary.c_str());
+    const bool roles = m.summary.find("nozzle_inlet (inlet)") != std::string::npos &&
+                       m.summary.find("drain_outlet (drain)") != std::string::npos &&
+                       m.summary.find("vessel_wall (wall)") != std::string::npos;
+    CHECK(roles, "roles: %s", m.summary.c_str());
+    CHECK(m.summary.find("Not meshed") != std::string::npos, "summary: %s", m.summary.c_str());
+    const fs::path out = fs::path(m.caseDir);
+    const bool files = fs::exists(out / "system" / "snappyHexMeshDict") && fs::exists(out / "Allmesh") &&
+                       fs::exists(out / "constant" / "triSurface" / "drain_outlet.stl") &&
+                       fs::exists(out / "constant" / "parcelInjectionProperties");
+    CHECK(files, "case files missing in %s", out.string().c_str());
+    std::error_code ec;
+    CHECK(!m.caseDir.empty() && fs::equivalent(out.parent_path(), cases, ec), "case in '%s', not under the cases folder",
+          out.string().c_str());
+
+    // No way out for liquid or air: refused, with the reason shown.
+    a.simulation_.setRole(ids["nozzle_inlet"], SurfaceRole::Obstruction);
+    a.simulation_.setRole(ids["drain_outlet"], SurfaceRole::Obstruction);
+    runToEnd();
+    m = a.cfdCaseModel();
+    CHECK(!m.done && m.error.find("no inlet or drain") != std::string::npos, "closed vessel: done=%d error=%s",
+          (int)m.done, m.error.c_str());
+    fs::remove_all(cases);
+}
+
 };
 
 } // namespace shitcad
 
 int main(int argc, char** argv) {
+    std::setvbuf(stdout, nullptr, _IONBF, 0);   // a crash must not swallow the progress lines
     int qtArgc = 1;
     char* qtArgv[] = {argv[0], nullptr};
     QGuiApplication qapp(qtArgc, qtArgv);
@@ -322,6 +400,8 @@ int main(int argc, char** argv) {
     AppTestAccess::testExtrudeCut();
     AppTestAccess::testRevolve();
     AppTestAccess::testLoft();
+    // ToolFlowTest.exe <cip-sim dir> [python]: also the CFD case button.
+    if (argc >= 2) AppTestAccess::testCfdCase(argv[1], argc >= 3 ? argv[2] : "python");
 
     ctx.doneCurrent();
     std::printf("\n%d checks, %d failed\n", g_checks, g_failures);

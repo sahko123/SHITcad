@@ -193,6 +193,7 @@ SimulationPanel::SimulationPanel(App& app, QWidget* parent) : QDockWidget("Simul
     col->addWidget(section("Run", buildRun(), true, content));
     results_ = section("Results", buildResults(), true, content);
     col->addWidget(results_);
+    col->addWidget(section("CFD case (OpenFOAM)", buildCfd(), false, content));
     auto* exportSpec = new QPushButton("Export spec...", content);
     exportSpec->setFocusPolicy(Qt::NoFocus);
     connect(exportSpec, &QPushButton::clicked, this, [a] { a->post([a] { a->exportSimulationSpecDialog(); }); });
@@ -490,6 +491,7 @@ void SimulationPanel::refresh() {
     refreshSetup(setup);
     refreshRun(app_.simRunModel());
     refreshResults(app_.simResultsModel());
+    refreshCfd(app_.cfdCaseModel());
     if (viewBody_->isVisible()) section_->refresh(app_.sectionModel());
 }
 
@@ -695,6 +697,84 @@ void SimulationPanel::refreshSetup(const App::SimSetupModel& m) {
     }
     message_->setVisible(!msg.isEmpty());
     setLabel(message_, msg);
+}
+
+// The set-up as an OpenFOAM case: cip-sim writes it (and meshes it) inside WSL.
+// Solving stays outside SHITcad - it runs for hours.
+QWidget* SimulationPanel::buildCfd() {
+    auto* body = new QWidget;
+    auto* col = new QVBoxLayout(body);
+    col->setContentsMargins(0, 0, 0, 0);
+    App* a = &app_;
+    col->addWidget(note("Writes the surfaces (by role) and nozzles as an OpenFOAM spray + film case. "
+                        "Needs an inlet or drain surface: liquid has to be able to leave.", body));
+    col->addWidget(new QLabel("Cases go in (inside WSL)", body));
+    cfdDir_ = new QLineEdit(body);
+    cfdDir_->setToolTip("A folder inside WSL; ~ is the WSL home. OpenFOAM is far slower on /mnt/c.");
+    connect(cfdDir_, &QLineEdit::editingFinished, this, [this, a] {
+        const std::string d = cfdDir_->text().toUtf8().toStdString();
+        a->post([a, d] { a->setCfdCasesDir(d); });
+    });
+    col->addWidget(cfdDir_);
+    cfdMesh_ = new QCheckBox("Mesh it as well (about a minute for a small vessel)", body);
+    cfdMesh_->setFocusPolicy(Qt::NoFocus);
+    connect(cfdMesh_, &QCheckBox::toggled, this, [a](bool on) { a->post([a, on] { a->setCfdMesh(on); }); });
+    col->addWidget(cfdMesh_);
+    cfdButton_ = new QPushButton("Generate CFD case", body);
+    cfdCancel_ = new QPushButton("Cancel", body);
+    for (auto* b : {cfdButton_, cfdCancel_}) b->setFocusPolicy(Qt::NoFocus);
+    connect(cfdButton_, &QPushButton::clicked, this, [a] { a->post([a] { a->startCfdCase(); }); });
+    connect(cfdCancel_, &QPushButton::clicked, this, [a] { a->post([a] { a->cancelCfdCase(); }); });
+    col->addWidget(cfdButton_);
+    col->addWidget(cfdCancel_);
+    cfdStatus_ = new QLabel(body);
+    cfdStatus_->setWordWrap(true);
+    col->addWidget(cfdStatus_);
+    cfdSummary_ = new QLabel(body);
+    cfdSummary_->setWordWrap(true);
+    cfdSummary_->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    col->addWidget(cfdSummary_);
+    cfdWarnings_ = note("", body, "#b08000");
+    col->addWidget(cfdWarnings_);
+    cfdError_ = note("", body, "#d05050");
+    col->addWidget(cfdError_);
+    cfdOpen_ = new QPushButton("Open case folder", body);
+    cfdOpen_->setFocusPolicy(Qt::NoFocus);
+    connect(cfdOpen_, &QPushButton::clicked, this, [a] { a->post([a] { a->openCfdCaseFolder(); }); });
+    col->addWidget(cfdOpen_);
+    return body;
+}
+
+void SimulationPanel::refreshCfd(const App::CfdCaseModel& m) {
+    setText(cfdDir_, m.casesDir);
+    if (cfdMesh_->isChecked() != m.mesh) {
+        const QSignalBlocker block(cfdMesh_);
+        cfdMesh_->setChecked(m.mesh);
+    }
+    cfdButton_->setVisible(!m.running);
+    cfdButton_->setEnabled(m.problem.empty());
+    cfdButton_->setToolTip(QString::fromStdString(m.problem));
+    cfdCancel_->setVisible(m.running);
+    QString status;
+    if (m.running) status = QString::asprintf("Working... %.0f s\n", m.seconds) + QString::fromStdString(m.status);
+    else if (m.done) status = QString::asprintf("Case written in %.0f s", m.seconds);
+    else if (m.cancelled) status = QString::fromStdString(m.status);
+    cfdStatus_->setVisible(!status.isEmpty());
+    setLabel(cfdStatus_, status);
+    cfdStatus_->setStyleSheet(m.done ? "color: #2e8b30;" : "");
+    QString summary;
+    if (!m.casePosix.empty()) summary = QString::fromStdString(m.casePosix) + "\n";
+    summary += QString::fromStdString(m.summary);
+    if (m.done) summary += "\nSolve it with reactingParcelFoam in the case folder (WSL).";
+    cfdSummary_->setVisible(!m.summary.empty());
+    setLabel(cfdSummary_, summary);
+    QStringList warn;
+    for (const auto& w : m.warnings) warn << QString::fromStdString(w);
+    cfdWarnings_->setVisible(!warn.isEmpty());
+    setLabel(cfdWarnings_, warn.join('\n'));
+    cfdError_->setVisible(!m.error.empty());
+    setLabel(cfdError_, QString::fromStdString(m.error));
+    cfdOpen_->setVisible(!m.caseDir.empty());
 }
 
 void SimulationPanel::refreshRun(const App::SimRunModel& m) {

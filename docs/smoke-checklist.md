@@ -161,6 +161,9 @@ must work from both.
       hidden and a section cuts them. A nozzle placed on the cavity sprays inward.
 - [ ] Unticking the last kept skin is refused with a message.
 - [ ] Engine settings: the cip-sim folder and python path persist across restarts.
+- [ ] CFD case: with an inlet or drain surface, Generate CFD case (Mesh ticked) shows progress, then the
+      case path, surfaces with roles and the cell count; Open case folder opens it. Without an opening
+      it refuses with "no inlet or drain". The cases folder persists across restarts.
 - [ ] Run: the log streams, Cancel stops it, and a finished run loads results on the geometry.
 - [ ] Results: field selection, legend, colours (grey = no data, amber = sprayed but
       unsampled); stale marking after moving a mesh or editing a nozzle.

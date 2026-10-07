@@ -14,6 +14,7 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstdio>
 #include <ctime>
@@ -40,6 +41,7 @@ void App::loadEngineSettings() {
         json j = json::parse(in);
         simEngine_.cipSimPath = j.value("cipSimPath", simEngine_.cipSimPath);
         simEngine_.python = j.value("python", simEngine_.python);
+        simEngine_.cfdCasesDir = j.value("cfdCasesDir", simEngine_.cfdCasesDir);
     } catch (...) {
         // A corrupt settings file just means asking again.
     }
@@ -49,7 +51,8 @@ void App::saveEngineSettings() {
     std::error_code ec;
     fs::create_directories(engineSettingsPath().parent_path(), ec);
     std::ofstream out(engineSettingsPath());
-    out << json{{"cipSimPath", simEngine_.cipSimPath}, {"python", simEngine_.python}}.dump(2) << "\n";
+    out << json{{"cipSimPath", simEngine_.cipSimPath}, {"python", simEngine_.python},
+                {"cfdCasesDir", simEngine_.cfdCasesDir}}.dump(2) << "\n";
 }
 
 std::string App::engineProblem() const {
@@ -116,6 +119,16 @@ static std::string timestamp() {
     return buf;
 }
 
+// Runs sit next to the project when it has been saved, so results travel with
+// it; otherwise in the temp folder.
+std::string App::simRunBase() const {
+    if (!currentFilePath_.empty()) {
+        fs::path proj = fsPath(currentFilePath_);
+        return utf8(proj.parent_path() / fsPath(utf8(proj.stem()) + "_sim"));
+    }
+    return utf8(fs::temp_directory_path() / "SHITcad_sim");
+}
+
 void App::startTier1Run() {
     if (simPhase_ == SimPhase::Running) return;
     simRunLog_.clear();
@@ -146,16 +159,7 @@ void App::startTier1Run() {
         return;
     }
 
-    // Runs sit next to the project when it has been saved, so results travel
-    // with it; otherwise in the temp folder.
-    fs::path base;
-    if (!currentFilePath_.empty()) {
-        fs::path proj = fsPath(currentFilePath_);
-        base = proj.parent_path() / fsPath(utf8(proj.stem()) + "_sim");
-    } else {
-        base = fs::temp_directory_path() / "SHITcad_sim";
-    }
-    fs::path dir = base / ("tier1_" + timestamp());
+    fs::path dir = fsPath(simRunBase()) / ("tier1_" + timestamp());
     std::error_code ec;
     fs::create_directories(dir, ec);
     if (ec) {
@@ -190,6 +194,7 @@ void App::startTier1Run() {
 }
 
 void App::pollSimulationRun() {
+    pollCfdCase();
     std::vector<std::string> lines;
     if (paraviewLauncher_.running()) {
         paraviewLauncher_.poll(lines);
@@ -476,6 +481,154 @@ void App::setResultsField(int field) {
     if (field < 0 || field >= (int)simView_.mesh.fields.size()) return;
     simView_.field = field;
     simView_.colourDirty = true;
+}
+
+// ---- CFD case ----------------------------------------------------------------------
+
+App::CfdCaseModel App::cfdCaseModel() {
+    if (!simEngine_.loaded) loadEngineSettings();
+    CfdCaseModel m;
+    m.casesDir = simEngine_.cfdCasesDir;
+    m.mesh = cfd_.mesh;
+    m.problem = engineProblem();
+    if (m.problem.empty() && simEngine_.cfdCasesDir.empty()) m.problem = "Set the folder CFD cases go in.";
+    m.running = cfd_.phase == SimPhase::Running;
+    m.done = cfd_.phase == SimPhase::Done;
+    m.cancelled = cfd_.phase == SimPhase::Cancelled;
+    m.seconds = m.running ? nowSeconds() - cfd_.start : cfd_.end - cfd_.start;
+    m.status = cfd_.status;
+    if (!m.running) m.error = cfd_.error;
+    m.warnings = cfd_.warnings;
+    m.caseDir = cfd_.caseDir;
+    m.casePosix = cfd_.casePosix;
+    m.summary = cfd_.summary;
+    return m;
+}
+
+void App::setCfdCasesDir(const std::string& dir) {
+    if (dir == simEngine_.cfdCasesDir) return;
+    simEngine_.cfdCasesDir = dir;
+    saveEngineSettings();
+}
+
+void App::startCfdCase() {
+    if (cfd_.phase == SimPhase::Running) return;
+    const bool mesh = cfd_.mesh;
+    cfd_ = CfdCaseState{};
+    cfd_.mesh = mesh;
+    auto fail = [this](const std::string& why) {
+        cfd_.error = why;
+        cfd_.phase = SimPhase::Failed;
+    };
+    if (!simEngine_.loaded) loadEngineSettings();
+    std::string problem = engineProblem();
+    if (!problem.empty()) return fail(problem);
+    // The same spec Tier 1 runs on, roles included: what the generator turns
+    // into patches and boundary conditions.
+    std::string spec, err;
+    std::vector<std::string> warnings;
+    if (!buildTier1Spec(simulation_, featureHistory_, spec, warnings, err)) return fail(err);
+    cfd_.warnings = warnings;
+
+    const std::string stamp = timestamp();
+    fs::path dir = fsPath(simRunBase()) / ("cfd_" + stamp);
+    std::error_code ec;
+    fs::create_directories(dir, ec);
+    if (ec) return fail("Could not create " + utf8(dir) + ": " + ec.message());
+    fs::path specPath = dir / "spec.json";
+    {
+        std::ofstream out(specPath, std::ios::binary);
+        out << spec << "\n";
+        if (!out) return fail("Could not write " + utf8(specPath));
+    }
+
+    // A case per press, named after the project: OpenFOAM writes its results
+    // into the case, so an earlier one is never overwritten.
+    std::string name;
+    const std::string stem = currentFilePath_.empty() ? std::string("untitled") : utf8(fsPath(currentFilePath_).stem());
+    for (char c : stem) name += (std::isalnum((unsigned char)c) || c == '-' || c == '_') ? c : '_';
+    std::string casesDir = simEngine_.cfdCasesDir;
+    while (casesDir.size() > 1 && casesDir.back() == '/') casesDir.pop_back();
+    const std::string out = casesDir + "/" + name + "_" + stamp;
+
+    std::vector<std::string> argv = {simEngine_.python, "-u", "-m", "cipsim.cli", "case",
+                                     "--spec", utf8(specPath), "--out", out};
+    if (mesh) argv.push_back("--mesh");
+    if (!cfdRunner_.start(argv, simEngine_.cipSimPath, true, err)) return fail(err);
+    cfd_.status = "Writing the case...";
+    cfd_.start = nowSeconds();
+    cfd_.phase = SimPhase::Running;
+}
+
+void App::pollCfdCase() {
+    if (cfd_.phase != SimPhase::Running) return;
+    std::vector<std::string> lines;
+    cfdRunner_.poll(lines);
+    std::string errors;
+    for (const auto& l : lines) {
+        const std::string kind = eventKind(l);
+        if (kind == "progress") {
+            cfd_.status = eventMessage(l);
+        } else if (kind == "warning") {
+            cfd_.warnings.push_back(eventMessage(l));
+        } else if (kind == "error") {
+            errors += (errors.empty() ? "" : "\n") + eventMessage(l);
+        } else if (kind == "result") {
+            json j = json::parse(l, nullptr, false);
+            if (!j.is_object()) continue;
+            // value() throws on a null, and case_posix IS null for a case
+            // written to a Windows folder: read the strings defensively.
+            auto str = [&j](const char* k) { return j.contains(k) && j[k].is_string() ? j[k].get<std::string>() : std::string(); };
+            cfd_.caseDir = str("case");
+            cfd_.casePosix = str("case_posix");
+            std::string s;
+            if (j.contains("patches") && j["patches"].is_object()) {
+                for (const auto& [patch, role] : j["patches"].items())
+                    s += (s.empty() ? "" : ", ") + patch + " (" + (role.is_string() ? role.get<std::string>() : "?") + ")";
+                s = std::to_string(j["patches"].size()) + " surfaces: " + s;
+            }
+            if (j.contains("mesh") && j["mesh"].is_object()) {
+                const auto& m = j["mesh"];
+                const long long cells = m.contains("cells") && m["cells"].is_number() ? m["cells"].get<long long>() : 0;
+                s += "\nMeshed: " + std::to_string(cells) + " cells, checkMesh " +
+                     (m.contains("check_mesh_ok") && m["check_mesh_ok"].is_boolean() && m["check_mesh_ok"].get<bool>()
+                          ? "OK" : "reported problems - see log.checkMesh");
+            } else {
+                s += "\nNot meshed: run ./Allmesh in the case.";
+            }
+            cfd_.summary = s;
+        } else if (kind.empty()) {
+            cfd_.warnings.push_back("engine output: " + l.substr(0, 200));
+        }
+    }
+    if (!errors.empty()) cfd_.error += (cfd_.error.empty() ? "" : "\n") + errors;
+    if (!cfdRunner_.finished()) return;
+    cfd_.end = nowSeconds();
+    if (cfdRunner_.exitCode() == 0 && !cfd_.caseDir.empty()) {
+        cfd_.phase = SimPhase::Done;
+    } else {
+        if (cfd_.error.empty()) {
+            const std::string& tail = cfdRunner_.stderrTail();
+            cfd_.error = "The case generator exited with code " + std::to_string(cfdRunner_.exitCode()) +
+                         (tail.empty() ? "." : ":\n" + tail.substr(tail.size() > 1500 ? tail.size() - 1500 : 0));
+        }
+        cfd_.phase = SimPhase::Failed;
+    }
+}
+
+void App::cancelCfdCase() {
+    if (cfd_.phase != SimPhase::Running) return;
+    cfdRunner_.cancel();
+    cfd_.phase = SimPhase::Cancelled;
+    cfd_.end = nowSeconds();
+    // Killing the Windows side does not stop a mesher already started inside
+    // WSL; say so rather than imply the case folder is clean.
+    cfd_.status = "Cancelled. A mesher already running inside WSL finishes on its own; delete the case folder if unwanted.";
+}
+
+void App::openCfdCaseFolder() {
+    if (cfd_.caseDir.empty()) return;
+    ShellExecuteW(nullptr, L"open", fsPath(cfd_.caseDir).c_str(), nullptr, nullptr, 1 /* SW_SHOWNORMAL */);
 }
 
 void App::openRunFolder() {

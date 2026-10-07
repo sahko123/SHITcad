@@ -435,6 +435,29 @@ public:
     void commitSimulationEdit();
     void exportSimulationSpecDialog();
 
+    // ---- CFD case: the spec handed to cip-sim's case generator, which writes
+    // an OpenFOAM case inside WSL (and meshes it, if asked). Independent of
+    // the Tier 1 run: either can go while the other does.
+    struct CfdCaseModel {
+        std::string casesDir;          // WSL folder the cases go in, e.g. ~/cip-work
+        bool mesh = true;              // mesh it straight away
+        std::string problem;           // why it cannot start, empty if it can
+        bool running = false, done = false, cancelled = false;
+        double seconds = 0;
+        std::string status;            // latest progress line
+        std::string error;
+        std::vector<std::string> warnings;
+        std::string caseDir;           // the case, as Windows sees it (\\wsl.localhost\...)
+        std::string casePosix;         // ... and inside WSL
+        std::string summary;           // surfaces and, if meshed, the mesh
+    };
+    CfdCaseModel cfdCaseModel();       // not const: loads the engine settings on first use
+    void setCfdCasesDir(const std::string& dir);   // saved per machine
+    void setCfdMesh(bool mesh) { cfd_.mesh = mesh; }
+    void startCfdCase();
+    void cancelCfdCase();
+    void openCfdCaseFolder();
+
     struct SimRunModel {
         std::string cipSimPath, python;
         std::string problem;           // why the engine cannot run, empty if it can
@@ -701,6 +724,7 @@ private:
     struct SimEngineSettings {
         std::string cipSimPath;        // cip-sim repository root
         std::string python = "python";
+        std::string cfdCasesDir = "~/cip-work"; // inside WSL: OpenFOAM is slow on /mnt/c
         bool loaded = false;
     };
     SimEngineSettings simEngine_;
@@ -717,6 +741,19 @@ private:
     double simRunStart_ = 0.0;
     double simRunEnd_ = 0.0;
     RunSummary simSummary_;
+
+    // CFD case generation in progress or just finished (see CfdCaseModel).
+    struct CfdCaseState {
+        SimPhase phase = SimPhase::Idle;
+        bool mesh = true;
+        std::string status, error, caseDir, casePosix, summary;
+        std::vector<std::string> warnings;
+        double start = 0.0, end = 0.0;
+    };
+    CfdCaseState cfd_;
+    ProcessRunner cfdRunner_;
+    void pollCfdCase();
+    std::string simRunBase() const;    // where run folders go: beside the project, else %TEMP%
 
     ProcessRunner paraviewLauncher_;
     std::string paraviewMessage_;
