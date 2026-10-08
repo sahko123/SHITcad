@@ -397,6 +397,14 @@ public:
         bool placing = false;          // the next surface click places a nozzle
         float standoffMm = 0.0f;
         int skinRevision = 0;          // changes when a skin edit was refused
+        int placingOpening = -1;       // OpeningKind the next surface click places, -1 none
+        struct Opening { uint32_t id; std::string label; };
+        std::vector<Opening> openings;
+        uint32_t selectedOpening = 0;  // 0: none; the opening* fields describe it
+        std::string openingName;
+        int openingKind = 0;           // OpeningKind
+        float openingRadiusMm = 0;
+        bool openingHosted = false;    // its surface still exists
         struct Nozzle { uint32_t id; std::string label; };
         std::vector<Nozzle> nozzles;
         uint32_t selected = 0;         // 0: none; the fields below describe it
@@ -418,7 +426,13 @@ public:
     void keepInsideOnly(uint32_t meshFeature);    // drop the outside of solid walls (isWallOutside)
     void resetSkins(uint32_t meshFeature);        // all skins, automatic facing
     void setNormalsShown(uint32_t meshFeature, bool show); // view only: arrows on the kept skins
-    void setNozzlePlacing(bool placing) { simUi_.placing = placing; }
+    void setNozzlePlacing(bool placing) { simUi_.placing = placing; if (placing) simUi_.placingOpening = -1; }
+    void setOpeningPlacing(int kind);                            // OpeningKind, or -1 to stop
+    void selectOpening(uint32_t id) { simUi_.selectedOpening = id; if (id) simUi_.selectedNozzle = 0; }
+    void setOpeningName(uint32_t id, const std::string& name);   // commits; empty is ignored
+    void setOpeningKind(uint32_t id, int kind);                  // commits
+    void setOpeningRadius(uint32_t id, float mm);                // live
+    void deleteOpening(uint32_t id);                             // commits
     void setNozzleStandoff(float mm) { simUi_.standoffMm = std::max(0.0f, mm); }
     void selectNozzle(uint32_t id) { simUi_.selectedNozzle = id; }
     void setNozzleName(uint32_t id, const std::string& name);   // commits; empty is ignored
@@ -705,6 +719,8 @@ private:
     struct SimUiState {
         bool placing = false;          // next click on a surface places a nozzle
         uint32_t selectedNozzle = 0;
+        int placingOpening = -1;         // OpeningKind the next click places, -1 none
+        uint32_t selectedOpening = 0;
         float standoffMm = 20.0f;      // how far inside the surface a placed nozzle sits
         std::string message;           // last export/validation message
         bool messageIsError = false;
@@ -907,6 +923,7 @@ private:
     bool canSwitchWorkspace() const;
     void setWorkspace(Workspace w);
     void handleSimulationInput(float vpW, float vpH);
+    bool placeOpeningAtHover(bool keepPlacing);   // the click of Place drain / inlet
     void renderSimulationOverlay(const float* view, const float* proj);
     float simulationSceneExtent();
     void loadEngineSettings();

@@ -182,6 +182,7 @@ SimulationPanel::SimulationPanel(App& app, QWidget* parent) : QDockWidget("Simul
     col->setContentsMargins(6, 6, 6, 6);
     col->addWidget(note("Tier 1: spray line of sight + splash", content));
     col->addWidget(section("Surfaces", buildSurfaces(), true, content));
+    col->addWidget(section("Openings (drains, inlets)", buildOpenings(), true, content));
     col->addWidget(section("Nozzles", buildNozzles(), true, content));
     col->addWidget(section("Run settings", buildRunSettings(), false, content));
     viewBody_ = new QWidget;
@@ -223,6 +224,133 @@ QWidget* SimulationPanel::buildSurfaces() {
     surfaceNote_ = note("", body);
     col->addWidget(surfaceNote_);
     return body;
+}
+
+// Drains and inlets: discs placed on a surface. cip-sim cuts each out of its
+// surface, so the vessel export needs no openings of its own.
+QWidget* SimulationPanel::buildOpenings() {
+    auto* body = new QWidget;
+    auto* col = new QVBoxLayout(body);
+    col->setContentsMargins(0, 0, 0, 0);
+    App* a = &app_;
+
+    auto* buttons = new QHBoxLayout;
+    placeDrain_ = new QPushButton(body);
+    placeInlet_ = new QPushButton(body);
+    for (auto* b : {placeDrain_, placeInlet_}) {
+        b->setFocusPolicy(Qt::NoFocus);
+        buttons->addWidget(b);
+    }
+    connect(placeDrain_, &QPushButton::clicked, this, [this, a] {
+        const bool placing = placeDrain_->property("placing").toBool();
+        a->post([a, placing] { a->setOpeningPlacing(placing ? -1 : (int)OpeningKind::Drain); });
+    });
+    connect(placeInlet_, &QPushButton::clicked, this, [this, a] {
+        const bool placing = placeInlet_->property("placing").toBool();
+        a->post([a, placing] { a->setOpeningPlacing(placing ? -1 : (int)OpeningKind::Inlet); });
+    });
+    col->addLayout(buttons);
+    col->addWidget(note("Click a surface to put a disc there; the part of the surface inside it becomes "
+                        "the drain or inlet. CFD needs at least one: liquid and air have to leave.", body));
+
+    openings_ = new QListWidget(body);
+    openings_->setMaximumHeight(80);
+    connect(openings_, &QListWidget::currentRowChanged, this, [this, a](int row) {
+        if (row < 0) return;
+        const uint32_t id = openings_->item(row)->data(Qt::UserRole).toUInt();
+        a->post([a, id] { a->selectOpening(id); });
+    });
+    col->addWidget(openings_);
+
+    openDetail_ = new QWidget(body);
+    auto* d = new QVBoxLayout(openDetail_);
+    d->setContentsMargins(0, 4, 0, 0);
+    auto* nameRow = new QHBoxLayout;
+    openName_ = new QLineEdit(openDetail_);
+    connect(openName_, &QLineEdit::editingFinished, this, [this, a] {
+        const uint32_t id = openDetailId_;
+        const std::string s = openName_->text().toUtf8().toStdString();
+        a->post([a, id, s] { a->setOpeningName(id, s); });
+    });
+    nameRow->addWidget(openName_, 1);
+    nameRow->addWidget(new QLabel("Name", openDetail_));
+    d->addLayout(nameRow);
+    auto* kindRow = new QHBoxLayout;
+    openKind_ = new QComboBox(openDetail_);
+    for (int k = 0; k < kOpeningKindCount; k++) openKind_->addItem(openingKindLabel((OpeningKind)k));
+    connect(openKind_, &QComboBox::activated, this, [this, a](int k) {
+        const uint32_t id = openDetailId_;
+        a->post([a, id, k] { a->setOpeningKind(id, k); });
+    });
+    kindRow->addWidget(openKind_, 1);
+    kindRow->addWidget(new QLabel("Is a", openDetail_));
+    d->addLayout(kindRow);
+    auto* radiusRow = new QHBoxLayout;
+    openRadius_ = spin(openDetail_, 0.1, 1e5, 1);
+    connect(openRadius_, &QDoubleSpinBox::valueChanged, this, [this, a](double v) {
+        const uint32_t id = openDetailId_;
+        a->post([a, id, v] { a->setOpeningRadius(id, (float)v); a->commitSimulationEdit(); });
+    });
+    radiusRow->addWidget(openRadius_, 1);
+    radiusRow->addWidget(new QLabel("Radius mm", openDetail_));
+    d->addLayout(radiusRow);
+    openOrphan_ = note("Its surface was deleted.", openDetail_, "#d05050");
+    d->addWidget(openOrphan_);
+    auto* del = new QPushButton("Delete opening", openDetail_);
+    del->setFocusPolicy(Qt::NoFocus);
+    connect(del, &QPushButton::clicked, this, [this, a] { const uint32_t id = openDetailId_; a->post([a, id] { a->deleteOpening(id); }); });
+    d->addWidget(del);
+    col->addWidget(openDetail_);
+    return body;
+}
+
+void SimulationPanel::refreshOpenings(const App::SimSetupModel& m) {
+    const bool drain = m.placingOpening == (int)OpeningKind::Drain;
+    const bool inlet = m.placingOpening == (int)OpeningKind::Inlet;
+    placeDrain_->setProperty("placing", drain);
+    placeInlet_->setProperty("placing", inlet);
+    const QString dText = drain ? "Click a surface... (Esc)" : "+ Drain";
+    const QString iText = inlet ? "Click a surface... (Esc)" : "+ Inlet";
+    if (placeDrain_->text() != dText) {
+        placeDrain_->setText(dText);
+        placeDrain_->setStyleSheet(drain ? "background: #33993f; color: white;" : "");
+    }
+    if (placeInlet_->text() != iText) {
+        placeInlet_->setText(iText);
+        placeInlet_->setStyleSheet(inlet ? "background: #33993f; color: white;" : "");
+    }
+
+    std::string key;
+    for (const auto& o : m.openings) key += std::to_string(o.id) + ":" + o.label + "\n";
+    if (key != shownOpenings_) {
+        shownOpenings_ = key;
+        const QSignalBlocker block(openings_);
+        openings_->clear();
+        for (const auto& o : m.openings) {
+            auto* item = new QListWidgetItem(QString::fromStdString(o.label), openings_);
+            item->setData(Qt::UserRole, o.id);
+        }
+    }
+    openings_->setVisible(!m.openings.empty());
+    {
+        int row = -1;
+        for (int i = 0; i < openings_->count(); i++)
+            if (openings_->item(i)->data(Qt::UserRole).toUInt() == m.selectedOpening) row = i;
+        if (openings_->currentRow() != row) {
+            const QSignalBlocker block(openings_);
+            openings_->setCurrentRow(row);
+        }
+    }
+    openDetail_->setVisible(m.selectedOpening != 0);
+    if (!m.selectedOpening) return;
+    openDetailId_ = m.selectedOpening;
+    setText(openName_, m.openingName);
+    if (openKind_->currentIndex() != m.openingKind) {
+        const QSignalBlocker block(openKind_);
+        openKind_->setCurrentIndex(m.openingKind);
+    }
+    setSpin(openRadius_, m.openingRadiusMm);
+    openOrphan_->setVisible(!m.openingHosted);
 }
 
 QWidget* SimulationPanel::buildNozzles() {
@@ -629,6 +757,8 @@ void SimulationPanel::refreshSetup(const App::SimSetupModel& m) {
     setLabel(surfaceNote_, m.surfaces.empty()
         ? "No surfaces yet. Import the vessel with Import > STL, one file per surface (wall, inlet cap, drain cap...)."
         : "Walls count toward coverage; caps and obstructions only block spray.");
+
+    refreshOpenings(m);
 
     // Nozzles
     place_->setProperty("placing", m.placing);

@@ -153,6 +153,10 @@ must work from both.
 - [ ] Place a nozzle: click Place, click inside the vessel; the spray cone shows.
       `Escape` cancels placing; `Delete` removes the selected nozzle.
 - [ ] Edit nozzle fields: a slider drag or a typed edit is **one** undo step.
+- [ ] Openings: + Drain / + Inlet, click a surface: a ring appears at the click, flush with the wall,
+      listed as drain1 / inlet1. Radius, kind and name edit; Delete and undo remove it. Moving or
+      rotating the import carries the rings. Generate CFD case on a vessel with no drain STL but a placed
+      drain succeeds and lists it.
 - [ ] Global shortcuts work in this workspace too (`Ctrl+Z/Y/S/O`).
 - [ ] Skins: import a solid-wall STL (two nested skins). The dialog says "in 2 separate skins" and offers
       "Keep only the inside"; with it ticked only the cavity is drawn, and the panel lists both skins.
