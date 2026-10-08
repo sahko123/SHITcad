@@ -36,12 +36,14 @@ public:
 
 private:
     QWidget* buildSurfaces();
+    QWidget* buildOpenings();
     QWidget* buildNozzles();
     QWidget* buildRunSettings();
     QWidget* buildRun();
     QWidget* buildResults();
     QWidget* buildCfd();
     void refreshSetup(const App::SimSetupModel& m);
+    void refreshOpenings(const App::SimSetupModel& m);
     void addSkinRows(QVBoxLayout* rc, QWidget* row, const App::SimSetupModel::Surface& s);
     void refreshRun(const App::SimRunModel& m);
     void refreshResults(const App::SimResultsModel& m);
@@ -54,6 +56,17 @@ private:
     QLabel* surfaceNote_ = nullptr;
     std::string shownSurfaces_;
     std::vector<QComboBox*> roleCombos_;
+
+    QPushButton* placeDrain_ = nullptr;
+    QPushButton* placeInlet_ = nullptr;
+    QListWidget* openings_ = nullptr;
+    std::string shownOpenings_;
+    QWidget* openDetail_ = nullptr;
+    uint32_t openDetailId_ = 0;
+    QLineEdit* openName_ = nullptr;
+    QComboBox* openKind_ = nullptr;
+    QDoubleSpinBox* openRadius_ = nullptr;
+    QLabel* openOrphan_ = nullptr;
 
     QPushButton* place_ = nullptr;
     QDoubleSpinBox* standoff_ = nullptr;

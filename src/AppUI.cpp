@@ -580,6 +580,12 @@ void App::setMeshImportData(const MeshImportFeatureData& data) {
                 if (n.hostFeature != meshPlace_.featureID) continue;
                 for (int i = 0; i < 3; i++) n.position[i] *= k;   // direction is unchanged
             }
+            // Openings sit on the surface: their centres scale with it. The
+            // radius is a size in the world, not in the file, so it does not.
+            for (auto& o : simulation_.openings) {
+                if (o.hostFeature != meshPlace_.featureID) continue;
+                for (int i = 0; i < 3; i++) o.center[i] *= k;
+            }
             commitSimulationEdit();
         }
     }

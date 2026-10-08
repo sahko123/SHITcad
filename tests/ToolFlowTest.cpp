@@ -366,6 +366,37 @@ static void testCfdCase(const std::string& cipSim, const std::string& python) {
     m = a.cfdCaseModel();
     CHECK(!m.done && m.error.find("no inlet or drain") != std::string::npos, "closed vessel: done=%d error=%s",
           (int)m.done, m.error.c_str());
+
+    // A drain placed in SHITcad - no drain STL at all. The vessel's own caps
+    // become plain wall (obstructions), so the placed opening is the only way
+    // out: picked on the side wall exactly as a click would, then generated.
+    a.setOpeningPlacing((int)OpeningKind::Drain);
+    const float from[3] = {0, 0, 500}, dir[3] = {1, 0, 0};   // from the axis, out to the wall
+    a.meshHover_ = pickMesh(a.scene_, from, dir);
+    CHECK(a.meshHover_.hit && near(a.meshHover_.hitWorld[0], 300.0, 2.0), "side-wall pick x=%g",
+          a.meshHover_.hitWorld[0]);
+    CHECK(a.placeOpeningAtHover(false), "placing the drain failed");
+    CHECK(a.simulation_.openings.size() == 1 && a.simUi_.placingOpening == -1, "openings=%zu placing=%d",
+          a.simulation_.openings.size(), a.simUi_.placingOpening);
+    const uint32_t oid = a.simUi_.selectedOpening;
+    const SimOpening* placed = a.simulation_.findOpening(oid);
+    CHECK(placed && placed->name == "drain1" && placed->hostFeature == ids["vessel_wall"], "placed opening");
+    a.setOpeningRadius(oid, 20.0f);
+    a.commitSimulationEdit();
+    runToEnd();
+    m = a.cfdCaseModel();
+    CHECK(m.done, "case with a placed drain: %s", m.error.c_str());
+    CHECK(m.summary.find("4 surfaces") != std::string::npos && m.summary.find("drain1 (drain)") != std::string::npos,
+          "summary: %s", m.summary.c_str());
+    CHECK(fs::exists(fs::path(m.caseDir) / "constant" / "triSurface" / "drain1.stl"), "no drain1.stl in %s",
+          m.caseDir.c_str());
+
+    // Undo removes it; the selection follows.
+    a.globalUndo();   // the radius edit
+    a.globalUndo();   // the placement
+    a.validateSimulationSelection();
+    CHECK(a.simulation_.openings.empty() && a.simUi_.selectedOpening == 0, "undo left %zu openings",
+          a.simulation_.openings.size());
     fs::remove_all(cases);
 }
 

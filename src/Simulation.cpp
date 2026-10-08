@@ -60,6 +60,38 @@ void SimulationSetup::setRole(FeatureID f, SurfaceRole role) {
     roles.push_back({f, role});
 }
 
+const char* openingKindName(OpeningKind kind) { return kind == OpeningKind::Inlet ? "inlet" : "drain"; }
+const char* openingKindLabel(OpeningKind kind) { return kind == OpeningKind::Inlet ? "Inlet" : "Drain"; }
+bool openingKindFromName(const std::string& name, OpeningKind& out) {
+    for (int i = 0; i < kOpeningKindCount; i++) {
+        if (name == openingKindName((OpeningKind)i)) { out = (OpeningKind)i; return true; }
+    }
+    return false;
+}
+
+SimOpening* SimulationSetup::findOpening(uint32_t id) {
+    for (auto& o : openings) if (o.id == id) return &o;
+    return nullptr;
+}
+
+const SimOpening* SimulationSetup::findOpening(uint32_t id) const {
+    for (const auto& o : openings) if (o.id == id) return &o;
+    return nullptr;
+}
+
+uint32_t SimulationSetup::addOpening(SimOpening o) {
+    o.id = nextOpeningID++;
+    if (o.name.empty()) o.name = std::string(openingKindName(o.kind)) + std::to_string(o.id);
+    openings.push_back(o);
+    return o.id;
+}
+
+void SimulationSetup::removeOpening(uint32_t id) {
+    openings.erase(std::remove_if(openings.begin(), openings.end(),
+                                  [id](const SimOpening& o) { return o.id == id; }),
+                   openings.end());
+}
+
 SimNozzle* SimulationSetup::findNozzle(uint32_t id) {
     for (auto& n : nozzles) if (n.id == id) return &n;
     return nullptr;
@@ -115,28 +147,32 @@ static void normalise(double v[3]) {
     if (m > 1e-12) { v[0] /= m; v[1] /= m; v[2] /= m; }
 }
 
-bool nozzleWorld(const SimNozzle& n, const FeatureHistory& history, double pos[3], double axis[3]) {
-    const MeshImportFeatureData* host = n.hostFeature ? hostData(history, n.hostFeature) : nullptr;
-    if (n.hostFeature && !host) return false;
+// A point and direction stored in a host mesh's frame, to world and back.
+// Shared by nozzles and openings, so both follow a moved or rotated vessel.
+static bool hostToWorld(FeatureID hostFeature, const FeatureHistory& history, const double p[3],
+                        const double a[3], double pos[3], double axis[3]) {
+    const MeshImportFeatureData* host = hostFeature ? hostData(history, hostFeature) : nullptr;
+    if (hostFeature && !host) return false;
     if (!host) {
-        for (int i = 0; i < 3; i++) { pos[i] = n.position[i]; axis[i] = n.axis[i]; }
+        for (int i = 0; i < 3; i++) { pos[i] = p[i]; axis[i] = a[i]; }
     } else {
         const double* r = host->transform.r;
-        host->transform.apply(n.position, pos);
+        host->transform.apply(p, pos);
         for (int i = 0; i < 3; i++)
-            axis[i] = r[i * 3] * n.axis[0] + r[i * 3 + 1] * n.axis[1] + r[i * 3 + 2] * n.axis[2];
+            axis[i] = r[i * 3] * a[0] + r[i * 3 + 1] * a[1] + r[i * 3 + 2] * a[2];
     }
     normalise(axis);
     return true;
 }
 
-void setNozzleWorld(SimNozzle& n, const FeatureHistory& history, const double pos[3], const double axis[3]) {
-    const MeshImportFeatureData* host = n.hostFeature ? hostData(history, n.hostFeature) : nullptr;
-    double a[3] = {axis[0], axis[1], axis[2]};
-    normalise(a);
+static void worldToHost(FeatureID& hostFeature, const FeatureHistory& history, const double pos[3],
+                        const double axis[3], double p[3], double a[3]) {
+    const MeshImportFeatureData* host = hostFeature ? hostData(history, hostFeature) : nullptr;
+    double w[3] = {axis[0], axis[1], axis[2]};
+    normalise(w);
     if (!host) {
-        n.hostFeature = NullFeatureID; // host gone: keep the nozzle where it is, in world
-        for (int i = 0; i < 3; i++) { n.position[i] = pos[i]; n.axis[i] = a[i]; }
+        hostFeature = NullFeatureID; // host gone: keep it where it is, in world
+        for (int i = 0; i < 3; i++) { p[i] = pos[i]; a[i] = w[i]; }
         return;
     }
     // Inverse of p = R q + t is q = R^T (p - t); R is orthonormal.
@@ -144,9 +180,25 @@ void setNozzleWorld(SimNozzle& n, const FeatureHistory& history, const double po
     const double d[3] = {pos[0] - host->transform.t[0], pos[1] - host->transform.t[1],
                          pos[2] - host->transform.t[2]};
     for (int i = 0; i < 3; i++) {
-        n.position[i] = r[0 + i] * d[0] + r[3 + i] * d[1] + r[6 + i] * d[2];
-        n.axis[i] = r[0 + i] * a[0] + r[3 + i] * a[1] + r[6 + i] * a[2];
+        p[i] = r[0 + i] * d[0] + r[3 + i] * d[1] + r[6 + i] * d[2];
+        a[i] = r[0 + i] * w[0] + r[3 + i] * w[1] + r[6 + i] * w[2];
     }
+}
+
+bool nozzleWorld(const SimNozzle& n, const FeatureHistory& history, double pos[3], double axis[3]) {
+    return hostToWorld(n.hostFeature, history, n.position, n.axis, pos, axis);
+}
+
+void setNozzleWorld(SimNozzle& n, const FeatureHistory& history, const double pos[3], const double axis[3]) {
+    worldToHost(n.hostFeature, history, pos, axis, n.position, n.axis);
+}
+
+bool openingWorld(const SimOpening& o, const FeatureHistory& history, double center[3], double axis[3]) {
+    return hostToWorld(o.hostFeature, history, o.center, o.axis, center, axis);
+}
+
+void setOpeningWorld(SimOpening& o, const FeatureHistory& history, const double center[3], const double axis[3]) {
+    worldToHost(o.hostFeature, history, center, axis, o.center, o.axis);
 }
 
 // ---- spec export ----------------------------------------------------------------
@@ -288,8 +340,43 @@ bool buildTier1Spec(const SimulationSetup& sim, const FeatureHistory& history,
         return false;
     }
 
+    // Openings: discs on a surface, which cip-sim cuts out of it. Named by the
+    // surface they sit on; every name must be unique across surfaces too.
+    json openings = json::array();
+    for (const auto& o : sim.openings) {
+        double c[3], a[3];
+        if (o.hostFeature == NullFeatureID || !openingWorld(o, history, c, a)) {
+            error = "Opening '" + o.name + "' is not on a surface (it was deleted). Delete the opening or place it again.";
+            return false;
+        }
+        const Feature* hf = history.findFeature(o.hostFeature);
+        if (!hf || !featureIsActive(history, o.hostFeature)) {
+            error = "Opening '" + o.name + "' sits on a surface that is left out of this run "
+                    "(suppressed, rolled back, or failed to load). Unsuppress it, or delete the opening.";
+            return false;
+        }
+        if (!(o.radiusMm > 0.0f)) {
+            error = "Opening '" + o.name + "': radius must be positive.";
+            return false;
+        }
+        if (!names.insert(o.name).second) {
+            error = "The name '" + o.name + "' is used twice (surfaces and openings share names). Rename the opening.";
+            return false;
+        }
+        openings.push_back({
+            {"name", o.name},
+            {"role", openingKindName(o.kind)},
+            {"surface", hf->name},
+            {"center", {c[0], c[1], c[2]}},
+            {"axis", {a[0], a[1], a[2]}},
+            {"radius", tidy(o.radiusMm)},
+            {"meta", {{"shitcad_opening_id", o.id}}},
+        });
+    }
+
     doc["surfaces"] = surfaces;
     doc["nozzles"] = nozzles;
+    if (!openings.empty()) doc["openings"] = openings;
     // `replace` rather than the default throw: this runs every frame
     // (the stale-results check), and a path byte that is not valid UTF-8 would
     // otherwise terminate the app rather than show an error.
@@ -304,6 +391,7 @@ void simulationToJson(const SimulationSetup& sim, json& out) {
     out["rays"] = sim.rays;
     out["bounces"] = sim.bounces;
     out["nextNozzleID"] = sim.nextNozzleID;
+    out["nextOpeningID"] = sim.nextOpeningID;
     out["roles"] = json::array();
     for (const auto& r : sim.roles)
         out["roles"].push_back({{"feature", r.meshFeature}, {"role", surfaceRoleName(r.role)}});
@@ -317,6 +405,15 @@ void simulationToJson(const SimulationSetup& sim, json& out) {
             {"pressureBar", n.pressureBar},
         });
     }
+    out["openings"] = json::array();
+    for (const auto& o : sim.openings) {
+        out["openings"].push_back({
+            {"id", o.id}, {"name", o.name}, {"kind", openingKindName(o.kind)}, {"hostFeature", o.hostFeature},
+            {"center", {o.center[0], o.center[1], o.center[2]}},
+            {"axis", {o.axis[0], o.axis[1], o.axis[2]}},
+            {"radiusMm", o.radiusMm},
+        });
+    }
 }
 
 bool simulationFromJson(const json& in, SimulationSetup& out, std::string& error) {
@@ -325,6 +422,7 @@ bool simulationFromJson(const json& in, SimulationSetup& out, std::string& error
         s.rays = in.value("rays", s.rays);
         s.bounces = in.value("bounces", s.bounces);
         s.nextNozzleID = in.value("nextNozzleID", s.nextNozzleID);
+        s.nextOpeningID = in.value("nextOpeningID", s.nextOpeningID);
         for (const auto& r : in.value("roles", json::array())) {
             SimSurfaceRole sr;
             sr.meshFeature = r.at("feature").get<FeatureID>();
@@ -351,6 +449,26 @@ bool simulationFromJson(const json& in, SimulationSetup& out, std::string& error
             n.pressureBar = j.value("pressureBar", n.pressureBar);
             s.nextNozzleID = std::max(s.nextNozzleID, n.id + 1);
             s.nozzles.push_back(n);
+        }
+        for (const auto& j : in.value("openings", json::array())) {
+            SimOpening o;
+            o.id = j.at("id").get<uint32_t>();
+            o.name = j.at("name").get<std::string>();
+            if (!openingKindFromName(j.at("kind").get<std::string>(), o.kind)) {
+                error = "unknown opening kind '" + j.at("kind").get<std::string>() + "'";
+                return false;
+            }
+            o.hostFeature = j.value("hostFeature", (FeatureID)NullFeatureID);
+            auto c = j.at("center").get<std::vector<double>>();
+            auto a = j.at("axis").get<std::vector<double>>();
+            if (c.size() != 3 || a.size() != 3) {
+                error = "opening '" + o.name + "' center/axis must have 3 values";
+                return false;
+            }
+            for (int i = 0; i < 3; i++) { o.center[i] = c[i]; o.axis[i] = a[i]; }
+            o.radiusMm = j.value("radiusMm", o.radiusMm);
+            s.nextOpeningID = std::max(s.nextOpeningID, o.id + 1);
+            s.openings.push_back(o);
         }
         out = std::move(s);
         return true;

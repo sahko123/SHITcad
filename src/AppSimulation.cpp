@@ -82,7 +82,8 @@ void App::handleSimulationInput(float vpW, float vpH) {
     if (in_.ctrl && in_.keyPressed(Key::O)) openProjectDialog();
     if (in_.keyPressed(Key::Escape)) {
         if (simUi_.placing) simUi_.placing = false;
-        else simUi_.selectedNozzle = 0;
+        else if (simUi_.placingOpening >= 0) simUi_.placingOpening = -1;
+        else { simUi_.selectedNozzle = 0; simUi_.selectedOpening = 0; }
     }
     if (in_.keyPressed(Key::Delete) && simUi_.selectedNozzle &&
         simulation_.findNozzle(simUi_.selectedNozzle)) {
@@ -90,9 +91,20 @@ void App::handleSimulationInput(float vpW, float vpH) {
         simUi_.selectedNozzle = 0;
         commitSimulationEdit();
     }
+    if (in_.keyPressed(Key::Delete) && simUi_.selectedOpening &&
+        simulation_.findOpening(simUi_.selectedOpening)) {
+        simulation_.removeOpening(simUi_.selectedOpening);
+        simUi_.selectedOpening = 0;
+        commitSimulationEdit();
+    }
 
     if (in_.mouseY < in_.viewY) return;
     if (!in_.mouseClicked(MouseButton::Left)) return;
+
+    if (simUi_.placingOpening >= 0) {
+        placeOpeningAtHover(in_.shift);
+        return;
+    }
 
     if (simUi_.placing) {
         if (!meshHover_.hit || meshHover_.bodyIndex >= (int)scene_.bodyCount()) return;
@@ -113,6 +125,7 @@ void App::handleSimulationInput(float vpW, float vpH) {
         n.hostFeature = body.sourceFeature;
         setNozzleWorld(n, featureHistory_, pos, inward);
         simUi_.selectedNozzle = simulation_.addNozzle(n);
+        simUi_.selectedOpening = 0;
         if (!in_.shift) simUi_.placing = false;
         commitSimulationEdit();
         return;
@@ -134,7 +147,18 @@ void App::handleSimulationInput(float vpW, float vpH) {
         float d = std::hypot(sx - in_.mouseX, sy - in_.mouseY);
         if (d < bestD) { bestD = d; best = n.id; }
     }
+    uint32_t bestOpening = 0;
+    for (const auto& o : simulation_.openings) {
+        double c[3], ax[3];
+        if (!openingWorld(o, featureHistory_, c, ax)) continue;
+        const float cf[3] = {(float)c[0], (float)c[1], (float)c[2]};
+        float sx, sy;
+        if (!worldToScreen(cf, view, proj, vpW, vpH, sx, sy)) continue;
+        float d = std::hypot(sx - in_.mouseX, sy - in_.mouseY);
+        if (d < bestD) { bestD = d; bestOpening = o.id; best = 0; }
+    }
     simUi_.selectedNozzle = best;
+    simUi_.selectedOpening = bestOpening;
 }
 
 // ---- overlay ------------------------------------------------------------------
@@ -188,6 +212,34 @@ void addCone(std::vector<LineVert>& out, const double p[3], const double axisIn[
     const double tip[3] = {p[0] + a[0] * len * 0.35, p[1] + a[1] * len * 0.35, p[2] + a[2] * len * 0.35};
     const float axisCol[3] = {1.0f, 1.0f, 1.0f};
     addLine(out, p, tip, axisCol);
+}
+
+// A circle of `radius` about `axis` at `c`, plus a tick along the axis so a
+// disc seen edge-on still shows where it is.
+void addRing(std::vector<LineVert>& out, const double c[3], const double axisIn[3], double radius, const float col[3]) {
+    double a[3] = {axisIn[0], axisIn[1], axisIn[2]};
+    double m = std::sqrt(a[0] * a[0] + a[1] * a[1] + a[2] * a[2]);
+    if (m < 1e-12 || radius <= 0) return;
+    for (double& v : a) v /= m;
+    const double helper[3] = {std::fabs(a[1]) < 0.9 ? 0.0 : 1.0, std::fabs(a[1]) < 0.9 ? 1.0 : 0.0, 0.0};
+    double u[3] = {a[1] * helper[2] - a[2] * helper[1], a[2] * helper[0] - a[0] * helper[2],
+                   a[0] * helper[1] - a[1] * helper[0]};
+    m = std::sqrt(u[0] * u[0] + u[1] * u[1] + u[2] * u[2]);
+    for (double& v : u) v /= m;
+    const double w[3] = {a[1] * u[2] - a[2] * u[1], a[2] * u[0] - a[0] * u[2], a[0] * u[1] - a[1] * u[0]};
+    const int seg = 48;
+    for (int s = 0; s < seg; s++) {
+        const double t0 = kTwoPiD * s / seg, t1 = kTwoPiD * (s + 1) / seg;
+        double p0[3], p1[3];
+        for (int k = 0; k < 3; k++) {
+            p0[k] = c[k] + radius * (u[k] * std::cos(t0) + w[k] * std::sin(t0));
+            p1[k] = c[k] + radius * (u[k] * std::cos(t1) + w[k] * std::sin(t1));
+        }
+        addLine(out, p0, p1, col);
+    }
+    const double tip[3] = {c[0] + a[0] * radius, c[1] + a[1] * radius, c[2] + a[2] * radius};
+    const double tail[3] = {c[0] - a[0] * radius, c[1] - a[1] * radius, c[2] - a[2] * radius};
+    addLine(out, tail, tip, col);
 }
 
 // About `count` arrows spread by area over a triangle list, each along its
@@ -266,6 +318,21 @@ void App::renderSimulationOverlay(const float* view, const float* proj) {
                              meshHover_.hitWorld[1] + in[1] * simUi_.standoffMm,
                              meshHover_.hitWorld[2] + in[2] * simUi_.standoffMm};
         addCone(verts, p, in, 65.0, len, previewCol);
+    }
+    // Openings: a ring at the radius, and a short tick along the axis.
+    const float drainCol[3] = {0.85f, 0.45f, 0.20f};
+    const float inletCol[3] = {0.30f, 0.85f, 0.45f};
+    for (const auto& o : simulation_.openings) {
+        double c[3], ax[3];
+        if (!openingWorld(o, featureHistory_, c, ax)) continue;
+        const float* col = o.id == simUi_.selectedOpening ? selectedCol
+                         : o.kind == OpeningKind::Inlet ? inletCol : drainCol;
+        addRing(verts, c, ax, o.radiusMm, col);
+    }
+    if (simUi_.placingOpening >= 0 && meshHover_.hit) {
+        const double c[3] = {meshHover_.hitWorld[0], meshHover_.hitWorld[1], meshHover_.hitWorld[2]};
+        const double ax[3] = {meshHover_.normal[0], meshHover_.normal[1], meshHover_.normal[2]};
+        addRing(verts, c, ax, 25.0, previewCol);
     }
 
     // Normal arrows on the kept skins of the imports that ask for them. Drawn
@@ -399,6 +466,20 @@ App::SimSetupModel App::simSetupModel() const {
     m.placing = simUi_.placing;
     m.standoffMm = simUi_.standoffMm;
     m.skinRevision = simUi_.skinRevision;
+    m.placingOpening = simUi_.placingOpening;
+    for (const auto& o : simulation_.openings) {
+        double c[3], ax[3];
+        const bool ok = openingWorld(o, featureHistory_, c, ax);
+        m.openings.push_back({o.id, o.name + " (" + openingKindLabel(o.kind) + ")" + (ok ? "" : "  (surface deleted)")});
+    }
+    if (const SimOpening* o = simulation_.findOpening(simUi_.selectedOpening)) {
+        m.selectedOpening = o->id;
+        m.openingName = o->name;
+        m.openingKind = (int)o->kind;
+        m.openingRadiusMm = o->radiusMm;
+        double c[3], ax[3];
+        m.openingHosted = o->hostFeature != NullFeatureID && openingWorld(*o, featureHistory_, c, ax);
+    }
     for (const auto& n : simulation_.nozzles) {
         double p[3], a[3];
         const bool ok = nozzleWorld(n, featureHistory_, p, a);
@@ -515,6 +596,57 @@ void App::setNormalsShown(uint32_t meshFeature, bool show) {
     else simUi_.normalsShown.erase(meshFeature);
 }
 
+// ---- openings ------------------------------------------------------------------
+
+bool App::placeOpeningAtHover(bool keepPlacing) {
+    if (simUi_.placingOpening < 0 || !meshHover_.hit || meshHover_.bodyIndex >= (int)scene_.bodyCount())
+        return false;
+    const Body3D& body = scene_.getBody(meshHover_.bodyIndex);
+    // Flush with the wall: the centre is the hit itself, the axis the surface
+    // normal. The disc's sign does not matter to the cut.
+    const double c[3] = {meshHover_.hitWorld[0], meshHover_.hitWorld[1], meshHover_.hitWorld[2]};
+    const double ax[3] = {meshHover_.normal[0], meshHover_.normal[1], meshHover_.normal[2]};
+    SimOpening o;
+    o.kind = (OpeningKind)simUi_.placingOpening;
+    o.hostFeature = body.sourceFeature;
+    setOpeningWorld(o, featureHistory_, c, ax);
+    simUi_.selectedOpening = simulation_.addOpening(o);
+    simUi_.selectedNozzle = 0;
+    if (!keepPlacing) simUi_.placingOpening = -1;
+    commitSimulationEdit();
+    return true;
+}
+
+void App::setOpeningPlacing(int kind) {
+    simUi_.placingOpening = (kind >= 0 && kind < kOpeningKindCount) ? kind : -1;
+    if (simUi_.placingOpening >= 0) simUi_.placing = false;
+}
+
+void App::setOpeningName(uint32_t id, const std::string& name) {
+    SimOpening* o = simulation_.findOpening(id);
+    if (!o || name.empty()) return;
+    o->name = name;
+    commitSimulationEdit();
+}
+
+void App::setOpeningKind(uint32_t id, int kind) {
+    SimOpening* o = simulation_.findOpening(id);
+    if (!o || kind < 0 || kind >= kOpeningKindCount) return;
+    o->kind = (OpeningKind)kind;
+    commitSimulationEdit();
+}
+
+void App::setOpeningRadius(uint32_t id, float mm) {
+    if (SimOpening* o = simulation_.findOpening(id)) o->radiusMm = std::max(0.1f, mm);
+}
+
+void App::deleteOpening(uint32_t id) {
+    if (!simulation_.findOpening(id)) return;
+    simulation_.removeOpening(id);
+    if (simUi_.selectedOpening == id) simUi_.selectedOpening = 0;
+    commitSimulationEdit();
+}
+
 void App::setNozzleName(uint32_t id, const std::string& name) {
     SimNozzle* n = simulation_.findNozzle(id);
     if (!n || name.empty()) return;
@@ -579,6 +711,8 @@ void App::setSimulationBounces(int bounces) { simulation_.bounces = std::clamp(b
 void App::validateSimulationSelection() {
     if (simUi_.selectedNozzle && !simulation_.findNozzle(simUi_.selectedNozzle))
         simUi_.selectedNozzle = 0; // removed by undo
+    if (simUi_.selectedOpening && !simulation_.findOpening(simUi_.selectedOpening))
+        simUi_.selectedOpening = 0;
 }
 
 // Nozzle names beside their apexes, in the Simulation workspace.
@@ -598,6 +732,16 @@ void App::drawNozzleLabels() {
         Color32 col = nz.id == simUi_.selectedNozzle ? rgba32(255, 150, 40, 255) : rgba32(40, 180, 240, 255);
         ov.addCircleFilled({sx, sy}, 4.0f, col);
         ov.addText({sx + 7, sy - 7}, col, nz.name.c_str());
+    }
+    for (const auto& o : simulation_.openings) {
+        double c[3], ax[3];
+        if (!openingWorld(o, featureHistory_, c, ax)) continue;
+        const float cf[3] = {(float)c[0], (float)c[1], (float)c[2]};
+        float sx, sy;
+        if (!worldToScreen(cf, view, proj, in_.screenW, in_.screenH, sx, sy)) continue;
+        Color32 col = o.id == simUi_.selectedOpening ? rgba32(255, 150, 40, 255)
+                    : o.kind == OpeningKind::Inlet ? rgba32(80, 215, 115, 255) : rgba32(215, 115, 50, 255);
+        ov.addText({sx + 7, sy - 7}, col, o.name.c_str());
     }
 }
 

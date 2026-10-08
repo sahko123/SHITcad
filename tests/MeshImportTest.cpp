@@ -601,6 +601,76 @@ static void testSkins(const fs::path& dir) {
           f2 ? f2->errorMsg.c_str() : "?");
 }
 
+// Openings in the spec: an opening is stored in its host's frame and written in
+// world coordinates, so a rotated, moved vessel carries it; names are shared
+// with surfaces; it needs a live host.
+static void testOpeningSpec(const fs::path& box) {
+    std::printf("openings in the spec\n");
+    FeatureHistory h;
+    MeshImportFeatureData md;
+    md.sourcePath = box.string();
+    md.unit = "m";
+    axisRotation(0, 90.0, md.transform.r);            // lay it on its side
+    md.transform.t[0] = 1000;                         // and move it 1 m in x
+    const FeatureID fid = h.addMeshImportFeature(md, "vessel");
+
+    SimulationSetup sim;
+    SimNozzle n;
+    n.hostFeature = fid;
+    n.position[2] = 650;
+    sim.addNozzle(n);
+    SimOpening o;
+    o.kind = OpeningKind::Drain;
+    o.hostFeature = fid;
+    o.center[2] = 0;          // host frame: the centre of the box's floor
+    o.axis[2] = 1;
+    o.axis[1] = 0;
+    o.radiusMm = 30;
+    const uint32_t oid = sim.addOpening(o);
+    CHECK(sim.findOpening(oid) && sim.findOpening(oid)->name == "drain1", "default name");
+
+    std::string spec, err;
+    std::vector<std::string> warnings;
+    CHECK(buildTier1Spec(sim, h, spec, warnings, err), "%s", err.c_str());
+    if (!spec.empty()) {
+        auto doc = nlohmann::json::parse(spec);
+        const bool has = doc.contains("openings") && doc["openings"].size() == 1;
+        CHECK(has, "spec: %s", spec.c_str());
+        if (has) {
+            const auto& j = doc["openings"][0];
+            CHECK(j["role"] == "drain" && j["surface"] == "vessel" && j["radius"] == 30, "%s", j.dump().c_str());
+            // R = rotate +90 about X maps (0,0,0)->(0,0,0) and (0,0,1)->(0,-1,0); then +1000 in x.
+            const auto c = j["center"].get<std::vector<double>>();
+            const auto ax = j["axis"].get<std::vector<double>>();
+            CHECK(near(c[0], 1000, 1e-9) && near(c[1], 0, 1e-9) && near(c[2], 0, 1e-9), "center (%g %g %g)", c[0], c[1], c[2]);
+            CHECK(near(ax[0], 0, 1e-12) && near(ax[1], -1, 1e-12) && near(ax[2], 0, 1e-12), "axis (%g %g %g)", ax[0], ax[1], ax[2]);
+        }
+    }
+
+    // Saved and loaded with the project's simulation block.
+    nlohmann::json js;
+    simulationToJson(sim, js);
+    SimulationSetup back;
+    CHECK(simulationFromJson(js, back, err) && back.openings.size() == 1 && back.nextOpeningID == 2, "%s", err.c_str());
+    if (back.openings.size() == 1) {
+        CHECK(back.openings[0].kind == OpeningKind::Drain && back.openings[0].radiusMm == 30.0f &&
+              back.openings[0].hostFeature == fid, "round trip");
+    }
+    CHECK(sameSimulation(sim, back), "round trip differs");
+
+    // Names are shared with surfaces: results are reported per name.
+    sim.findOpening(oid)->name = "vessel";
+    CHECK(!buildTier1Spec(sim, h, spec, warnings, err) && err.find("used twice") != std::string::npos, "%s", err.c_str());
+    sim.findOpening(oid)->name = "drain1";
+
+    // A host left out of the run takes its openings with it - refused, not dropped.
+    h.suppressFeature(fid);
+    CHECK(!buildTier1Spec(sim, h, spec, warnings, err), "suppressed host accepted");
+    h.unsuppressFeature(fid);
+    sim.findOpening(oid)->hostFeature = NullFeatureID;
+    CHECK(!buildTier1Spec(sim, h, spec, warnings, err) && err.find("not on a surface") != std::string::npos, "%s", err.c_str());
+}
+
 // A solid-wall vessel exported with an internal part as its own solid (a
 // baffle): "keep the inside" must drop only the outside of the wall.
 static void testWallOutsideKeepsInternals(const fs::path& dir) {
@@ -637,6 +707,7 @@ int main() {
     testReplay(dir, box);
     testSkins(dir);
     testWallOutsideKeepsInternals(dir);
+    testOpeningSpec(box);
 
     std::printf("\n%d checks, %d failed\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;
